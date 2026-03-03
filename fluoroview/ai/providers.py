@@ -17,7 +17,7 @@ from typing import Any
 PROVIDERS = {
     "OpenAI": {
         "env_var": "OPENAI_API_KEY",
-        "default_model": "gpt-4o",
+        "default_model": "codex-mini-latest",
     },
     "Google Gemini": {
         "env_var": "GEMINI_API_KEY",
@@ -30,28 +30,69 @@ PROVIDERS = {
 }
 
 
-def _post_json(url: str, headers: dict, body: dict, timeout: int = 120) -> dict:
+def _post_json(url: str, headers: dict, body: dict, timeout: int = 180) -> dict:
     data = json.dumps(body).encode()
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode() if e.fp else ""
+        raise RuntimeError(f"HTTP {e.code}: {body_text[:300]}") from e
 
 
 def _get_json(url: str, headers: dict | None = None, timeout: int = 30) -> Any:
     req = urllib.request.Request(url, headers=headers or {})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body_text = e.read().decode() if e.fp else ""
+        raise RuntimeError(f"HTTP {e.code}: {body_text[:300]}") from e
 
 
 # ── OpenAI ─────────────────────────────────────────────────────────────
+
+# Models to show at top of the list (most useful for coding)
+_OPENAI_PREFERRED_ORDER = [
+    "codex-mini-latest",
+    "o4-mini",
+    "o3",
+    "o3-mini",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "chatgpt-4o-latest",
+    "gpt-4-turbo",
+    "o1",
+    "o1-mini",
+]
+
+_OPENAI_KEYWORDS = (
+    "codex", "gpt-5", "gpt-4", "gpt-3.5", "chatgpt",
+    "o1", "o2", "o3", "o4",
+)
+
 
 def openai_list_models(api_key: str) -> list[str]:
     url = "https://api.openai.com/v1/models"
     headers = {"Authorization": f"Bearer {api_key}"}
     data = _get_json(url, headers)
-    ids = sorted(m["id"] for m in data.get("data", []))
-    preferred = [m for m in ids if any(k in m for k in ("gpt-4", "gpt-3.5", "o1", "o3", "o4"))]
-    return preferred if preferred else ids
+    all_ids = sorted(m["id"] for m in data.get("data", []))
+
+    # Filter to chat/codex models
+    chat_models = [m for m in all_ids
+                   if any(k in m.lower() for k in _OPENAI_KEYWORDS)]
+
+    # Sort: preferred models first, then alphabetical
+    preferred_set = set(_OPENAI_PREFERRED_ORDER)
+    top = [m for m in _OPENAI_PREFERRED_ORDER if m in chat_models]
+    rest = [m for m in chat_models if m not in preferred_set]
+    result = top + rest
+
+    return result if result else all_ids[:50]
 
 
 def openai_chat(api_key: str, model: str, messages: list[dict],
@@ -65,7 +106,15 @@ def openai_chat(api_key: str, model: str, messages: list[dict],
     if system_prompt:
         msgs.append({"role": "system", "content": system_prompt})
     msgs.extend(messages)
-    body = {"model": model, "messages": msgs, "max_tokens": 16000}
+
+    # Codex / o-series use 'max_completion_tokens', others use 'max_tokens'
+    is_reasoning = any(k in model for k in ("o1", "o3", "o4", "codex"))
+    body: dict = {"model": model, "messages": msgs}
+    if is_reasoning:
+        body["max_completion_tokens"] = 16000
+    else:
+        body["max_tokens"] = 16000
+
     data = _post_json(url, headers, body)
     return data["choices"][0]["message"]["content"]
 

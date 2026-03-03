@@ -88,9 +88,9 @@ def load_multichannel_tif(path: str, max_dim: int = MAX_PREVIEW_DIM) -> list[Cha
     if img.ndim == 2:
         channels_data = [img]
     elif img.ndim == 3:
-        if img.shape[0] <= 10:
+        if img.shape[0] <= 100:
             channels_data = [img[c] for c in range(img.shape[0])]
-        elif img.shape[2] <= 10:
+        elif img.shape[2] <= 100:
             channels_data = [img[:, :, c] for c in range(img.shape[2])]
         else:
             channels_data = [img]

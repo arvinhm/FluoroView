@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Image Visualization, Annotation, and Single-Cell Analysis"
+version: 2.0.0
+date-released: 2026-02-26
+url: "https://github.com/arvinhm/FluoroView"
+license: BSD-3-Clause
+authors:
+  - family-names: Haj-Mirzaian
+    given-names: Arvin
+    orcid: "https://orcid.org/0000-0001-8977-6865"
+    email: ahajmirzaian@mgh.harvard.edu
+    affiliation: "Massachusetts General Hospital, Harvard Medical School"
+  - family-names: Heidari
+    given-names: Pedram
+    affiliation: "Massachusetts General Hospital, Harvard Medical School"
+keywords:
+  - fluorescence microscopy
+  - multiplex imaging
+  - cell segmentation
+  - single-cell analysis
+  - image viewer
+  - digital pathology
+  - Python
+repository-code: "https://github.com/arvinhm/FluoroView"

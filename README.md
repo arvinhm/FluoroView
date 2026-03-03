@@ -1,6 +1,10 @@
+<p align="center">
+  <img src="figures/FluroView.jpg" alt="FluoroView Logo" width="600">
+</p>
+
 # FluoroView v2 — Next-Generation Multiplex Fluorescence Microscopy Viewer
 
-A powerful, macOS-native desktop application for viewing, annotating, and
+A powerful, cross-platform desktop application for viewing, annotating, and
 analysing multiplexed fluorescence microscopy images. Built in Python with
 **CustomTkinter** featuring a premium **Liquid Glass** aesthetic — no browser required.
 

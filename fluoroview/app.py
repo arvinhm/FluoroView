@@ -36,7 +36,7 @@ from fluoroview.core.channel import (
     scan_folder, get_pixel_size_um,
 )
 from fluoroview.core.tile_engine import (
-    ViewportRenderer, render_minimap, render_scale_bar,
+    ViewportRenderer, render_minimap, render_scale_bar, draw_scale_bar_on_image,
 )
 from fluoroview.core.roi import ROIData
 from fluoroview.core.annotations import Annotation
@@ -1261,6 +1261,13 @@ class FluoroView(ctk.CTk):
     # ══════════════════════════════════════════════════════════════════
 
     def _on_mouse_press(self, event):
+        # Scale bar click — bottom-right 130x40 area
+        cw = self.canvas.winfo_width()
+        ch_ = self.canvas.winfo_height()
+        if event.x > cw - 150 and event.y > ch_ - 50:
+            self._set_pixel_size()
+            return
+
         # Cell group brush intercept
         if self.cell_brush_active:
             self.cell_brush_painting = True
@@ -1479,6 +1486,7 @@ class FluoroView(ctk.CTk):
         self.status_var.set("Saving ROIs..."); self.update_idletasks()
         params_list = [c.get_params() for c in self.channel_controls]
         ds = self.channels[0].ds_factor
+        pixel_um = self.pixel_size_um
 
         def _do():
             try:
@@ -1502,7 +1510,8 @@ class FluoroView(ctk.CTk):
                                 c0.full_h, c0.full_w, ds)[fy1:fy1 + rh, fx1:fx1 + rw]
                             for ci in range(3):
                                 rgb[:, :, ci] = rgb[:, :, ci] * mask_local
-                        Image.fromarray(rgb).save(
+                        rgb_sb = draw_scale_bar_on_image(rgb, pixel_um)
+                        Image.fromarray(rgb_sb).save(
                             os.path.join(rf, f"{roi.name}-merged.tif"))
                     # Build ROI mask once for per-channel exports
                     rh_ch, rw_ch = fy2 - fy1, fx2 - fx1
@@ -1537,7 +1546,8 @@ class FluoroView(ctk.CTk):
                             m = ch_mask[:fh, :fw]
                             for ci in range(3):
                                 cr[:, :, ci] = cr[:, :, ci] * m
-                        Image.fromarray(cr).save(
+                        cr_sb = draw_scale_bar_on_image(cr, pixel_um)
+                        Image.fromarray(cr_sb).save(
                             os.path.join(rf, f"{roi.name}-{p.get('name', f'ch{i+1}')}.tif"))
 
                         # Collect stats (inside ROI mask)
@@ -1561,29 +1571,44 @@ class FluoroView(ctk.CTk):
                     csv_path = os.path.join(rf, f"{roi.name}-stats.csv")
                     with open(csv_path, "w", newline="") as f:
                         w = csv.writer(f)
-                        w.writerow(["Channel", "Mean_Intensity", "SEM",
-                                    "Std", "Median", "Min", "Max", "N_pixels"])
-                        for i, (cd, p) in enumerate(zip(self.channels, params_list)):
-                            if not p["visible"]:
-                                continue
-                            cd_ = cd.full_data[fy1:fy2, fx1:fx2].astype(np.float64)
-                            if ch_mask is not None:
-                                pixels = cd_[ch_mask[:cd_.shape[0], :cd_.shape[1]] > 0]
-                            else:
-                                pixels = cd_.ravel()
-                            nz = pixels[pixels > 0]
+                        w.writerow([
+                            "Channel", "Color",
+                            "Raw_Mean", "Raw_SEM", "Raw_Std",
+                            "Raw_Median", "Raw_Min", "Raw_Max",
+                            "Raw_Sum", "N_pixels", "N_nonzero",
+                            "Percentile_5", "Percentile_25",
+                            "Percentile_75", "Percentile_95",
+                        ])
+                        for i, cd in enumerate(self.channels):
+                            p = params_list[i] if i < len(params_list) else {"name": f"Ch{i+1}", "color_name": ""}
                             nm = p.get("name", f"Ch{i+1}")
-                            if len(nz) > 0:
-                                w.writerow([nm,
-                                            f"{np.mean(nz):.2f}",
-                                            f"{np.std(nz)/np.sqrt(len(nz)):.4f}",
-                                            f"{np.std(nz):.2f}",
-                                            f"{np.median(nz):.2f}",
-                                            f"{np.min(nz):.2f}",
-                                            f"{np.max(nz):.2f}",
-                                            len(nz)])
+                            cn = p.get("color_name", "")
+                            raw = cd.full_data[fy1:fy2, fx1:fx2].astype(np.float64)
+                            if ch_mask is not None:
+                                pixels = raw[ch_mask[:raw.shape[0], :raw.shape[1]] > 0]
                             else:
-                                w.writerow([nm, 0, 0, 0, 0, 0, 0, 0])
+                                pixels = raw.ravel()
+                            nz = pixels[pixels > 0]
+                            n_total = len(pixels)
+                            n_nz = len(nz)
+                            if n_nz > 0:
+                                w.writerow([
+                                    nm, cn,
+                                    f"{np.mean(nz):.2f}",
+                                    f"{np.std(nz)/np.sqrt(n_nz):.4f}",
+                                    f"{np.std(nz):.2f}",
+                                    f"{np.median(nz):.2f}",
+                                    f"{np.min(nz):.2f}",
+                                    f"{np.max(nz):.2f}",
+                                    f"{np.sum(nz):.0f}",
+                                    n_total, n_nz,
+                                    f"{np.percentile(nz, 5):.2f}",
+                                    f"{np.percentile(nz, 25):.2f}",
+                                    f"{np.percentile(nz, 75):.2f}",
+                                    f"{np.percentile(nz, 95):.2f}",
+                                ])
+                            else:
+                                w.writerow([nm, cn] + [0] * 13)
 
                     # ── Bar graph PNG ──
                     try:

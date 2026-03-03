@@ -3,11 +3,15 @@
 Detection is fully lazy — no heavy imports at startup.
 """
 
-import importlib
+import importlib.util
+import os
+import platform
+
+if platform.system() == "Darwin":
+    os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 
 def _check_available(module_name: str) -> bool:
-    """Check if a module is importable without actually importing it."""
     try:
         return importlib.util.find_spec(module_name) is not None
     except (ModuleNotFoundError, ValueError):

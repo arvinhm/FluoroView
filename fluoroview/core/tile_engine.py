@@ -384,3 +384,59 @@ def render_scale_bar(canvas_w: int, canvas_h: int,
     draw.text((x + bar_px // 2, y - 14), label, fill=(255, 255, 255, 230),
               font=font, anchor="mt")
     return bar_img
+
+
+def draw_scale_bar_on_image(img: np.ndarray, pixel_size_um: float) -> np.ndarray:
+    """Burn a scale bar onto an RGB uint8 image (bottom-right).
+
+    Works with or without a pixel size — shows px units as fallback.
+    """
+    h, w = img.shape[:2]
+    if h < 40 or w < 80:
+        return img
+
+    if pixel_size_um > 0:
+        target_widths = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]
+        bar_px, bar_um = 0, 0
+        for um in target_widths:
+            px = um / pixel_size_um
+            if w * 0.08 <= px <= w * 0.35:
+                bar_px, bar_um = int(px), um
+                break
+        if bar_px == 0:
+            bar_px = int(w * 0.15)
+            bar_um = max(1, int(bar_px * pixel_size_um))
+        label = f"{bar_um // 1000} mm" if bar_um >= 1000 else f"{bar_um} \u00b5m"
+    else:
+        bar_px = int(w * 0.15)
+        label = f"{bar_px} px"
+
+    pil = Image.fromarray(img)
+    draw = ImageDraw.Draw(pil)
+
+    import platform as _pf
+    font = None
+    _fps = (
+        ["/System/Library/Fonts/Supplemental/Arial Bold.ttf"] if _pf.system() == "Darwin"
+        else ["C:/Windows/Fonts/arialbd.ttf"] if _pf.system() == "Windows"
+        else ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+    ) + ["Arial Bold", "Arial"]
+    fsize = max(18, min(36, h // 20))
+    for fp in _fps:
+        try:
+            font = ImageFont.truetype(fp, fsize); break
+        except Exception:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    bar_h = max(3, h // 200)
+    margin = max(20, int(w * 0.04))
+    bx = w - bar_px - margin
+    by = h - margin - bar_h
+
+    draw.rectangle([bx, by, bx + bar_px, by + bar_h], fill=(255, 255, 255))
+    draw.text((bx + bar_px // 2, by - 4), label, fill=(255, 255, 255),
+              font=font, anchor="mb")
+
+    return np.array(pil)
