@@ -4,6 +4,7 @@
 
 # FluoroView v2 — Multiplex Fluorescence Microscopy Viewer & Analysis Platform
 
+[![DOI](https://zenodo.org/badge/1166381082.svg)](https://doi.org/10.5281/zenodo.19059504)
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org)
 [![Tests](https://github.com/arvinhm/FluoroView/actions/workflows/python-app.yml/badge.svg)](https://github.com/arvinhm/FluoroView/actions)
@@ -238,7 +239,8 @@ If you use FluoroView in your research, please cite:
          Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping},
   author={Haj-Mirzaian, Arvin and Heidari, Pedram},
   journal={Journal of Open Source Software},
-  year={2026}
+  year={2026},
+  doi={10.5281/zenodo.19059504}
 }
 ```
 

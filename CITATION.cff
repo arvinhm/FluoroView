@@ -25,4 +25,5 @@ keywords:
   - image viewer
   - digital pathology
   - Python
+doi: "10.5281/zenodo.19059504"
 repository-code: "https://github.com/arvinhm/FluoroView"
