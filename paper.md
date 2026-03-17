@@ -13,8 +13,10 @@ authors:
   - name: Arvin Haj-Mirzaian
     orcid: 0000-0001-8977-6865
     corresponding: true
+    email: ahajmirzaian@mgh.harvard.edu
     affiliation: 1
   - name: Pedram Heidari
+    email: Heidari.Pedram@mgh.harvard.edu
     affiliation: 1
 affiliations:
   - name: Division of Nuclear Medicine and Molecular Imaging, Department of Radiology, Massachusetts General Hospital, Harvard Medical School, Boston, MA 02114, USA
