@@ -1,4 +1,4 @@
----
+```yaml
 title: "FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping"
 tags:
   - Python
@@ -23,7 +23,7 @@ affiliations:
     index: 1
 date: 16 March 2026
 bibliography: paper.bib
----
+```
 # Summary
 
 Advances in highly multiplexed tissue imaging enable simultaneous detection of
