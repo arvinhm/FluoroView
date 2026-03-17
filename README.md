@@ -2,64 +2,125 @@
   <img src="figures/FluroView.jpg" alt="FluoroView Logo" width="600">
 </p>
 
-# FluoroView — Next-Generation Multiplex Fluorescence Microscopy Viewer
+# FluoroView v2 — Multiplex Fluorescence Microscopy Viewer & Analysis Platform
 
-A powerful, cross-platform desktop application for viewing, annotating, and
-analysing multiplexed fluorescence microscopy images. Built in Python with
-**CustomTkinter** featuring a premium **Liquid Glass** aesthetic — no browser required.
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org)
+[![Tests](https://github.com/arvinhm/FluoroView/actions/workflows/python-app.yml/badge.svg)](https://github.com/arvinhm/FluoroView/actions)
+
+A powerful, cross-platform desktop application for viewing, annotating, segmenting, and analyzing multiplexed fluorescence microscopy images. Built in Python with **CustomTkinter** — no browser, no server, no containers required.
+
+---
+
+## Figure 1: Software Architecture & Workflow
+
+<p align="center">
+  <img src="figures/Overview.png" alt="Figure 1: FluoroView Architecture" width="900">
+</p>
+
+**Figure 1.** FluoroView software architecture and data-flow diagram. The application comprises six subpackages: **core/** (memory-mapped channel data, ROIs, annotations, tile-based rendering engine), **ui/** (CustomTkinter interface with per-channel controls), **analysis/** (vectorized per-cell quantification and threshold-based phenotyping), **segmentation/** (Cellpose and DeepCell backends), **io/** (multi-format loading, session files, export), and **ai/** (multi-provider chat interface). Arrows indicate data flow between subpackages; external dependencies are shown at bottom.
+
+---
+
+## Figure 2: Main Viewer Interface
+
+<p align="center">
+  <img src="figures/Figure_1.png" alt="Figure 2: FluoroView Viewer" width="900">
+</p>
+
+**Figure 2.** FluoroView main viewer interface displaying a 5-channel multiplex fluorescence tissue image (5625 x 8500 px, merged from separate single-channel TIFFs). Key annotated elements: **Toolbar** with ROI drawing (Rect, Circle, Free), segmentation, and phenotyping (P±) tools; **Samples** list with multi-file channel merging; **AI Chat** panel with OpenAI provider connection; **Minimap** for viewport navigation; per-channel **Windowing** controls (min, max, brightness, gamma) with live histograms; physical **Scale bar** (100 μm, auto-detected from OME-TIFF metadata); and **Live analysis** panel showing Mean Intensity / DAPI ratios per channel. The tile-cached rendering engine achieves 69 FPS for 4-channel compositing using precomputed LUT-based contrast/gamma lookup tables and a 256-tile LRU cache.
+
+---
+
+## Figure 3: ROI Tools, Annotations & Publication-Quality Export
+
+<p align="center">
+  <img src="figures/Figure_2.png" alt="Figure 3: ROI and Annotations" width="900">
+</p>
+
+**Figure 3.** Interactive ROI tools, author-tracked annotations, and publication-quality export. **Top-left:** Two freehand ROIs (ROI-1, ROI-2) drawn on the tissue with linked author-tracked annotations ("Arvin's comment") and threaded conversation. **Top-right:** ROI-specific analysis showing per-channel intensity bar chart (Mean Intensity / DAPI with SEM error bars) with ROI-3 selected from the dropdown. **Bottom:** ROI export folder containing per-channel masked TIFF images (DAPI, ECM, Membrane, NM, PanC) with 50 μm embedded scale bars, merged composite, intensity statistics CSV (`ROI-1-stats.csv`), and publication-ready analysis graph (`ROI-1-analysis.png`).
+
+---
+
+## Figure 4: Cell Segmentation
+
+<p align="center">
+  <img src="figures/Figure_4.png" alt="Figure 4: Cell Segmentation" width="900">
+</p>
+
+**Figure 4.** Cell segmentation using multiple models. **Left:** Automated Cellpose segmentation overlay showing detected cell boundaries on a multiplex tissue image. **Center:** Segmentation menu offering TIFF mask import, whole-image Cellpose, ROI-only Cellpose, and a submenu with five model presets (cyto3, nuclei, cyto2, cyto, tissuenet_cp3) for different tissue types. **Right:** High-magnification view of segmentation boundaries (yellow outlines) overlaid on the composite image, showing individual cell morphology and accurate boundary detection.
+
+---
+
+## Figure 5: Single-Cell Analysis & Cell Phenotyping
+
+<p align="center">
+  <img src="figures/Figure_5.png" alt="Figure 5: Analysis and Phenotyping" width="900">
+</p>
+
+**Figure 5.** Single-cell analysis and threshold-based cell phenotyping (n = 13,017 cells, 5 markers). **Panel A:** Scatter plot showing PanC vs Membrane expression colored by Membrane intensity, revealing marker co-expression patterns. **Panel B:** Hierarchically clustered cell-by-marker heatmap (500 cells × 5 markers, ward linkage) showing distinct expression clusters. **Panel C:** PanC expression frequency histogram showing bimodal distribution. **Panel D:** Spatial map rendering actual cell mask shapes (not centroid dots) colored by Membrane intensity, preserving tissue architecture. **Bottom row:** Threshold-based cell phenotyping with combinatorial marker annotation — spatial phenotype map showing cells colored by phenotype (e.g., Membrane+ ECM− PanC+ NM−) with legend, and a sortable count table listing 15 distinct cell populations with counts and percentages.
 
 ---
 
 ## Quick Start
 
 ```bash
-# 1. Open Terminal and cd into the project folder
-cd /Users/Arvin/Downloads/Grants/OR51E2_grant/Images
+git clone https://github.com/arvinhm/FluoroView.git
+cd FluoroView
 
-# 2. Install dependencies (one-time)
 pip install -r fluoroview/requirements.txt
 
-# 3. Launch the app (pick any one of these)
-python run_fluoroview.py          # simplest
-python -m fluoroview              # module style
+python run_fluoroview.py
 ```
 
-That's it — the dark-themed viewer window will open.
+### Try with Example Data
+
+The repository includes downsampled example images for immediate testing:
+
+```bash
+python run_fluoroview.py
+```
+
+1. Click **File** → select all 5 channel TIFs from `example_data/`
+2. Select all 5 in the list → right-click → **Merge Selected as Channels**
+3. Click **Seg** → **Import mask (TIFF)** → select `example_data/BEMS340264_Scene-002_cell_mask.tif`
+4. Click **Cells** → **Current View** → four-panel analysis opens
+5. Click **P±** → adjust thresholds → see phenotype distributions
 
 ---
 
-## Installation Details
+## Installation
 
 ### Prerequisites
 
 | Requirement | Version | Notes |
 |---|---|---|
-| Python | 3.10+ | macOS ships with 3.9; install 3.11+ via Homebrew (`brew install python@3.11`) |
-| Tkinter | built-in | Included with Python on macOS. Verify: `python -c "import tkinter"` |
+| Python | 3.10+ | macOS: `brew install python@3.11` |
+| Tkinter | built-in | Verify: `python -c "import tkinter"` |
 
 ### Install dependencies
-
-```bash
-pip install numpy tifffile Pillow scipy scikit-image scikit-learn matplotlib customtkinter
-```
-
-Or use the bundled requirements file:
 
 ```bash
 pip install -r fluoroview/requirements.txt
 ```
 
-### Optional: Deep-learning segmentation
+Or install as a package:
 
-For single-cell analysis with DeepCell Mesmer (nuclear + membrane
-segmentation), also install TensorFlow and DeepCell:
+```bash
+pip install .
+```
+
+### Optional: Cellpose segmentation
+
+```bash
+pip install cellpose
+```
+
+### Optional: DeepCell Mesmer
 
 ```bash
 pip install tensorflow deepcell
 ```
-
-This is **not required** — the app works perfectly without it.  You can always
-import pre-computed segmentation masks (TIFF label images) instead.
 
 ---
 
@@ -67,11 +128,9 @@ import pre-computed segmentation masks (TIFF label images) instead.
 
 ### Loading Images
 
-1. Click **Folder** to open a directory of TIF files, or **File** to pick
-   individual TIFs.
-2. Multi-channel TIFs and folders-of-single-channel-TIFs are both supported.
-3. Channels appear in the right panel with colour, contrast, brightness, and
-   gamma controls.
+1. Click **Folder** to open a directory of TIF files, or **File** to pick individual files.
+2. Multi-channel TIFs and folders of single-channel TIFs are both supported.
+3. To merge separate files as channels: select multiple files in the list (Cmd+Click / Ctrl+Click), right-click, and choose **Merge Selected as Channels**.
 
 ### Viewing
 
@@ -80,138 +139,80 @@ import pre-computed segmentation masks (TIFF label images) instead.
 | Pan | Left-click drag (or right-click drag) |
 | Zoom | Scroll wheel / trackpad pinch |
 | Fit to window | **Fit** button |
-| Coordinates | Shown in the toolbar as you move the cursor |
 
 ### Drawing ROIs
 
-Click **Rect**, **Circ**, or **Free** in the toolbar, then draw on the image.
-- **Rect / Circle** — click and drag
-- **Freehand** — click to place points; click the red start-point to close
+Click **Rect**, **Circle**, or **Free** in the toolbar, then draw on the image. Toggle visibility with **Eye**, clear all with **X**.
 
-Toggle visibility with **Eye**, clear all with **X**.
+### Annotations
 
-### Annotations / Notes
+Click **Pin** in the Annotations panel, then click on the image to place a note. Each note records author name, timestamp, and machine fingerprint. Double-click to view details. Use **Link** to associate with an ROI.
 
-Click **Pin** in the Annotations panel (right side), then click on the image to
-place a note.  Each note records:
-- **Author name** — auto-detected from your PC hostname; click **Name** to
-  change it
-- **Date and time** of creation
-- **Machine fingerprint** — only the machine that created a note can edit or
-  delete it (multi-user safe)
+### Segmentation & Analysis
 
-Double-click an annotation to see full details.  Use **Link** to associate a
-note with an ROI.
-
-### Channel Groups
-
-Create named presets of which channels are visible:
-1. Turn on only the channels you want.
-2. Click **+** next to the Group dropdown.
-3. Name the group (e.g. "DAPI + Membrane").
-4. Switch between groups instantly from the dropdown.
+1. Click **Seg** → choose **Import mask (TIFF)**, **Cellpose: whole image**, or **Cellpose: ROI(s) only**
+2. Click **Cells** → choose scope (**ROI** / **Current View** / **Entire Slide**)
+3. Four-panel analysis opens with scatter, heatmap, histogram, and spatial map
+4. Click **P±** for cell phenotyping with threshold-based marker gating
 
 ### Saving & Exporting
 
 | Button | What it does |
 |---|---|
 | **Save** | Export full-resolution composite (TIFF or PNG) |
-| **ROIs** | Save cropped ROI images (merged + per-channel) |
+| **ROIs** | Save cropped ROI images (merged + per-channel) with scale bars |
 | **CSV** | Export per-ROI per-channel intensity statistics |
-| **Mask / Brush** | Open the brush-mask tool for local adjustments with live Gaussian feathering and red tint preview |
-
-### Sessions (Save / Load)
-
-Save the **entire viewer state** (file paths, channel settings, ROIs,
-annotations, segmentation mask, channel groups, zoom/pan, AND **brushed image modifications**) to a monolithic
-`.fluoroview.npz` file:
-
-- **Save Session** — left panel
-- **Load Session** — left panel
-
-Share the `.fluoroview.npz` with collaborators — they'll see everything exactly
-as you left it (annotations are author-locked, and all masked edits are permanently baked into the session state).
-
-### Segmentation & Single-Cell Analysis
-
-1. Click **Seg** and choose:
-   - **Import mask (TIFF)** — load a pre-computed label mask from CellProfiler,
-     QuPath, ImageJ, etc.
-   - **Run DeepCell Mesmer** — AI-powered whole-cell segmentation (requires
-     TensorFlow + DeepCell)
-2. Toggle **Show segmentation overlay** to see cell boundaries.
-3. Click **Cells** to open the single-cell analysis popup with:
-   - Scatter plots (marker X vs Y)
-   - Heatmap (cells x markers, hierarchically clustered)
-   - Histograms (marker distribution)
-   - Spatial maps (cells coloured by expression)
-   - CSV export of all per-cell data
-
-### AI Assistant
-
-Click the **AI** button in the toolbar to open the built-in AI chat:
-
-1. **Setup:** Click **Settings** to choose a provider (OpenAI, Gemini, Claude) and enter an API key. 
-2. **Connection Status:** A visual indicator (●) shows green when connected and red on error.
-3. **Chat:** Ask the AI to write features or fix bugs. The AI has full context of the source tree.
-4. **History:** Click **History** to view and restore past saved conversations.
-
-The AI can write code edits directly. Every edit is backed up automatically via a local version control system — press **Apply** to write them.
+| **Save Session** / **Load Session** | Save/restore entire viewer state |
 
 ---
 
 ## Project Structure
 
 ```
-Images/
-  run_fluoroview.py              <-- launch script
-  fluoroview/
-    __init__.py                  package root
-    __main__.py                  python -m fluoroview entry point
-    app.py                       main application window (1194 lines)
-    constants.py                 colours, theme, LUT presets
-    requirements.txt             pip dependencies
-    core/
-      channel.py                 ChannelData, loaders, folder scanner
-      roi.py                     ROIData (rect, circle, freehand)
-      annotations.py             Annotation with author identity
-      session.py                 SessionState serialisation
-    ui/
-      theme.py                   dark theme for tkinter/ttk
-      channel_control.py         per-channel sliders + histogram
-      annotation_panel.py        notes sidebar with access control
-      popups/
-        merge_popup.py           channel merge viewer
-        mask_popup.py            brush-mask adjustment tool
-        cell_analysis.py         scatter, heatmap, histogram, spatial
-    analysis/
-      intensity.py               ratio-to-DAPI computation
-      spatial.py                 BallTree nearest-cell queries
-      quantification.py          per-cell marker quantification
-    segmentation/
-      base.py                    abstract segmenter interface
-      deepcell_seg.py            optional DeepCell Mesmer wrapper
-      mask_import.py             import TIFF label masks
-      overlay.py                 cell outline / colour overlays
-    io/
-      formats.py                 multi-format image loader
-      session_io.py              .fluoroview.npz read/write
-      export.py                  CSV + image export
-    ai/
-      providers.py               OpenAI / Gemini / Claude backends
-      chat_ui.py                 AI chat window with setup flow
-      version_control.py         file versioning for AI edits
+FluoroView/
+├── run_fluoroview.py              Launch script
+├── pyproject.toml                 Package configuration (pip install .)
+├── paper.md                       JOSS paper
+├── paper.bib                      Bibliography
+├── CITATION.cff                   Citation metadata
+├── LICENSE                        BSD 3-Clause
+├── example_data/                  Downsampled test images + segmentation mask
+├── tests/                         Pytest test suite (24 tests)
+├── figures/                       Paper and README figures
+│
+└── fluoroview/
+    ├── __init__.py                Package root (v2.0.0)
+    ├── __main__.py                python -m fluoroview entry point
+    ├── app.py                     Main application window
+    ├── constants.py               Colors, theme, LUT presets
+    ├── requirements.txt           pip dependencies
+    ├── core/                      Channel data, ROIs, annotations, tile engine
+    ├── ui/                        CustomTkinter interface, popups
+    ├── analysis/                  Quantification, phenotyping, spatial queries
+    ├── segmentation/              Cellpose, DeepCell, mask import, overlay
+    ├── io/                        Multi-format loading, session I/O, export
+    ├── ai/                        Multi-provider chat, version control
+    └── icons/                     Glass-style icon generator
 ```
 
 ---
 
-## Keyboard Shortcuts (macOS)
+## Running Tests
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+---
+
+## Keyboard Shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Cmd+S` | Save session |
-| `Cmd+O` | Load session |
-| `Cmd+Z` | Undo last ROI |
+| `Cmd+S` / `Ctrl+S` | Save session |
+| `Cmd+O` / `Ctrl+O` | Load session |
+| `Cmd+Z` / `Ctrl+Z` | Undo last ROI |
 | Scroll | Zoom in / out |
 | Right-click drag | Pan |
 
@@ -219,43 +220,34 @@ Images/
 
 ## Troubleshooting
 
-**"No module named tkinter"**
-```bash
-brew install python-tk@3.11
-```
+**"No module named tkinter"** — `brew install python-tk@3.11`
 
-**"numpy.dtype size changed" errors**
-```bash
-pip install --upgrade numpy scikit-image scikit-learn scipy
-```
+**"numpy.dtype size changed"** — `pip install --upgrade numpy scikit-image scikit-learn scipy`
 
-**App doesn't start / blank window**
-```bash
-python -c "import tkinter; tkinter.Tk().mainloop()"
-```
-If this shows a window, tkinter works.  If not, reinstall Python with
-Homebrew.
-
-**DeepCell segmentation fails**
-Make sure TensorFlow is installed and compatible with your Python version.
-On Apple Silicon Macs use `pip install tensorflow-macos tensorflow-metal`.
+**DeepCell segmentation fails** — ensure TensorFlow is installed. On Apple Silicon: `pip install tensorflow-macos tensorflow-metal`.
 
 ---
 
-## Credits
+## Citation
 
-Inspired by and adapted from:
-- [DeepCell-tf](https://github.com/vanvalenlab/deepcell-tf) — cell
-  segmentation and overlay rendering
-- [MCMICRO](https://github.com/labsyspharm/mcmicro) — multiplexed imaging
-  pipeline and quantification patterns
-- [Minerva Story](https://github.com/labsyspharm/minerva-story) — channel
-  grouping and storytelling concepts
-- [Scope2Screen](https://github.com/labsyspharm/scope2screen) — spatial
-  queries, annotation patterns, transfer functions
-- [UnMicst](https://github.com/HMS-IDAC/UnMicst) — UNet segmentation and
-  patch-based inference
+If you use FluoroView in your research, please cite:
+
+```bibtex
+@article{hajmirzaian2026fluoroview,
+  title={FluoroView: An Open-Source Desktop Application for Interactive Multiplex
+         Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping},
+  author={Haj-Mirzaian, Arvin and Heidari, Pedram},
+  journal={Journal of Open Source Software},
+  year={2026}
+}
+```
 
 ---
 
-*FluoroView v2.0 — 34 Python modules, 4,281 lines of code.*
+## License
+
+BSD 3-Clause License. See [LICENSE](LICENSE) for details.
+
+---
+
+*FluoroView v2.0 — 42 Python modules, ~8,400 lines of code, 24 automated tests.*

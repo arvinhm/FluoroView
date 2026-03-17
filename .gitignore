@@ -6,3 +6,4 @@ dist/
 build/
 .fluoroview_versions/
 example/
+.pytest_cache/
