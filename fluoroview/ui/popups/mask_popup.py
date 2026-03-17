@@ -386,5 +386,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
                 self.after(0, lambda: self.parent_app.status_var.set(
                     f"Saved masked result: {os.path.basename(path)}"))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e), parent=self))
+                err_msg = str(e)
+                self.after(0, lambda: messagebox.showerror("Error", err_msg, parent=self))
         threading.Thread(target=_do, daemon=True).start()

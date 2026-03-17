@@ -325,5 +325,6 @@ class MergePopup(ctk.CTkToplevel):
                 else:
                     tifffile.imwrite(path, comp)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e), parent=self))
+                err_msg = str(e)
+                self.after(0, lambda: messagebox.showerror("Error", err_msg, parent=self))
         threading.Thread(target=_do, daemon=True).start()

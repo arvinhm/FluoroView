@@ -1362,7 +1362,10 @@ class FluoroView(tk.Tk):
                 self.after(0, lambda: self.status_var.set(
                     f"Saved {len(self.rois)} ROIs to {os.path.basename(base_folder)}"))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Save Error", str(e)))
+
+                err_msg = str(e)
+
+                self.after(0, lambda: messagebox.showerror("Save Error", err_msg))
 
         threading.Thread(target=do_save, daemon=True).start()
 
@@ -1547,7 +1550,10 @@ class FluoroView(tk.Tk):
                     tifffile.imwrite(path, rgb)
                 self.after(0, lambda: self.status_var.set(f"Saved composite → {os.path.basename(path)}"))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Save Error", str(e)))
+
+                err_msg = str(e)
+
+                self.after(0, lambda: messagebox.showerror("Save Error", err_msg))
                 self.after(0, lambda: self.status_var.set("Save failed"))
 
         threading.Thread(target=do_save, daemon=True).start()
@@ -1594,7 +1600,10 @@ class FluoroView(tk.Tk):
 
                 self.after(0, lambda: self.status_var.set(f"Saved {len(self.channels)} channels to {os.path.basename(folder)}"))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Save Error", str(e)))
+
+                err_msg = str(e)
+
+                self.after(0, lambda: messagebox.showerror("Save Error", err_msg))
                 self.after(0, lambda: self.status_var.set("Save failed"))
 
         threading.Thread(target=do_save, daemon=True).start()
@@ -2079,7 +2088,10 @@ class MergePopup(tk.Toplevel):
                 else:
                     tifffile.imwrite(path, composite)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Save Error", str(e), parent=self))
+
+                err_msg = str(e)
+
+                self.after(0, lambda: messagebox.showerror("Save Error", err_msg, parent=self))
 
         threading.Thread(target=do_save, daemon=True).start()
 
@@ -2561,7 +2573,10 @@ class MaskAdjustPopup(tk.Toplevel):
                     self.after(0, lambda: self._after_apply(
                         f"Channel {idx+1} saved to temp.\nPath: {os.path.basename(path)}"))
                 except Exception as e:
-                    self.after(0, lambda: messagebox.showerror("Error", str(e), parent=self))
+
+                    err_msg = str(e)
+
+                    self.after(0, lambda: messagebox.showerror("Error", err_msg, parent=self))
                 finally:
                     self.after(0, lambda: self.config(cursor=''))
 
@@ -2587,7 +2602,10 @@ class MaskAdjustPopup(tk.Toplevel):
                 self.after(0, lambda: self._after_apply(
                     f"Applied to {len(saved)} channels.\nTemp files saved."))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e), parent=self))
+
+                err_msg = str(e)
+
+                self.after(0, lambda: messagebox.showerror("Error", err_msg, parent=self))
             finally:
                 self.after(0, lambda: self.config(cursor=''))
 
@@ -2666,7 +2684,10 @@ class MaskAdjustPopup(tk.Toplevel):
                 else:
                     tifffile.imwrite(path, composite)
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Save Error", str(e), parent=self))
+
+                err_msg = str(e)
+
+                self.after(0, lambda: messagebox.showerror("Save Error", err_msg, parent=self))
 
         threading.Thread(target=do_save, daemon=True).start()
 

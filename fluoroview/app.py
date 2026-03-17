@@ -1524,7 +1524,8 @@ class FluoroView(ctk.CTk):
                 self.after(0, lambda: self.status_var.set(
                     f"Saved → {os.path.basename(path)}"))
             except Exception as e:
-                self.after(0, lambda: messagebox.showerror("Error", str(e)))
+                err_msg = str(e)
+                self.after(0, lambda: messagebox.showerror("Error", err_msg))
         threading.Thread(target=_do, daemon=True).start()
 
     def _save_all_rois(self):
@@ -1871,7 +1872,8 @@ class FluoroView(ctk.CTk):
                 nm = self.channel_controls[idx].get_params().get("name", f"Ch{idx+1}")
                 self.after(0, lambda: self.status_var.set(f"\u2705 Applied to {nm}"))
             except Exception as ex:
-                self.after(0, lambda: self.status_var.set(f"\u274C Apply failed: {ex}"))
+                err_msg = str(ex)
+                self.after(0, lambda: self.status_var.set(f"\u274C Apply failed: {err_msg}"))
         threading.Thread(target=_bg, daemon=True).start()
 
         if self._renderer:

@@ -295,8 +295,9 @@ class AIChatPanel(ctk.CTkFrame):
                     models = list_models(prov, key)
                     win.after(0, lambda: _on_fetched(models))
                 except Exception as e:
+                    err_msg = str(e)[:50]
                     win.after(0, lambda: status_lbl.configure(
-                        text=f"Error: {str(e)[:50]}"))
+                        text=f"Error: {err_msg}"))
             threading.Thread(target=_do, daemon=True).start()
 
         def _on_fetched(models):
@@ -417,8 +418,9 @@ class AIChatPanel(ctk.CTkFrame):
                 models = list_models(provider, key)
                 self.after(0, lambda: self._on_models_fetched(models))
             except Exception as e:
+                err_msg = str(e)[:50]
                 self.after(0, lambda: self._model_status.configure(
-                    text=f"Error: {str(e)[:50]}"))
+                    text=f"Error: {err_msg}"))
             finally:
                 self._fetching = False
         threading.Thread(target=_do, daemon=True).start()
@@ -467,7 +469,8 @@ class AIChatPanel(ctk.CTkFrame):
                 self.messages.append({"role": "assistant", "content": reply})
                 self.after(0, lambda: self._on_reply(reply))
             except Exception as e:
-                self.after(0, lambda: self._on_error(str(e)))
+                err_msg = str(e)
+                self.after(0, lambda: self._on_error(err_msg))
         threading.Thread(target=_do, daemon=True).start()
 
     def _on_reply(self, reply):
