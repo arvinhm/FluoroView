@@ -87,23 +87,22 @@ tile-cached rendering engine, and the phenotyping workflow.
 
 # Software design
 
-FluoroView comprises 42 Python modules (~8,400 lines) in six subpackages. The
-software architecture and data-flow diagram is shown in \autoref{fig:workflow}.
-The **core/** subpackage provides memory-mapped channel arrays via tifffile
-[@tifffile], ROI geometry, annotations with machine-fingerprint identity
-tracking, session serialization, and a tile-based rendering engine with LRU
-cache. The **ui/** subpackage implements the graphical interface using
-CustomTkinter [@customtkinter] with per-channel controls, annotation panel,
-and popup dialogs for analysis and phenotyping. The **analysis/** subpackage
-contains vectorized per-cell quantification via scipy.ndimage [@scipy], BallTree
-spatial queries via scikit-learn [@scikit-learn], and threshold-based
-phenotyping. The **segmentation/** subpackage offers pluggable Cellpose
-[@cellpose; @cellpose3] and DeepCell Mesmer [@deepcell] backends with TIFF mask
-import and boundary overlay via scikit-image [@scikit-image]. The **io/**
-subpackage handles multi-format loading (TIFF, OME-TIFF, JPEG, PNG, SVS, CZI),
-multi-file channel merging, session files, and export. The **ai/** subpackage
-provides multi-provider chat (OpenAI/Gemini/Claude) with snapshot-based version
-control.
+FluoroView comprises 42 Python modules (~8,400 lines) in six subpackages, as
+illustrated in \autoref{fig:workflow}. The **core/** subpackage provides
+memory-mapped channel arrays via tifffile [@tifffile], ROI geometry, annotations
+with machine-fingerprint identity tracking, session serialization, and a
+tile-based rendering engine with LRU cache. The **ui/** subpackage implements the
+graphical interface using CustomTkinter [@customtkinter]. The **analysis/**
+subpackage contains vectorized per-cell quantification via scipy.ndimage
+[@scipy], BallTree spatial queries via scikit-learn [@scikit-learn], and
+threshold-based phenotyping. The **segmentation/** subpackage offers pluggable
+Cellpose [@cellpose; @cellpose3] and DeepCell Mesmer [@deepcell] backends. The
+**io/** subpackage handles multi-format loading (TIFF, OME-TIFF, JPEG, PNG, SVS,
+CZI), multi-file channel merging, session persistence, and export. The **ai/**
+subpackage provides multi-provider chat (OpenAI/Gemini/Claude) with
+snapshot-based version control.
+
+![FluoroView software architecture and data-flow diagram. The six subpackages are shown with data-flow arrows: core/ provides memory-mapped channel data, ROIs, annotations, and the tile-based rendering engine; ui/ implements the CustomTkinter interface with per-channel controls and popup dialogs; analysis/ performs vectorized per-cell quantification and threshold-based phenotyping; segmentation/ wraps Cellpose and DeepCell backends; io/ handles multi-format image loading and CSV/image export; and ai/ provides the multi-provider chat interface with version control. External dependencies (NumPy, SciPy, tifffile, Cellpose, matplotlib, CustomTkinter, OpenAI/Gemini/Claude APIs) are shown at bottom.\label{fig:workflow}](figures/Overview.png)
 
 A key design trade-off was choosing precomputed uint16$\rightarrow$uint8 lookup
 tables for contrast/gamma over per-pixel floating-point math. This sacrifices
@@ -112,35 +111,59 @@ compositing with OpenCV-accelerated resize [@opencv] and a 256-tile LRU cache.
 For cell quantification, we chose vectorized scipy.ndimage operations
 (single-pass mean/sum/median over all cells) over the conventional per-cell
 regionprops approach, reducing quantification of 13,000 cells from minutes to
-seconds.
+seconds. \autoref{fig:viewer} shows the main viewer interface with a 5-channel
+multiplex fluorescence tissue image (5625 $\times$ 8500 px). The interface
+includes: a toolbar with ROI drawing, segmentation, and phenotyping (P$\pm$)
+tools; a file/sample list supporting multi-file channel merging; per-channel
+windowing controls (min, max, brightness, gamma) with live histograms; an
+adaptive minimap showing viewport position; a physical scale bar (100 $\mu$m,
+auto-detected from OME-TIFF metadata); a live intensity-ratio analysis panel;
+and an integrated AI chat panel with provider selection.
 
-The main viewer interface (\autoref{fig:viewer}) provides real-time multi-channel
-compositing with per-channel windowing controls (min, max, brightness, gamma),
-adaptive minimap, physical scale bar auto-detected from OME-TIFF metadata, live
-intensity-ratio analysis, and an integrated AI chat panel.
+![FluoroView main viewer interface displaying a 5-channel multiplex fluorescence tissue image with annotated UI elements: toolbar, sample list, AI chat panel, adaptive minimap, per-channel windowing controls with live histograms, physical scale bar (100 \textmu m), and live intensity-ratio analysis.\label{fig:viewer}](figures/Figure_1.png)
 
-Interactive ROI tools (\autoref{fig:rois}) support rectangle, ellipse, and
-freehand polygon regions with author-tracked annotations and threaded
-conversation. Each ROI can be analyzed independently with per-channel intensity
-bar charts (Mean Intensity / DAPI with SEM error bars), and exported as
-publication-ready figures including per-channel masked TIFF images with embedded
-scale bars, merged composites, intensity statistics CSV, and analysis graphs.
+\autoref{fig:rois} demonstrates the interactive ROI tools and publication-quality
+export workflow. Two freehand ROIs (ROI-1, ROI-2) are drawn on the tissue with
+linked author-tracked annotations ("Arvin's comment") and threaded conversation.
+The right panel shows ROI-specific analysis with per-channel intensity bar charts
+(Mean Intensity / DAPI with SEM error bars) and a dropdown selector for
+individual ROIs. The bottom panel shows the export output: a folder containing
+per-channel masked TIFF images (DAPI, ECM, Membrane, NM, PanC) with 50 $\mu$m
+embedded scale bars, a merged composite, intensity statistics CSV, and a
+publication-ready analysis graph.
 
-Cell segmentation (\autoref{fig:segmentation}) is supported through Cellpose
-with five model presets (cyto3, nuclei, cyto2, cyto, tissuenet\_cp3), applicable
-to whole images or selected ROIs with automatic tiled parallel processing.
-Imported segmentation masks from any external pipeline are equally supported.
+![Interactive ROI tools, author-tracked annotations with threaded conversation, ROI-specific per-channel intensity analysis (Mean Intensity / DAPI with SEM error bars), and publication-quality export folder containing per-channel masked TIFF images with 50 \textmu m scale bars, merged composite, intensity statistics CSV, and analysis graph.\label{fig:rois}](figures/Figure_2.png)
 
-The single-cell analysis and phenotyping module (\autoref{fig:analysis})
-provides: (A) scatter plots showing expression of two markers with a third as
-color channel; (B) hierarchically clustered cell-by-marker heatmaps with ward
-linkage; (C) expression frequency histograms; and (D) spatial maps rendering
-actual cell mask shapes colored by marker intensity. The bottom row shows
-threshold-based cell phenotyping where researchers set per-channel positivity
-thresholds, exclude irrelevant channels, and define custom marker names. Each
-cell receives a combinatorial phenotype string (e.g., Membrane^+^ ECM^-^
-PanC^+^ NM^-^), visualized as a spatial phenotype map with actual cell mask
-shapes and a sortable count table showing distinct cell populations.
+\autoref{fig:segmentation} shows the cell segmentation capabilities. The left
+panel displays an automated Cellpose segmentation overlay with detected cell
+boundaries on a multiplex tissue image. The center panel shows the segmentation
+menu offering TIFF mask import (for pre-computed masks from CellProfiler, QuPath,
+or ImageJ), whole-image Cellpose, ROI-only Cellpose, and a submenu with five
+model presets (cyto3, nuclei, cyto2, cyto, tissuenet\_cp3) optimized for
+different tissue types. The right panel shows a high-magnification view of
+segmentation boundaries (yellow outlines) overlaid on the composite image,
+demonstrating accurate detection of individual cell morphology.
+
+![Cell segmentation. Left: Cellpose segmentation overlay with cell boundaries. Center: segmentation menu with TIFF mask import, whole-image and ROI-only Cellpose, and five model presets (cyto3, nuclei, cyto2, cyto, tissuenet\_cp3). Right: high-magnification view of cell boundary outlines (yellow) on the composite image.\label{fig:segmentation}](figures/Figure_4.png)
+
+\autoref{fig:analysis} presents the single-cell analysis and cell phenotyping
+module applied to 13,017 cells across 5 markers. Panel A shows a scatter plot of
+PanC versus Membrane expression, with cells colored by Membrane intensity,
+revealing marker co-expression patterns across the tissue. Panel B displays a
+hierarchically clustered cell-by-marker heatmap (500 cells $\times$ 5 markers,
+ward linkage), identifying distinct expression clusters. Panel C shows the PanC
+expression frequency histogram, revealing a bimodal distribution that helps
+inform threshold selection. Panel D renders a spatial map using actual cell mask
+shapes (not centroid dots) colored by Membrane intensity, preserving tissue
+architecture and cell morphology. The bottom row demonstrates threshold-based
+cell phenotyping: researchers set per-channel positivity thresholds (with
+automatic Otsu, median, or P75 suggestions), exclude irrelevant channels (e.g.,
+DAPI), and define custom marker names. Each cell receives a combinatorial
+phenotype string (e.g., Membrane^+^ ECM^-^ PanC^+^ NM^-^). The spatial
+phenotype map shows cells colored by their assigned phenotype, and the sortable
+count table lists 15 distinct cell populations with counts and percentages.
+
+![Single-cell analysis and cell phenotyping (n = 13,017 cells, 5 markers). Top: (A) PanC vs Membrane scatter plot colored by Membrane intensity; (B) hierarchically clustered cell-by-marker heatmap (500 cells x 5 markers). Middle: (C) PanC expression frequency histogram; (D) spatial map with actual cell mask shapes colored by Membrane intensity. Bottom: threshold-based cell phenotyping with spatial phenotype map and sortable count table showing 15 distinct cell populations.\label{fig:analysis}](figures/Figure_5.png)
 
 # Research impact statement
 
@@ -158,16 +181,6 @@ combination of zero-infrastructure installation, no license fees, and an
 integrated AI assistant for customization positions FluoroView as accessible
 community infrastructure for spatial biology laboratories.
 
-![FluoroView software architecture and data-flow diagram. The application comprises six subpackages with clear boundaries: core/ provides memory-mapped channel data, ROIs, annotations, and the tile-based rendering engine; ui/ implements the CustomTkinter interface; analysis/ performs vectorized per-cell quantification and threshold-based phenotyping; segmentation/ wraps Cellpose and DeepCell backends; io/ handles multi-format loading and export; and ai/ provides the multi-provider chat interface. External dependencies are shown at bottom.\label{fig:workflow}](figures/Overview.png)
-
-![FluoroView main viewer interface. A 5-channel multiplex fluorescence tissue image (5625 x 8500 px) is displayed with per-channel windowing controls (min, max, brightness, gamma) and live histograms on the right panel. Annotated elements include the toolbar with ROI, segmentation, and phenotyping (P\textpm) tools; the file/sample list with multi-file channel merging; session save/load; adaptive minimap; physical scale bar (100 \textmu m); live intensity-ratio analysis; and the integrated AI chat panel with OpenAI provider.\label{fig:viewer}](figures/Figure_1.png)
-
-![Interactive ROI tools, annotations, and publication-quality export. Top-left: two freehand ROIs (ROI-1, ROI-2) drawn on the tissue with linked author-tracked annotations and threaded conversation. Top-right: per-ROI intensity bar chart (Mean Intensity / DAPI with SEM error bars) with ROI-specific dropdown selector. Bottom: ROI export folder containing per-channel masked TIFF images (DAPI, ECM, Membrane, NM, PanC) with 50 \textmu m scale bars, merged composite, intensity statistics CSV, and publication-ready analysis graph.\label{fig:rois}](figures/Figure_2.png)
-
-![Cell segmentation using multiple models. Left: automated Cellpose segmentation overlay showing detected cell boundaries on a multiplex tissue image. Center: segmentation menu offering TIFF mask import, whole-image Cellpose, ROI-only Cellpose, and a submenu with five model presets (cyto3, nuclei, cyto2, cyto, tissuenet\_cp3). Right: high-magnification view of segmentation boundaries (yellow outlines) overlaid on the composite image showing individual cell morphology.\label{fig:segmentation}](figures/Figure_4.png)
-
-![Single-cell analysis and threshold-based cell phenotyping. Top row: (A) scatter plot of PanC vs Membrane expression colored by Membrane intensity (n = 13,017 cells); (B) hierarchically clustered cell-by-marker heatmap (500 cells x 5 markers). Middle row: (C) PanC expression frequency histogram; (D) spatial map with actual cell mask shapes colored by Membrane intensity showing tissue architecture. Bottom row: threshold-based cell phenotyping with combinatorial marker annotation---spatial phenotype map showing cells colored by phenotype (e.g., Membrane^+^ ECM^-^ PanC^+^ NM^-^) with legend, and a sortable count table listing 15 distinct cell populations with counts and percentages.\label{fig:analysis}](figures/Figure_5.png)
-
 # Acknowledgements
 
 This work was supported by the Division of Nuclear Medicine and Molecular
@@ -177,9 +190,14 @@ DeepCell, UnMicst, and SCIMAP for their open-source contributions.
 
 # AI usage disclosure
 
-Generative AI tools (Anthropic Claude 4.6 Opus) were used
-during development for debugging and performance
-optimization. All AI-generated outputs were reviewed,
-validated, and approved by the human authors. 
+Generative AI tools (Anthropic Claude 4.6 Opus, via the Cursor IDE) were used
+during development for code generation, refactoring, debugging, performance
+optimization, and documentation drafting. All AI-generated outputs were reviewed,
+validated, and approved by the human authors. Core architectural decisions---
+tile-based rendering with LUT lookup tables, integer screen blending, memory-
+mapped channel arrays, machine-fingerprint annotation tracking, vectorized
+scipy.ndimage cell quantification, threshold-based phenotyping with combinatorial
+annotation, and the modular package structure---were conceived and directed
+entirely by the authors.
 
 # References
