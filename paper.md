@@ -1,4 +1,4 @@
-```yaml
+---
 title: "FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping"
 tags:
   - Python
@@ -23,7 +23,8 @@ affiliations:
     index: 1
 date: 16 March 2026
 bibliography: paper.bib
-```
+---
+
 # Summary
 
 Advances in highly multiplexed tissue imaging enable simultaneous detection of
@@ -151,6 +152,13 @@ DeepCell, UnMicst, and SCIMAP for their open-source contributions.
 # AI usage disclosure
 
 Generative AI tools (Anthropic Claude 4.6 Opus, via the Cursor IDE) were used
-during development for code debugging and performance optimization.
-All AI-generated outputs were reviewed, validated, and approved by the human authors. 
+during development for code generation, refactoring, debugging, performance
+optimization, and documentation drafting. All AI-generated outputs were reviewed,
+validated, and approved by the human authors. Core architectural decisions---
+tile-based rendering with LUT lookup tables, integer screen blending, memory-
+mapped channel arrays, machine-fingerprint annotation tracking, vectorized
+scipy.ndimage cell quantification, threshold-based phenotyping with combinatorial
+annotation, and the modular package structure---were conceived and directed
+entirely by the authors.
 
+# References
