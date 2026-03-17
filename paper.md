@@ -24,7 +24,6 @@ affiliations:
 date: 16 March 2026
 bibliography: paper.bib
 ---
-
 # Summary
 
 Advances in highly multiplexed tissue imaging enable simultaneous detection of
