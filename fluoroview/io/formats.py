@@ -1,4 +1,3 @@
-"""Multi-format image loading helpers (OME-TIFF, CZI, ND2 via tifffile)."""
 
 from __future__ import annotations
 
@@ -7,7 +6,6 @@ import numpy as np
 
 
 def read_image(path: str) -> np.ndarray:
-    """Read an image file; returns the raw array (may be multi-dim)."""
     try:
         return tifffile.memmap(path, mode="r")
     except Exception:
@@ -21,7 +19,6 @@ def squeeze_to_2d(arr: np.ndarray) -> np.ndarray:
 
 
 def get_ome_channel_names(path: str) -> list[str]:
-    """Extract channel names from OME-TIFF metadata if available."""
     try:
         with tifffile.TiffFile(path) as tf:
             if tf.ome_metadata:

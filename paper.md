@@ -1,12 +1,14 @@
 ---
-title: "FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Image Visualization, Annotation, and Single-Cell Analysis"
+title: "FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping"
 tags:
   - Python
   - fluorescence microscopy
   - multiplex imaging
   - cell segmentation
   - single-cell analysis
+  - cell phenotyping
   - digital pathology
+  - spatial biology
 authors:
   - name: Arvin Haj-Mirzaian
     orcid: 0000-0001-8977-6865
@@ -17,114 +19,144 @@ authors:
 affiliations:
   - name: Division of Nuclear Medicine and Molecular Imaging, Department of Radiology, Massachusetts General Hospital, Harvard Medical School, Boston, MA 02114, USA
     index: 1
-date: 26 February 2026
+date: 16 March 2026
 bibliography: paper.bib
 ---
 
 # Summary
 
-Advances in highly multiplexed tissue imaging are transforming our
-understanding of human biology by enabling simultaneous detection of 10–100
-proteins at subcellular resolution [@bodenmiller2016multiplexed]. Technologies
-such as cyclic immunofluorescence (CyCIF), CODEX, MIBI, and Imaging Mass
-Cytometry generate datasets that routinely exceed tens of gigabytes per
-whole-slide image [@lin2018highly], posing substantial challenges for
-interactive visualization and quantitative analysis. FluoroView is a free,
-open-source Python desktop application that provides a complete environment for
-multiplex fluorescence image analysis on macOS, Windows, and Linux. It combines
-a high-performance tile-cached viewer (69 FPS, LUT-based compositing for up to
-50 channels), interactive ROI tools with automated quantification and
-publication-quality export, author-tracked annotations with threaded replies,
-Cellpose-powered cell segmentation [@cellpose; @cellpose3], per-cell
-expression analysis, persistent session management, and an integrated AI
-assistant supporting OpenAI, Google Gemini, and Anthropic Claude for
-user-directed software customization. FluoroView is distributed under the BSD
-3-Clause license at https://github.com/arvinhm/FluoroView.
+Advances in highly multiplexed tissue imaging enable simultaneous detection of
+10--100 proteins at subcellular resolution [@bodenmiller2016multiplexed].
+Technologies such as cyclic immunofluorescence (CyCIF), CODEX, MIBI, and Imaging
+Mass Cytometry generate datasets that routinely exceed tens of gigabytes per
+whole-slide image [@lin2018highly], posing substantial challenges for interactive
+visualization and quantitative analysis. FluoroView is a free, open-source Python
+desktop application that provides a unified environment for multiplex
+fluorescence image analysis on macOS, Windows, and Linux. It combines a
+high-performance tile-cached viewer with LUT-based compositing for up to 50
+channels, interactive ROI tools with automated quantification, author-tracked
+annotations, Cellpose-powered cell segmentation [@cellpose; @cellpose3],
+vectorized per-cell expression quantification, threshold-based cell phenotyping
+with combinatorial marker annotation, and an integrated AI assistant supporting
+OpenAI, Google Gemini, and Anthropic Claude. FluoroView is distributed under the
+BSD 3-Clause license at <https://github.com/arvinhm/FluoroView>.
 
-# Statement of Need
+# Statement of need
 
 Multiplexed tissue imaging has become a cornerstone of spatial biology, yet
 analysis remains a significant bottleneck. The typical workflow requires
 researchers to switch between multiple tools: one for viewing, another for
 annotation, a separate pipeline for segmentation, and yet another for
-quantitative analysis. This fragmentation wastes time, introduces errors, and
-makes results difficult to reproduce.
+quantitative analysis and cell phenotyping. This fragmentation wastes time,
+introduces errors, and makes results difficult to reproduce. FluoroView is
+designed for biomedical researchers---pathologists, immunologists, and spatial
+biologists---who need to view, annotate, segment, quantify, and phenotype
+multiplex fluorescence images in a single application without programming,
+server infrastructure, or commercial licenses.
 
-Existing open-source tools address subsets of these requirements. QuPath
-[@bankhead2017qupath] excels at pathology annotation but lacks integrated
-deep-learning segmentation with live overlay. Napari [@napari] provides
-powerful visualization but requires Python scripting. MCMICRO [@mcmicro]
-offers a comprehensive pipeline but requires Nextflow and Docker. Minerva
+# State of the field
+
+Existing open-source tools address subsets of the multiplex imaging workflow.
+QuPath [@bankhead2017qupath] excels at pathology annotation but lacks integrated
+deep-learning segmentation with live overlay and built-in threshold-based cell
+phenotyping. Napari [@napari] provides powerful n-dimensional visualization but
+requires Python scripting for analytical workflows. MCMICRO [@mcmicro] offers a
+comprehensive command-line pipeline but requires Nextflow and Docker. Minerva
 Story [@minerva_story] enables web-based narrative visualization but cannot
 perform segmentation or quantitative analysis. Scope2Screen [@scope2screen]
-provides spatial queries but requires server deployment. DeepCell [@deepcell]
-and UnMicst [@unmicst] provide segmentation but lack integrated viewers.
-ImageJ/FIJI [@schindelin2012fiji], while free, lacks native multi-channel
-compositing with per-channel gamma correction and integrated deep-learning
-segmentation. Meanwhile, commercial platforms (HALO, Visiopharm, inForm)
-offer polished interfaces but impose license fees of \$10,000–\$50,000 per
-seat, operate as closed systems, and prevent reproducible sharing of
-workflows.
+provides spatial queries but requires server deployment. DeepCell [@deepcell] and
+UnMicst [@unmicst] provide segmentation but lack integrated viewers. ImageJ/FIJI
+[@schindelin2012fiji] lacks native multi-channel compositing with per-channel
+gamma correction and integrated deep-learning segmentation. SCIMAP [@scimap]
+offers downstream spatial analysis in Python but has no graphical viewer.
+Commercial platforms (HALO, Visiopharm, inForm) offer polished interfaces but
+impose license fees of \$10,000--\$50,000 per seat and prevent reproducible
+sharing of workflows.
 
-FluoroView fills this gap as a unified desktop application combining fast
-visualization, annotation, segmentation, and analysis in a single window
-(\autoref{fig:overview}). It requires no server, no containers, and no
-programming knowledge. Its built-in AI assistant transforms the software
-from a fixed-feature application into a customizable platform where
-researchers describe desired features in natural language and the AI
-implements them with automatic version control.
+We chose to build FluoroView as a standalone application rather than contribute
+to existing projects because no single tool integrates all six workflow stages
+(viewing, annotation, segmentation, quantification, phenotyping, export) in a
+zero-infrastructure desktop application. FluoroView deliberately builds upon
+established libraries---tifffile [@tifffile] for image I/O, Cellpose for
+segmentation, scipy.ndimage [@scipy] for quantification, scikit-image
+[@scikit-image] for boundary detection---rather than reimplementing solved
+problems, focusing its unique contribution on the integration layer, the
+tile-cached rendering engine, and the phenotyping workflow.
 
-# Software Design
+# Software design
 
-FluoroView comprises 40 Python modules (~7,500 lines) in six subpackages:
-**core/** (channel data with memory-mapped arrays, ROIs, annotations with
-machine-fingerprint identity tracking, session serialization, tile-based
-rendering engine with LRU cache); **ui/** (CustomTkinter [@customtkinter]
-interface with per-channel histogram controls, annotation panel with threaded
-replies, brush-mask tool, single-cell analysis dialog); **analysis/**
-(intensity ratio computation with SEM, BallTree spatial queries, MCQuant-style
-per-cell quantification via scikit-image regionprops); **segmentation/**
-(pluggable backends for Cellpose v3/v4 and DeepCell Mesmer, TIFF mask import,
-boundary overlay rendering); **io/** (multi-format loading via tifffile and
-Pillow supporting TIFF, OME-TIFF, JPEG, PNG, SVS, CZI; NPZ session files;
-CSV and image export with embedded scale bars); and **ai/** (multi-provider
-chat with OpenAI/Gemini/Claude, file version control with snapshot-based
-undo, module hot-reloading).
+FluoroView comprises 42 Python modules (~8,400 lines) in six subpackages
+(\autoref{fig:architecture}): **core/** (memory-mapped channel arrays, ROIs,
+annotations with machine-fingerprint identity tracking, session serialization,
+tile-based rendering engine); **ui/** (CustomTkinter [@customtkinter] interface
+with per-channel controls, annotation panel, analysis and phenotyping dialogs);
+**analysis/** (vectorized per-cell quantification via scipy.ndimage, BallTree
+spatial queries via scikit-learn [@scikit-learn], threshold-based phenotyping);
+**segmentation/** (pluggable Cellpose and DeepCell Mesmer backends, TIFF mask
+import, boundary overlay via scikit-image); **io/** (multi-format loading
+supporting TIFF, OME-TIFF, JPEG, PNG, SVS, CZI; multi-file channel merging;
+session files; CSV and image export); and **ai/** (multi-provider chat with
+OpenAI/Gemini/Claude, snapshot-based version control, module hot-reloading).
 
-The rendering engine uses precomputed uint16→uint8 lookup tables for
-contrast/gamma, integer screen blending without float intermediates, and
-OpenCV-accelerated resize, achieving 14.6 ms per frame (69 FPS) for 4-channel
-compositing. A 256-tile LRU cache provides instant response when panning over
-previously viewed regions. An adaptive minimap and physical scale bar (auto-
-detected from OME-TIFF metadata or user-configured) provide spatial context.
+A key design trade-off was choosing precomputed uint16$\rightarrow$uint8 lookup
+tables for contrast/gamma over per-pixel floating-point math. This sacrifices
+sub-integer precision but achieves 14.6 ms per frame (69 FPS) for 4-channel
+compositing with OpenCV-accelerated resize [@opencv] and a 256-tile LRU cache
+(\autoref{fig:viewer}). For cell quantification, we chose vectorized
+scipy.ndimage operations (single-pass mean/sum/median over all cells) over the
+conventional per-cell regionprops approach, reducing quantification of 13,000
+cells from minutes to seconds.
 
-Key capabilities include: three ROI types (rectangle, ellipse, freehand) with
-zoom-independent labels; ROI export producing per-channel masked images, raw
-intensity CSV (mean, SEM, percentiles), bar graphs, and annotation text;
-collaborative annotations with author-locked editing via device fingerprint;
-Cellpose segmentation with five model presets applicable to whole images or
-selected ROIs; four single-cell visualization modes (scatter, heatmap,
-histogram, spatial map); and complete session persistence in a single
-`.fluoroview.npz` file.
+FluoroView provides three ROI types with publication-quality export
+(\autoref{fig:rois}), Cellpose segmentation with five model presets and tiled
+parallel processing (\autoref{fig:segmentation}), simultaneous four-panel
+single-cell analysis with actual cell mask rendering (\autoref{fig:analysis}),
+and threshold-based cell phenotyping with combinatorial marker annotation (e.g.,
+Membrane^+^ ECM^-^ PanC^+^ NM^-^) and spatial visualization
+(\autoref{fig:analysis}).
 
-![FluoroView interface. (A) Main viewer showing a 4-channel multiplex fluorescence tissue image with channel controls, minimap, and scale bar. (B) Cellpose segmentation overlay with cell boundaries. (C) Single-cell scatter plot and spatial expression map. (D) ROI export folder with masked channel images, intensity statistics CSV, and analysis bar graph.\label{fig:overview}](figures/overview.png)
+# Research impact statement
+
+FluoroView was developed to support ongoing multiplex immunofluorescence research
+at Massachusetts General Hospital and Harvard Medical School, where it is
+actively used for CyCIF tissue analysis in the Division of Nuclear Medicine and
+Molecular Imaging. The software has been benchmarked on whole-slide images
+containing over 33,000 segmented cells across 5 channels, demonstrating
+real-time interactive performance (69 FPS) and complete phenotyping workflows
+with 15+ distinct cell populations. FluoroView's session persistence format
+(`.fluoroview.npz`) enables reproducible sharing of complete analysis states
+between collaborators. The combination of zero-infrastructure installation, no
+license fees, and an integrated AI assistant for customization positions
+FluoroView as accessible community infrastructure for spatial biology
+laboratories that cannot afford commercial platforms.
+
+![FluoroView software architecture showing six subpackages with data-flow boundaries and external dependencies.\label{fig:architecture}](figures/Overview.png)
+
+![Main viewer interface with 5-channel composite, per-channel windowing controls, minimap, scale bar, live analysis, and AI chat.\label{fig:viewer}](figures/Figure_1.png)
+
+![ROI tools, author-tracked annotations, and publication-quality export with per-channel masked images, statistics CSV, and bar graphs.\label{fig:rois}](figures/Figure_2.png)
+
+![Cell segmentation with Cellpose overlay, five model presets (cyto3, nuclei, cyto2, cyto, tissuenet\_cp3), and boundary visualization.\label{fig:segmentation}](figures/Figure_4.png)
+
+![Single-cell analysis and phenotyping. Top: (A) scatter, (B) heatmap, (C) histogram, (D) spatial cell masks. Bottom: threshold-based phenotyping with spatial map and count table (15 phenotypes, 13,017 cells).\label{fig:analysis}](figures/Figure_5.png)
 
 # Acknowledgements
 
 This work was supported by the Division of Nuclear Medicine and Molecular
 Imaging, Department of Radiology, Massachusetts General Hospital. The authors
 acknowledge the developers of Cellpose, MCMICRO, Minerva Story, Scope2Screen,
-DeepCell, and UnMicst for their open-source contributions that inspired
-FluoroView's design.
+DeepCell, UnMicst, and SCIMAP for their open-source contributions.
 
-# AI Usage Disclosure
+# AI usage disclosure
 
 Generative AI tools (Anthropic Claude 4.6 Opus, via the Cursor IDE) were used
 during development for code generation, refactoring, debugging, performance
-optimization, and documentation drafting. All AI-generated outputs were
-reviewed, validated, and approved by the human authors. Core architectural
-decisions—tile-based rendering, LUT-based processing, machine-fingerprint
-annotation tracking, and the modular package structure—were conceived and
-directed entirely by the authors.
+optimization, and documentation drafting. All AI-generated outputs were reviewed,
+validated, and approved by the human authors. Core architectural decisions---
+tile-based rendering with LUT lookup tables, integer screen blending, memory-
+mapped channel arrays, machine-fingerprint annotation tracking, vectorized
+scipy.ndimage cell quantification, threshold-based phenotyping with combinatorial
+annotation, and the modular package structure---were conceived and directed
+entirely by the authors.
 
 # References

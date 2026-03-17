@@ -1,9 +1,3 @@
-"""Custom Canvas-based glass-effect widgets for FluoroView.
-
-Provides premium frosted-glass UI elements using tkinter Canvas drawing:
-rounded rectangles, gradient fills, glow borders, animated hover states.
-All widgets are pure tkinter — no external dependencies.
-"""
 
 from __future__ import annotations
 
@@ -12,12 +6,7 @@ from tkinter import ttk
 from fluoroview.constants import THEME, FONTS, RADIUS
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  UTILITY: Rounded rectangle on any Canvas
-# ══════════════════════════════════════════════════════════════════════
-
 def rounded_rect(canvas: tk.Canvas, x1, y1, x2, y2, r=10, **kwargs):
-    """Draw a rounded rectangle.  Returns item id."""
     points = [
         x1 + r, y1,
         x2 - r, y1,
@@ -33,7 +22,6 @@ def rounded_rect(canvas: tk.Canvas, x1, y1, x2, y2, r=10, **kwargs):
 
 
 def hex_lerp(c1: str, c2: str, t: float) -> str:
-    """Linearly interpolate between two hex colors."""
     r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
     r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
     r = int(r1 + (r2 - r1) * t)
@@ -42,15 +30,7 @@ def hex_lerp(c1: str, c2: str, t: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  GLASS PANEL — frosted container with glow border
-# ══════════════════════════════════════════════════════════════════════
-
 class GlassPanel(tk.Canvas):
-    """A frosted-glass panel with rounded corners and subtle glow border.
-
-    Use as a container: pack child widgets into ``self.interior``.
-    """
 
     def __init__(self, parent, bg_color=None, border_color=None,
                  radius=RADIUS, pad=8, **kwargs):
@@ -70,7 +50,6 @@ class GlassPanel(tk.Canvas):
         w, h = self.winfo_width(), self.winfo_height()
         if w < 4 or h < 4:
             return
-        # Outer glow border
         rounded_rect(self, 0, 0, w - 1, h - 1, r=self._radius,
                       fill=self._bg_color, outline=self._border_color,
                       width=1, tags="bg")
@@ -78,12 +57,7 @@ class GlassPanel(tk.Canvas):
         self.itemconfig(self._win, width=w - self._pad * 2)
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  GLASS CARD — elevated card with hover lift effect
-# ══════════════════════════════════════════════════════════════════════
-
 class GlassCard(tk.Canvas):
-    """Card with subtle glass styling and hover highlight."""
 
     def __init__(self, parent, height=60, radius=8, **kwargs):
         self._radius = radius
@@ -121,12 +95,7 @@ class GlassCard(tk.Canvas):
         self._redraw()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  GLASS BUTTON — rounded button with glow hover
-# ══════════════════════════════════════════════════════════════════════
-
 class GlassButton(tk.Canvas):
-    """Premium rounded button with hover glow effect."""
 
     def __init__(self, parent, text="", icon="", command=None,
                  accent=False, width=None, height=32, **kwargs):
@@ -136,7 +105,6 @@ class GlassButton(tk.Canvas):
         self._hovering = False
         self._pressing = False
 
-        # Colors
         if accent:
             self._bg = "#0e3a4a"
             self._hover = "#154558"
@@ -194,12 +162,7 @@ class GlassButton(tk.Canvas):
             self._command()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  GLASS ICON BUTTON — circular toolbar button
-# ══════════════════════════════════════════════════════════════════════
-
 class GlassIconButton(tk.Canvas):
-    """Circular icon button with glow-on-hover for toolbars."""
 
     def __init__(self, parent, icon="", command=None, size=34,
                  accent=False, tooltip_text="", **kwargs):
@@ -222,7 +185,6 @@ class GlassIconButton(tk.Canvas):
         cx, cy = w // 2, h // 2
         r = min(w, h) // 2 - 2
         if self._hovering:
-            # Glow ring
             self.create_oval(cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2,
                              fill="", outline=THEME["ACCENT"], width=1)
             bg = THEME["BG4"] if not self._accent else "#154558"
@@ -246,12 +208,7 @@ class GlassIconButton(tk.Canvas):
             self._command()
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  GLASS SEPARATOR — gradient fade line
-# ══════════════════════════════════════════════════════════════════════
-
 class GlassSeparator(tk.Canvas):
-    """Horizontal separator with gradient fade on edges."""
 
     def __init__(self, parent, height=1, **kwargs):
         super().__init__(parent, height=height, highlightthickness=0,
@@ -263,7 +220,6 @@ class GlassSeparator(tk.Canvas):
         w = self.winfo_width()
         if w < 10:
             return
-        # Center bright, edges dark
         mid = THEME["GLASS_EDGE"]
         edge = THEME["BG"]
         steps = 20
@@ -274,21 +230,14 @@ class GlassSeparator(tk.Canvas):
             x1 = i * seg_w
             x2 = x1 + seg_w
             self.create_line(x1, 0, x2, 0, fill=c, width=1)
-            # Mirror
             x1m = w - x1 - seg_w
             x2m = x1m + seg_w
             self.create_line(x1m, 0, x2m, 0, fill=c, width=1)
-        # Center fill
         self.create_line(steps * seg_w, 0, w - steps * seg_w, 0,
                          fill=mid, width=1)
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  STATUS BAR — gradient strip with glow indicator
-# ══════════════════════════════════════════════════════════════════════
-
 class GlassStatusBar(tk.Canvas):
-    """Premium status bar with gradient background and status indicator dot."""
 
     def __init__(self, parent, textvariable=None, **kwargs):
         self._textvar = textvariable
@@ -304,16 +253,13 @@ class GlassStatusBar(tk.Canvas):
         w, h = self.winfo_width(), self.winfo_height()
         if w < 10:
             return
-        # Gradient background (BG to BG2)
         steps = 8
         sh = max(1, h // steps)
         for i in range(steps):
             c = hex_lerp(THEME["BG"], THEME["BG2"], i / steps)
             self.create_rectangle(0, i * sh, w, (i + 1) * sh,
                                   fill=c, outline="")
-        # Top border line
         self.create_line(0, 0, w, 0, fill=THEME["BORDER"], width=1)
-        # Status dot
         text = self._textvar.get() if self._textvar else ""
         dot_color = THEME["EMERALD"] if "✓" in text or "Ready" in text else \
                     THEME["AMBER"] if "⏳" in text else \
@@ -321,17 +267,11 @@ class GlassStatusBar(tk.Canvas):
                     THEME["ACCENT"]
         self.create_oval(10, h // 2 - 3, 16, h // 2 + 3,
                          fill=dot_color, outline="")
-        # Text
         self.create_text(24, h // 2, text=text, fill=THEME["FG2"],
                          font=FONTS["BODY_SMALL"], anchor="w")
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  TOOLBAR GROUP — pill-shaped container for toolbar buttons
-# ══════════════════════════════════════════════════════════════════════
-
 class ToolbarGroup(tk.Frame):
-    """Groups toolbar buttons in a frosted pill-shaped container."""
 
     def __init__(self, parent, **kwargs):
         super().__init__(parent, bg=THEME["BG2"],
@@ -340,12 +280,7 @@ class ToolbarGroup(tk.Frame):
                          padx=3, pady=2, **kwargs)
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  SECTION HEADER — gradient underline header
-# ══════════════════════════════════════════════════════════════════════
-
 class SectionHeader(tk.Canvas):
-    """Section header with icon, text, and gradient underline."""
 
     def __init__(self, parent, text="", icon="", **kwargs):
         self._text = f"{icon}  {text}" if icon else text
@@ -358,11 +293,9 @@ class SectionHeader(tk.Canvas):
         w, h = self.winfo_width(), self.winfo_height()
         if w < 10:
             return
-        # Text
         self.create_text(8, h // 2 - 2, text=self._text,
                          fill=THEME["ACCENT"], font=FONTS["HEADING"],
                          anchor="w")
-        # Gradient underline
         line_y = h - 2
         grad_w = min(w - 16, 120)
         steps = 15

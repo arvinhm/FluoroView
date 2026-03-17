@@ -1,12 +1,3 @@
-"""High-performance tile-based rendering engine.
-
-Optimisations vs. naive approach:
-  - LUT-based contrast/gamma (uint16 → uint8 lookup, no per-pixel float math)
-  - In-place uint8 screen blending (no float32 intermediates for cached tiles)
-  - OpenCV resize when available (4-8x faster than PIL)
-  - Parallel tile compositing via ThreadPoolExecutor
-  - LRU tile cache (256 tiles = ~200 MB for 512x512 RGB)
-"""
 
 from __future__ import annotations
 
@@ -20,7 +11,6 @@ from PIL import Image, ImageDraw, ImageFont
 TILE_SIZE = 512
 MAX_CACHE_TILES = 256
 
-# Try to use OpenCV for fast resize
 try:
     import cv2 as _cv2
     _HAS_CV2 = True
@@ -29,7 +19,6 @@ except Exception:
 
 
 def _fast_resize(arr: np.ndarray, w: int, h: int, interpolation: str = "lanczos"):
-    """Resize numpy array (H,W,3 uint8) using cv2 if available, else PIL."""
     if _HAS_CV2:
         inter = _cv2.INTER_NEAREST if interpolation == "nearest" else _cv2.INTER_LANCZOS4
         return _cv2.resize(arr, (w, h), interpolation=inter)
@@ -38,14 +27,8 @@ def _fast_resize(arr: np.ndarray, w: int, h: int, interpolation: str = "lanczos"
     return np.array(pil.resize((w, h), mode))
 
 
-# ── LUT-based channel processing ──────────────────────────────────────
-
 def _build_lut(cmin: float, cmax: float, brightness: float,
                gamma: float, color: tuple, max_val: int = 65535) -> np.ndarray:
-    """Build a uint16→uint8×3 lookup table for fast channel rendering.
-
-    Returns shape (max_val+1, 3) uint8 array.
-    """
     x = np.arange(max_val + 1, dtype=np.float32)
     rng = max(1.0, cmax - cmin)
     x = np.clip((x - cmin) / rng, 0, 1)
@@ -62,25 +45,17 @@ def _build_lut(cmin: float, cmax: float, brightness: float,
 
 
 def _apply_channel_lut(data: np.ndarray, lut: np.ndarray) -> np.ndarray:
-    """Apply a prebuilt LUT to raw channel data. Returns uint8 RGB."""
     idx = np.clip(data, 0, lut.shape[0] - 1).astype(np.intp)
     return lut[idx]
 
 
 def _screen_blend_u8(base: np.ndarray, layer: np.ndarray) -> np.ndarray:
-    """Screen blend two uint8 RGB arrays: 1-(1-A/255)*(1-B/255)*255.
-
-    Uses integer arithmetic to avoid float conversion.
-    """
     a = base.astype(np.uint16)
     b = layer.astype(np.uint16)
     return (a + b - (a * b) // 255).astype(np.uint8)
 
 
-# ── Public API (float path for compatibility) ─────────────────────────
-
 def _apply_channel_params(data: np.ndarray, params: dict) -> np.ndarray | None:
-    """Apply contrast/brightness/gamma/colour. Returns float32 RGB (H,W,3)."""
     if not params["visible"]:
         return None
     cmin, cmax = params["min"], params["max"]
@@ -101,12 +76,9 @@ def _apply_channel_params(data: np.ndarray, params: dict) -> np.ndarray | None:
     return rgb
 
 
-# ── Fast compositing ──────────────────────────────────────────────────
-
 def composite_region(channels, params_list: list[dict],
                      y1: int, y2: int, x1: int, x2: int,
                      use_preview: bool = False) -> np.ndarray:
-    """Render a region as composited uint8 RGB using LUT path."""
     rh, rw = y2 - y1, x2 - x1
     comp = np.zeros((rh, rw, 3), dtype=np.uint8)
 
@@ -125,10 +97,7 @@ def composite_region(channels, params_list: list[dict],
     return comp
 
 
-# ── Tile Cache ─────────────────────────────────────────────────────────
-
 class TileCache:
-    """Thread-safe LRU cache."""
 
     def __init__(self, max_size: int = MAX_CACHE_TILES):
         self._cache: OrderedDict[str, np.ndarray] = OrderedDict()
@@ -160,10 +129,7 @@ class TileCache:
         return len(self._cache)
 
 
-# ── Viewport Renderer ─────────────────────────────────────────────────
-
 class ViewportRenderer:
-    """Tile-cached viewport renderer with fast compositing."""
 
     def __init__(self, channels, executor: ThreadPoolExecutor | None = None):
         self.channels = channels
@@ -217,7 +183,6 @@ class ViewportRenderer:
         result = np.zeros((ch_, cw, 3), dtype=np.uint8)
         x = int(cw / 2 + pan[0] - dw / 2)
         y = int(ch_ / 2 + pan[1] - dh / 2)
-        # Clip paste region
         sy1, sy2 = max(0, y), min(ch_, y + dh)
         sx1, sx2 = max(0, x), min(cw, x + dw)
         ry1, ry2 = max(0, -y), max(0, -y) + (sy2 - sy1)
@@ -297,8 +262,6 @@ class ViewportRenderer:
         return "|".join(parts)
 
 
-# ── Minimap ────────────────────────────────────────────────────────────
-
 def render_minimap(channels, params_list: list[dict],
                    minimap_size: int = 150,
                    viewport_rect: tuple | None = None) -> Image.Image:
@@ -327,8 +290,6 @@ def render_minimap(channels, params_list: list[dict],
                        outline="#00ff88", width=2)
     return result
 
-
-# ── Scale Bar ──────────────────────────────────────────────────────────
 
 def render_scale_bar(canvas_w: int, canvas_h: int,
                      zoom: float, ds_factor: int,
@@ -387,10 +348,6 @@ def render_scale_bar(canvas_w: int, canvas_h: int,
 
 
 def draw_scale_bar_on_image(img: np.ndarray, pixel_size_um: float) -> np.ndarray:
-    """Burn a scale bar onto an RGB uint8 image (bottom-right).
-
-    Works with or without a pixel size — shows px units as fallback.
-    """
     h, w = img.shape[:2]
     if h < 40 or w < 80:
         return img

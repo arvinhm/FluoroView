@@ -1,4 +1,3 @@
-"""Brush-mask adjustment popup — premium CTk version."""
 
 from __future__ import annotations
 
@@ -17,7 +16,6 @@ from fluoroview.constants import IF_COLORS, NUM_WORKERS, THEME
 
 
 class MaskAdjustPopup(ctk.CTkToplevel):
-    """Brush tool to paint a mask; contrast / brightness adjustments apply inside."""
 
     def __init__(self, parent, channels, params_list, ch_names, file_name, dpi):
         super().__init__(parent)
@@ -59,7 +57,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
                      font=ctk.CTkFont(size=16, weight="bold"),
                      text_color="#0a84ff").pack(padx=12, pady=(12, 6))
 
-        # Brush controls
         bf = ctk.CTkFrame(left, corner_radius=8)
         bf.pack(fill="x", padx=8, pady=4)
         sf = ctk.CTkFrame(bf, fg_color="transparent")
@@ -75,10 +72,16 @@ class MaskAdjustPopup(ctk.CTkToplevel):
         mf = ctk.CTkFrame(bf, fg_color="transparent")
         mf.pack(fill="x", padx=8, pady=4)
         self.mode_var = tk.StringVar(value="paint")
-        ctk.CTkRadioButton(mf, text="Paint", variable=self.mode_var,
-                           value="paint").pack(side="left", padx=4)
-        ctk.CTkRadioButton(mf, text="Erase", variable=self.mode_var,
-                           value="erase").pack(side="left", padx=4)
+        self._paint_btn = ctk.CTkButton(
+            mf, text="Paint", width=80, height=28,
+            fg_color="#0a84ff", hover_color="#0070e0",
+            command=lambda: self._set_mode("paint"))
+        self._paint_btn.pack(side="left", padx=4)
+        self._erase_btn = ctk.CTkButton(
+            mf, text="Erase", width=80, height=28,
+            fg_color="#2c2e36", hover_color="#ff453a",
+            command=lambda: self._set_mode("erase"))
+        self._erase_btn.pack(side="left", padx=4)
 
         ubf = ctk.CTkFrame(bf, fg_color="transparent")
         ubf.pack(fill="x", padx=8, pady=4)
@@ -92,7 +95,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
                                       text_color="#8e8e93")
         self.mask_info.pack(pady=4)
 
-        # Channel adjustments — scrollable
         adj = ctk.CTkScrollableFrame(left, label_text="Mask Region Adjustments",
                                      corner_radius=8)
         adj.pack(fill="both", expand=True, padx=8, pady=4)
@@ -124,7 +126,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
                 side="left", fill="x", expand=True, padx=4)
             self.mask_brt_vars.append(bv)
 
-        # Bottom buttons
         zf = ctk.CTkFrame(left, fg_color="transparent")
         zf.pack(fill="x", padx=8, pady=2)
         ctk.CTkButton(zf, text="Fit", width=60, fg_color="#2c2e36",
@@ -157,9 +158,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
         self.canvas.bind("<B2-Motion>", self._on_pan_drag)
         self.canvas.bind("<Configure>", lambda e: self._schedule_update())
 
-    # ── ALL REMAINING METHODS FROM ORIGINAL (unchanged logic) ─────────
-    # These are imported from the original mask_popup.py to maintain
-    # exact functionality. Only the UI layer was changed above.
 
     def _update_brush_size(self):
         self.brush_size = self.size_var.get()
@@ -226,6 +224,15 @@ class MaskAdjustPopup(ctk.CTkToplevel):
         if len(self.mask_history) > 30:
             self.mask_history.pop(0)
 
+    def _set_mode(self, mode: str):
+        self.mode_var.set(mode)
+        if mode == "paint":
+            self._paint_btn.configure(fg_color="#0a84ff")
+            self._erase_btn.configure(fg_color="#2c2e36")
+        else:
+            self._paint_btn.configure(fg_color="#2c2e36")
+            self._erase_btn.configure(fg_color="#ff453a")
+
     def _undo(self):
         if self.mask_history:
             self.mask = self.mask_history.pop()
@@ -253,7 +260,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
             img = cd.preview.copy()
             r, g, b = bp["color"]
 
-            # Base composite
             cmin, cmax = bp["min"], bp["max"]
             if cmax <= cmin: cmax = cmin + 1
             base = np.clip((img - cmin) / (cmax - cmin), 0, 1) * bp["brightness"]
@@ -285,7 +291,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
         comp = composite_base * (1 - fm) + composite_mask * fm
         comp = np.clip(comp * 255, 0, 255).astype(np.uint8)
 
-        # Mask overlay
         overlay = np.zeros((ph, pw, 3), dtype=np.uint8)
         overlay[:, :, 0] = (self.mask * 80).astype(np.uint8)
         overlay[:, :, 2] = (self.mask * 40).astype(np.uint8)
@@ -328,7 +333,6 @@ class MaskAdjustPopup(ctk.CTkToplevel):
         self._schedule_update()
 
     def _apply_to_channel(self):
-        # Apply mask region settings back to the parent app's channel controls
         for i, ctrl in enumerate(self.parent_app.channel_controls):
             if i < len(self.mask_min_vars):
                 ctrl.min_var.set(self.mask_min_vars[i].get())

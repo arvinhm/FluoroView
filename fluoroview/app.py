@@ -1,16 +1,3 @@
-"""FluoroView v2 — main application window.
-
-Combines the refactored modules into a single cohesive application with:
-  - Multi-channel fluorescence composite viewer
-  - Session save / load (.fluoroview.npz)
-  - Annotations / notes with author-identity tracking
-  - Optional deep-learning segmentation (DeepCell Mesmer)
-  - Pre-computed mask import
-  - Segmentation outline overlay
-  - Single-cell quantification & analysis
-  - Channel grouping, gamma correction, LUT presets
-  - Spatial BallTree queries
-"""
 
 from __future__ import annotations
 
@@ -54,7 +41,6 @@ from fluoroview.ui.tooltip import ToolTip
 
 
 class FluoroView(ctk.CTk):
-    """Main application window — Apple iOS-inspired design."""
 
     def __init__(self):
         apply_dark_theme(None)
@@ -63,7 +49,6 @@ class FluoroView(ctk.CTk):
         self.geometry("1600x950")
         self.minsize(1000, 600)
 
-        # ── state ──────────────────────────────────────────────────────
         self.file_entries: dict = {}
         self.channels: list[ChannelData] = []
         self.channel_controls: list[ChannelControl] = []
@@ -91,17 +76,15 @@ class FluoroView(ctk.CTk):
         self.show_seg_overlay = False
         self.cell_data: dict | None = None
 
-        # Brush mask (integrated into main canvas)
         self.brush_mask: np.ndarray | None = None
         self.brush_mode_active = False
         self.brush_painting = False
         self.brush_erase = False
         self.brush_size = 20
         self._brush_history: list[np.ndarray] = []
-        self._brush_frame = None  # UI controls frame
+        self._brush_frame = None
 
-        # Cell group brush selection
-        self.cell_groups: dict[str, set[int]] = {}  # group_name → set of cell IDs
+        self.cell_groups: dict[str, set[int]] = {}
         self.cell_brush_active = False
         self.cell_brush_painting = False
         self.cell_brush_size = 30
@@ -125,9 +108,6 @@ class FluoroView(ctk.CTk):
         self.after(50, self._set_initial_layout)
         self.after(500, self._bg_check_deps)
 
-    # ══════════════════════════════════════════════════════════════════
-    #  UI CONSTRUCTION
-    # ══════════════════════════════════════════════════════════════════
 
     def _load_icons(self):
         from pathlib import Path
@@ -151,7 +131,6 @@ class FluoroView(ctk.CTk):
     def _build_ui(self):
         T = THEME
 
-        # ── Main 3-column PanedWindow for drag-resize ─────────────────
         self.main_pane = tk.PanedWindow(self, orient="horizontal",
                                         bg="#0a0b10", sashwidth=4,
                                         sashrelief="flat",
@@ -160,7 +139,6 @@ class FluoroView(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # ── LEFT SIDEBAR ──────────────────────────────────────────────
         left = ctk.CTkFrame(self.main_pane, width=230, corner_radius=0)
         self.main_pane.add(left, width=320, minsize=260, stretch="never")
 
@@ -179,12 +157,27 @@ class FluoroView(ctk.CTk):
                       command=self._remove_file).pack(side="right")
 
         self.file_listbox = tk.Listbox(
-            left, font=("SF Mono", 10), selectmode="single",
+            left, font=("SF Mono", 10), selectmode="extended",
             bg="#16181f", fg="#e5e5ea", selectbackground="#0a84ff",
             selectforeground="#ffffff", relief="flat", bd=0,
             highlightthickness=0, activestyle="none")
         self.file_listbox.pack(fill="both", expand=True, padx=12, pady=6)
         self.file_listbox.bind("<<ListboxSelect>>", self._on_file_select)
+
+        self._file_ctx_menu = tk.Menu(self.file_listbox, tearoff=0,
+                                      bg="#1c1e26", fg="#e5e5ea",
+                                      activebackground="#0a84ff",
+                                      activeforeground="#ffffff",
+                                      relief="flat", bd=0)
+        self._file_ctx_menu.add_command(
+            label="\U0001F500  Merge Selected as Channels",
+            command=self._merge_selected_as_channels)
+        self._file_ctx_menu.add_separator()
+        self._file_ctx_menu.add_command(
+            label="\u2715  Remove Selected",
+            command=self._remove_file)
+        self.file_listbox.bind("<Button-2>", self._show_file_ctx_menu)
+        self.file_listbox.bind("<Button-3>", self._show_file_ctx_menu)
 
         self.file_info_label = ctk.CTkLabel(left, text="No file loaded",
                                             wraplength=200, text_color="#8e8e93",
@@ -200,18 +193,15 @@ class FluoroView(ctk.CTk):
                       fg_color="#2c2e36", hover_color="#3a3c44",
                       command=self._load_session_dialog).pack(side="left", expand=True, fill="x")
 
-        # ── AI Chat panel (inline, below files) ──────────────────────
         from fluoroview.ai.chat_ui import AIChatPanel
         self._ai_chat_panel = AIChatPanel(left, self)
         self._ai_chat_panel.pack(fill="both", expand=True, padx=4, pady=(4, 8))
 
-        # ── CENTER: toolbar + canvas ──────────────────────────────────
         center = ctk.CTkFrame(self.main_pane, corner_radius=0, fg_color="transparent")
         self.main_pane.add(center, minsize=400, stretch="always")
         center.grid_rowconfigure(1, weight=1)
         center.grid_columnconfigure(0, weight=1)
 
-        # Premium toolbar
         toolbar = ctk.CTkFrame(center, height=52, corner_radius=0,
                                fg_color=T["BG2"])
         toolbar.grid(row=0, column=0, sticky="ew")
@@ -226,7 +216,6 @@ class FluoroView(ctk.CTk):
         ctk.CTkFrame(toolbar, width=1, height=24,
                      fg_color="#2c2e36").pack(side="left", padx=4, pady=12)
 
-        # ROI — segmented button
         self._roi_seg = ctk.CTkSegmentedButton(
             toolbar, values=["Rect", "Circle", "Free"],
             height=30, font=ctk.CTkFont(size=10),
@@ -283,6 +272,12 @@ class FluoroView(ctk.CTk):
                       command=self._open_cell_group_analysis)
         b_cellanalysis.pack(side="left", padx=1, pady=8)
         ToolTip(b_cellanalysis, "Cell group box plot analysis")
+        b_pheno = ctk.CTkButton(toolbar, text="P\u00b1", width=36, height=30,
+                      font=ctk.CTkFont(size=13, weight="bold"),
+                      fg_color="#1c1e26", hover_color="#bf5af2",
+                      command=self._open_phenotyping)
+        b_pheno.pack(side="left", padx=1, pady=8)
+        ToolTip(b_pheno, "Cell phenotyping")
 
         ctk.CTkFrame(toolbar, width=1, height=24,
                      fg_color="#2c2e36").pack(side="left", padx=4, pady=12)
@@ -311,17 +306,13 @@ class FluoroView(ctk.CTk):
                 "Set pixel size for scale bar\n"
                 "(e.g. 0.5 = each pixel is 0.5 \u00b5m)")
 
-        # Image canvas
         self.canvas = tk.Canvas(center, bg="#08090c", highlightthickness=0,
                                 cursor="crosshair")
         self.canvas.grid(row=1, column=0, sticky="nsew", padx=2, pady=(0, 2))
 
-        # Brush panel (hidden by default, shown when brush mode active)
         self._brush_frame = ctk.CTkFrame(center, corner_radius=0,
                                           fg_color="#1c1e26")
-        # Not shown by default; will be shown via grid() when brush mode activated
 
-        # Row 1 — brush controls
         bf_top = ctk.CTkFrame(self._brush_frame, fg_color="transparent")
         bf_top.pack(fill="x", padx=8, pady=(4, 2))
         ctk.CTkLabel(bf_top, text="Brush",
@@ -358,7 +349,6 @@ class FluoroView(ctk.CTk):
                       font=ctk.CTkFont(size=10),
                       command=self._toggle_brush_mode).pack(side="right")
 
-        # Row 2 — per-channel mask adjustments
         mask_hdr = ctk.CTkFrame(self._brush_frame, fg_color="transparent")
         mask_hdr.pack(fill="x", padx=8, pady=(2, 0))
         ctk.CTkLabel(mask_hdr, text="Mask Adjustments (live preview):",
@@ -375,7 +365,6 @@ class FluoroView(ctk.CTk):
         self._brush_ch_frame.pack(fill="x", padx=4, pady=(0, 4))
         self._brush_ch_vars: list[dict] = []
 
-        # Cell Group Brush panel (hidden by default)
         self._cell_brush_frame = ctk.CTkFrame(center, corner_radius=0,
                                                fg_color="#1c1e26")
         cb_row = ctk.CTkFrame(self._cell_brush_frame, fg_color="transparent")
@@ -406,7 +395,6 @@ class FluoroView(ctk.CTk):
                       fg_color="#ff453a", hover_color="#cc3630",
                       command=self._toggle_cell_brush).pack(side="right")
 
-        # Group list row
         cb_groups = ctk.CTkFrame(self._cell_brush_frame, fg_color="transparent")
         cb_groups.pack(fill="x", padx=8, pady=(0, 4))
         self._cell_group_list_frame = cb_groups
@@ -417,12 +405,9 @@ class FluoroView(ctk.CTk):
         right = ctk.CTkFrame(self.main_pane, width=320, corner_radius=0)
         self.main_pane.add(right, width=320, minsize=250, stretch="never")
         right.grid_columnconfigure(0, weight=1)
-        # row 0 = header, row 1 = group/seg, row 2 = channel list (expand),
-        # row 3 = apply btn, row 4 = tabs
         right.grid_rowconfigure(2, weight=3)
         right.grid_rowconfigure(4, weight=1)
 
-        # Row 0 — Channel header with ON / OFF
         ch_hdr = ctk.CTkFrame(right, fg_color="transparent")
         ch_hdr.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 2))
         ctk.CTkLabel(ch_hdr, text="\U0001F3A8  Channels",
@@ -437,7 +422,6 @@ class FluoroView(ctk.CTk):
                       font=ctk.CTkFont(size=10),
                       command=self._all_off).pack(side="right", padx=(2, 0))
 
-        # Row 1 — Group selector + seg overlay
         ctrl_row = ctk.CTkFrame(right, fg_color="transparent")
         ctrl_row.grid(row=1, column=0, sticky="ew", padx=10, pady=(2, 2))
         self.group_var = tk.StringVar(value="All")
@@ -455,18 +439,15 @@ class FluoroView(ctk.CTk):
                         command=self._schedule_update,
                         width=50, font=ctk.CTkFont(size=11)).pack(side="right")
 
-        # Row 2 — Scrollable channel list
         self.controls_frame = ctk.CTkScrollableFrame(
             right, fg_color="transparent", corner_radius=0)
         self.controls_frame.grid(row=2, column=0, sticky="nsew", padx=4, pady=4)
 
-        # Row 3 — Apply button
         ctk.CTkButton(right, text="\U0001F4CB Apply to All", height=30,
                       fg_color="#2c2e36", hover_color="#3a3c44",
                       command=self._apply_settings_to_all).grid(
             row=3, column=0, sticky="ew", padx=8, pady=4)
 
-        # Row 4 — Tabs: Analysis + Annotations
         self.tabview = ctk.CTkTabview(right, corner_radius=10, height=200)
         self.tabview.grid(row=4, column=0, sticky="nsew", padx=6, pady=(0, 8))
 
@@ -491,7 +472,6 @@ class FluoroView(ctk.CTk):
 
         self.dpi_var = tk.StringVar(value="300")
 
-        # Status bar
         self.status_var = tk.StringVar(value="\u2713  Ready \u2014 Open a folder to begin")
         status_bar = ctk.CTkFrame(self, height=30, corner_radius=0, fg_color=T["BG2"])
         status_bar.grid(row=1, column=0, sticky="ew")
@@ -500,7 +480,6 @@ class FluoroView(ctk.CTk):
                      text_color="#8e8e93").pack(side="left", padx=12)
 
     def _bg_check_deps(self):
-        """Check for Cellpose availability (no heavy import at startup)."""
         from fluoroview.segmentation import HAS_CELLPOSE
         if HAS_CELLPOSE:
             return
@@ -508,7 +487,6 @@ class FluoroView(ctk.CTk):
             "\u26A0 Cellpose not installed \u2014 click Seg to install or import masks"))
 
     def _set_initial_layout(self):
-        """Set initial PanedWindow sash positions."""
         self.update_idletasks()
         total_w = self.winfo_width()
         if total_w < 400:
@@ -520,7 +498,6 @@ class FluoroView(ctk.CTk):
             pass
 
     def _on_roi_seg_click(self, value):
-        """Handle the segmented ROI button click."""
         mode_map = {
             "Rect": "rect",
             "Circle": "circle",
@@ -530,9 +507,6 @@ class FluoroView(ctk.CTk):
         if mode:
             self._set_roi_mode(mode)
 
-    # ══════════════════════════════════════════════════════════════════
-    #  EVENT BINDINGS
-    # ══════════════════════════════════════════════════════════════════
 
     def _bind_events(self):
         self.canvas.bind("<MouseWheel>", self._on_scroll)
@@ -547,16 +521,12 @@ class FluoroView(ctk.CTk):
         self.canvas.bind("<B3-Motion>", self._on_pan_drag)
         self.canvas.bind("<Motion>", self._on_mouse_move)
         self.canvas.bind("<Configure>", lambda e: self._schedule_update())
-        # Cross-platform keyboard shortcuts (Cmd on macOS, Ctrl on Windows/Linux)
         import platform as _pf
         _mod = "Command" if _pf.system() == "Darwin" else "Control"
         self.bind(f"<{_mod}-s>", lambda e: self._save_session_dialog())
         self.bind(f"<{_mod}-o>", lambda e: self._load_session_dialog())
         self.bind(f"<{_mod}-z>", lambda e: self._undo_last_roi())
 
-    # ══════════════════════════════════════════════════════════════════
-    #  FILE MANAGEMENT
-    # ══════════════════════════════════════════════════════════════════
 
     def _open_folder(self):
         folder = filedialog.askdirectory(title="Select folder with TIF files")
@@ -599,25 +569,166 @@ class FluoroView(ctk.CTk):
             self.file_listbox.selection_set(idx)
             self._load_file(list(self.file_entries.keys())[idx])
 
+    def _show_file_ctx_menu(self, event):
+        sel = self.file_listbox.curselection()
+        if not sel:
+            return
+        merge_label = f"\U0001F500  Merge {len(sel)} Files as Channels"
+        self._file_ctx_menu.entryconfigure(0, label=merge_label,
+                                           state="normal" if len(sel) >= 2 else "disabled")
+        try:
+            self._file_ctx_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._file_ctx_menu.grab_release()
+
+    def _merge_selected_as_channels(self):
+        sel = self.file_listbox.curselection()
+        if len(sel) < 2:
+            messagebox.showinfo("Merge",
+                                "Select at least 2 files in the list, "
+                                "then right-click \u2192 Merge.")
+            return
+
+        selected_names = [self.file_listbox.get(i) for i in sel]
+
+        paths_to_merge = []
+        for name in selected_names:
+            entry = self.file_entries.get(name)
+            if entry is None:
+                continue
+            if entry[0] == "multi":
+                paths_to_merge.append(entry[1])
+            elif entry[0] == "folder":
+                messagebox.showinfo(
+                    "Merge",
+                    f'"{name}" is already a multi-channel entry.\n'
+                    f"Select individual single-channel files to merge.")
+                return
+
+        if len(paths_to_merge) < 2:
+            messagebox.showinfo("Merge", "Need at least 2 single-channel files.")
+            return
+
+        self.status_var.set(f"Merging {len(paths_to_merge)} files...")
+        self.update_idletasks()
+
+        try:
+            loaded_channels = []
+            ref_shape = None
+
+            for fp in paths_to_merge:
+                chs = load_any_image(fp)
+                if not chs:
+                    messagebox.showerror("Merge Error",
+                                         f"Could not load:\n{os.path.basename(fp)}")
+                    return
+                ch0 = chs[0]
+                shape = (ch0.full_h, ch0.full_w)
+
+                if ref_shape is None:
+                    ref_shape = shape
+                elif shape != ref_shape:
+                    messagebox.showerror(
+                        "Dimension Mismatch",
+                        f"All files must have the same dimensions.\n\n"
+                        f"First file: {ref_shape[0]} x {ref_shape[1]}\n"
+                        f"{os.path.basename(fp)}: {shape[0]} x {shape[1]}\n\n"
+                        f"Cannot merge files with different sizes.")
+                    return
+
+                loaded_channels.append(ch0)
+
+            merge_name = f"Merged ({len(loaded_channels)} ch)"
+            suffix = 0
+            while merge_name in self.file_entries:
+                suffix += 1
+                merge_name = f"Merged ({len(loaded_channels)} ch) #{suffix}"
+
+            self.file_entries[merge_name] = ("folder", paths_to_merge)
+            self.file_listbox.insert("end", merge_name)
+
+            self._save_current_settings()
+            self.current_file = merge_name
+            self.channels = loaded_channels
+            self._clear_controls()
+            self.rois = []
+            self._composite_cache = None
+            self.seg_mask = None
+            self.cell_data = None
+            self._renderer = None
+
+            for i, (ch, fp) in enumerate(zip(self.channels, paths_to_merge)):
+                raw_name = os.path.splitext(os.path.basename(fp))[0]
+                parts = raw_name.replace("-", "_").split("_")
+                ch_name = parts[-1] if len(parts) > 1 else raw_name
+                ctrl = ChannelControl(
+                    self.controls_frame, i, ch_name,
+                    vmin=ch.vmin, vmax=ch.vmax,
+                    data_max=float(ch.preview.max()),
+                    on_change=self._schedule_update,
+                    preview_data=ch.preview)
+                ctrl.pack(fill="x", padx=2)
+                self.channel_controls.append(ctrl)
+
+            if self.channels:
+                c0 = self.channels[0]
+                self.file_info_label.configure(
+                    text=f"{c0.full_h} x {c0.full_w}\n"
+                         f"{len(self.channels)} channels (merged)\n"
+                         f"Preview: {c0.preview.shape[0]}x{c0.preview.shape[1]}\n"
+                         f"DS: {c0.ds_factor}x")
+
+            self._rebuild_group_list()
+
+            self.pixel_size_um = get_pixel_size_um(paths_to_merge[0])
+            self._update_scale_btn()
+            ps_info = (f", {self.pixel_size_um:.3f}\u00b5m/px"
+                       if self.pixel_size_um > 0 else "")
+
+            self.zoom_level = 1.0
+            self.pan_offset = [0, 0]
+            self._zoom_fit()
+
+            self.file_listbox.selection_clear(0, "end")
+            idx = self.file_listbox.size() - 1
+            self.file_listbox.selection_set(idx)
+
+            ch_names = [os.path.splitext(os.path.basename(p))[0]
+                        for p in paths_to_merge]
+            self.status_var.set(
+                f"Merged {len(self.channels)} channels: "
+                f"{', '.join(ch_names)}{ps_info}")
+
+        except Exception as e:
+            messagebox.showerror("Merge Error", f"Failed to merge files:\n{e}")
+            self.status_var.set("Merge failed")
+            traceback.print_exc()
+
     def _remove_file(self):
         sel = self.file_listbox.curselection()
         if not sel:
             return
-        name = self.file_listbox.get(sel[0])
-        self.file_listbox.delete(sel[0])
-        self.file_entries.pop(name, None)
-        if name == self.current_file:
-            self.channels = []; self._clear_controls()
-            self.canvas.delete("all"); self.current_file = None
-            self.file_info_label.configure(text="No file loaded")
+        names = [self.file_listbox.get(i) for i in sel]
+        for idx in reversed(sel):
+            self.file_listbox.delete(idx)
+        for name in names:
+            self.file_entries.pop(name, None)
+            if name == self.current_file:
+                self.channels = []; self._clear_controls()
+                self.canvas.delete("all"); self.current_file = None
+                self.file_info_label.configure(text="No file loaded")
 
     def _on_file_select(self, _event):
         sel = self.file_listbox.curselection()
         if not sel:
             return
-        name = self.file_listbox.get(sel[0])
-        if name != self.current_file:
-            self._load_file(name)
+        if len(sel) == 1:
+            name = self.file_listbox.get(sel[0])
+            if name != self.current_file:
+                self._load_file(name)
+        else:
+            self.status_var.set(
+                f"{len(sel)} files selected \u2014 right-click to merge as channels")
 
     def _save_current_settings(self):
         if self.current_file and self.channel_controls:
@@ -675,7 +786,6 @@ class FluoroView(ctk.CTk):
 
             self._rebuild_group_list()
 
-            # Detect pixel size from TIFF metadata
             src_path = entry[1] if entry[0] == "multi" else entry[1][0]
             self.pixel_size_um = get_pixel_size_um(src_path)
             self._update_scale_btn()
@@ -715,9 +825,6 @@ class FluoroView(ctk.CTk):
                 self.file_settings[n] = [dict(p) for p in cur]; cnt += 1
         self.status_var.set(f"Applied settings to {cnt} sample(s)")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  CHANNEL GROUPS
-    # ══════════════════════════════════════════════════════════════════
 
     def _rebuild_group_list(self):
         vals = ["All"] + list(self.channel_groups.keys())
@@ -746,13 +853,6 @@ class FluoroView(ctk.CTk):
             c.visible_var.set(i in indices)
         self._schedule_update()
 
-    # ── channel canvas scroll helpers ──────────────────────────────────
-
-
-
-    # ══════════════════════════════════════════════════════════════════
-    #  SESSION SAVE / LOAD
-    # ══════════════════════════════════════════════════════════════════
 
     def _save_session_dialog(self):
         path = filedialog.asksaveasfilename(
@@ -805,10 +905,10 @@ class FluoroView(ctk.CTk):
                 self.current_file = None
                 idx = list(self.file_entries.keys()).index(state.current_file)
                 self.file_listbox.selection_set(idx)
-                
+
                 self.current_file = state.current_file
                 self._clear_controls()
-                
+
                 if state.channels_full and state.channels_preview:
                     from fluoroview.core.channel import ChannelData
                     self.channels = []
@@ -821,7 +921,7 @@ class FluoroView(ctk.CTk):
                             vmin = names[i].get("min", vmin)
                             vmax = names[i].get("max", vmax)
                         self.channels.append(ChannelData(
-                            path=self.current_file, full_data=full, preview=prev, 
+                            path=self.current_file, full_data=full, preview=prev,
                             ds_factor=ds, vmin=vmin, vmax=vmax))
                     self._build_channel_controls()
                 else:
@@ -835,14 +935,11 @@ class FluoroView(ctk.CTk):
             messagebox.showerror("Load Error", str(e))
             traceback.print_exc()
 
-    # ══════════════════════════════════════════════════════════════════
-    #  COMPOSITE RENDERING
-    # ══════════════════════════════════════════════════════════════════
 
     def _schedule_update(self):
         if not self._update_pending:
             self._update_pending = True
-            self.after(16, self._do_update)  # ~60fps target
+            self.after(16, self._do_update)
 
     def _do_update(self):
         self._update_pending = False
@@ -864,15 +961,12 @@ class FluoroView(ctk.CTk):
             cw, ch_, self.zoom_level, self.pan_offset,
             params_list, self.seg_mask, self.seg_overlay_var.get())
 
-        # Brush mask overlay — semi-transparent red tint where painted
         if self.brush_mode_active and self.brush_mask is not None:
             pil = self._overlay_brush_mask(pil, cw, ch_)
 
-        # Draw ROI / annotation overlays onto the PIL image
         draw = ImageDraw.Draw(pil)
         self._draw_overlays(draw, cw, ch_)
 
-        # Minimap overlay (top-right corner)
         if self.show_minimap and self.channels:
             c0 = self.channels[0]
             ds = c0.ds_factor
@@ -887,7 +981,6 @@ class FluoroView(ctk.CTk):
             pil.paste(mm, (cw - mm.width - 8, 8),
                       mm if mm.mode == "RGBA" else None)
 
-        # Scale bar overlay (bottom-right)
         if self.show_scale_bar:
             ds = self.channels[0].ds_factor if self.channels else 1
             sb = render_scale_bar(cw, ch_, self.zoom_level, ds,
@@ -900,7 +993,6 @@ class FluoroView(ctk.CTk):
         self.canvas.create_image(0, 0, image=self._tk_image, anchor="nw")
 
     def _overlay_brush_mask(self, pil: Image.Image, cw: int, ch_: int) -> Image.Image:
-        """Live preview: show adjusted image inside mask, red tint on edges."""
         if self.brush_mask is None or not self.channels:
             return pil
         from fluoroview.core.tile_engine import _apply_channel_params
@@ -914,7 +1006,6 @@ class FluoroView(ctk.CTk):
         mask = self.brush_mask
         has_adjustments = False
 
-        # Check if user has changed any sliders from the original
         if hasattr(self, '_brush_ch_vars') and self._brush_ch_vars:
             for d in self._brush_ch_vars:
                 idx = d["index"]
@@ -929,7 +1020,6 @@ class FluoroView(ctk.CTk):
                     break
 
         if has_adjustments:
-            # Render the adjusted composite at preview resolution
             adj_comp = np.zeros((ih, iw, 3), dtype=np.float32)
             for d in self._brush_ch_vars:
                 idx = d["index"]
@@ -950,7 +1040,6 @@ class FluoroView(ctk.CTk):
             adj_pil = Image.fromarray(adj_comp).resize(
                 (dw, dh), Image.NEAREST if self.zoom_level > 2 else Image.LANCZOS)
 
-            # Blend: inside mask = adjusted, outside = original
             mask_resized = Image.fromarray(
                 (mask * 255).astype(np.uint8), "L").resize((dw, dh), Image.LANCZOS)
 
@@ -959,10 +1048,8 @@ class FluoroView(ctk.CTk):
 
             pil_arr = np.array(pil)
             over_arr = np.array(full_overlay)
-            # Build screen-space alpha from positioned mask
             alpha_full = np.zeros((ch_, cw), dtype=np.float32)
             ma = np.array(mask_resized).astype(np.float32) / 255.0
-            # Clip paste region
             py1, py2 = max(0, oy), min(ch_, oy + dh)
             px1, px2 = max(0, ox), min(cw, ox + dw)
             my1, my2 = max(0, -oy), my1 + (py2 - py1) if (my1 := max(0, -oy)) is not None else 0
@@ -975,7 +1062,6 @@ class FluoroView(ctk.CTk):
             a3 = alpha_full[:, :, np.newaxis]
             blended = (pil_arr * (1 - a3) + over_arr * a3).astype(np.uint8)
 
-            # Add thin red border on mask edge
             from scipy.ndimage import binary_dilation, binary_erosion
             m_bool = alpha_full > 0.3
             edge = binary_dilation(m_bool, iterations=1) ^ m_bool
@@ -983,7 +1069,6 @@ class FluoroView(ctk.CTk):
 
             return Image.fromarray(blended)
         else:
-            # No adjustments yet — just show red tint where mask is painted
             mask_img = Image.fromarray((mask * 255).astype(np.uint8), "L")
             mask_resized = mask_img.resize((dw, dh), Image.NEAREST)
 
@@ -998,7 +1083,6 @@ class FluoroView(ctk.CTk):
             return pil.convert("RGB")
 
     def _draw_overlays(self, draw, cw, ch_):
-        """Draw ROIs, annotations, freehand onto *draw* at fixed screen size."""
         if not self.channels:
             return
         ih, iw = self.channels[0].preview.shape
@@ -1007,12 +1091,11 @@ class FluoroView(ctk.CTk):
         z = self.zoom_level
         fnt = self._label_font
         fnt_sm = self._label_font_sm
-        LW = 2  # fixed line width in screen pixels
+        LW = 2
 
         def _img2scr(px, py):
             return int(px * z) + ox, int(py * z) + oy
 
-        # ROIs
         if self.rois and self.show_rois:
             for roi in self.rois:
                 rx1, ry1, rx2, ry2 = roi.bbox
@@ -1031,13 +1114,11 @@ class FluoroView(ctk.CTk):
                     draw.rectangle([sx1, sy1, sx2, sy2], outline=rc, width=LW)
                     for cx, cy in [(sx1, sy1), (sx2, sy1), (sx1, sy2), (sx2, sy2)]:
                         draw.rectangle([cx - 3, cy - 3, cx + 3, cy + 3], fill=rc)
-                # Label — always 13px, never scales
                 draw.text((sx1 + 5, sy1 - 18), roi.name, fill="#000000",
                           font=fnt, anchor="lt")
                 draw.text((sx1 + 4, sy1 - 19), roi.name, fill=rc,
                           font=fnt, anchor="lt")
 
-        # In-progress rect/circle ROI preview
         if self._temp_roi_bbox is not None and self.roi_drawing:
             tx1, ty1, tx2, ty2 = self._temp_roi_bbox
             tsx1, tsy1 = _img2scr(tx1, ty1)
@@ -1049,7 +1130,6 @@ class FluoroView(ctk.CTk):
                 draw.rectangle([tsx1, tsy1, tsx2, tsy2],
                                outline="#ffff00", width=LW)
 
-        # Freehand in-progress
         if self.roi_freehand_pts and self.roi_mode == "freehand":
             pts = [_img2scr(px, py) for px, py in self.roi_freehand_pts]
             for j in range(len(pts) - 1):
@@ -1063,7 +1143,6 @@ class FluoroView(ctk.CTk):
                 draw.text((pts[0][0] + 8, pts[0][1] - 12), "click to close",
                           fill="#ff4444", font=fnt_sm)
 
-        # Annotation pins — fixed 8px radius, fixed font
         if self.annotations and self.annotation_panel.show_annotations:
             PR = 8
             for ann in self.annotations:
@@ -1081,7 +1160,6 @@ class FluoroView(ctk.CTk):
                           fill=col, font=fnt, anchor="lt")
 
     def _display_array(self, rgb):
-        """Legacy display path — used by export functions."""
         if rgb is None:
             return
         cw = self.canvas.winfo_width(); ch_ = self.canvas.winfo_height()
@@ -1102,9 +1180,6 @@ class FluoroView(ctk.CTk):
         self.canvas.delete("all")
         self.canvas.create_image(0, 0, image=self._tk_image, anchor="nw")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  ANALYSIS GRAPH
-    # ══════════════════════════════════════════════════════════════════
 
     def _update_analysis_graph(self):
         T = THEME
@@ -1142,7 +1217,6 @@ class FluoroView(ctk.CTk):
         nb = len(ratios)
         bw = max(10, pw // max(1, nb) - 8)
         gap = max(4, (pw - nb * bw) // max(1, nb + 1))
-        # Axes
         c.create_line(ml, mt, ml, h - mb, fill=T["CHART_GRID"], width=1)
         c.create_line(ml, h - mb, w - mr, h - mb, fill=T["CHART_GRID"], width=1)
         c.create_text(12, h // 2, text="Mean\u00b1SEM", anchor="center", angle=90,
@@ -1170,9 +1244,6 @@ class FluoroView(ctk.CTk):
             c.create_text(x + bw // 2, h - mb + 4, text=names[i], anchor="n",
                           fill=T["CHART_TEXT"], font=("SF Pro Display", 8))
 
-    # ══════════════════════════════════════════════════════════════════
-    #  ZOOM / PAN
-    # ══════════════════════════════════════════════════════════════════
 
     def _on_scroll(self, event):
         if event.num == 4 or event.delta > 0:
@@ -1204,7 +1275,6 @@ class FluoroView(ctk.CTk):
         self._schedule_update()
 
     def _set_pixel_size(self):
-        """Ask user for pixel size in microns and update the scale bar."""
         from tkinter import simpledialog
         current = self.pixel_size_um
         msg = (
@@ -1227,7 +1297,6 @@ class FluoroView(ctk.CTk):
                 f"scale bar updated")
 
     def _update_scale_btn(self):
-        """Update the scale button label to show current pixel size."""
         if self.pixel_size_um > 0:
             self.scale_btn.configure(
                 text=f"\U0001F4CF {self.pixel_size_um:.2f}\u00b5m",
@@ -1256,32 +1325,25 @@ class FluoroView(ctk.CTk):
         it = cy - (ih * self.zoom_level) / 2
         return (ex - il) / self.zoom_level, (ey - it) / self.zoom_level
 
-    # ══════════════════════════════════════════════════════════════════
-    #  MOUSE EVENTS — ROI drawing + annotation pins
-    # ══════════════════════════════════════════════════════════════════
 
     def _on_mouse_press(self, event):
-        # Scale bar click — bottom-right 130x40 area
         cw = self.canvas.winfo_width()
         ch_ = self.canvas.winfo_height()
         if event.x > cw - 150 and event.y > ch_ - 50:
             self._set_pixel_size()
             return
 
-        # Cell group brush intercept
         if self.cell_brush_active:
             self.cell_brush_painting = True
             self._cell_brush_paint_at(event.x, event.y)
             return
 
-        # Brush mode intercept
         if self.brush_mode_active:
             self._brush_save_undo()
             self.brush_painting = True
             self._brush_paint_at(event.x, event.y)
             return
 
-        # Annotation pin mode
         if self.annotation_pin_mode:
             px, py = self._canvas_to_image(event.x, event.y)
             if px is not None:
@@ -1318,12 +1380,10 @@ class FluoroView(ctk.CTk):
             self._pan_so = list(self.pan_offset)
 
     def _on_mouse_drag(self, event):
-        # Cell group brush intercept
         if self.cell_brush_active and self.cell_brush_painting:
             self._cell_brush_paint_at(event.x, event.y)
             return
 
-        # Brush mode intercept
         if self.brush_mode_active and self.brush_painting:
             self._brush_paint_at(event.x, event.y)
             return
@@ -1345,12 +1405,10 @@ class FluoroView(ctk.CTk):
             self._schedule_update()
 
     def _on_mouse_release(self, event):
-        # Cell brush — stop
         if self.cell_brush_active:
             self.cell_brush_painting = False
             return
 
-        # Brush mode — stop painting
         if self.brush_mode_active:
             self.brush_painting = False
             return
@@ -1380,9 +1438,6 @@ class FluoroView(ctk.CTk):
                 return
         self.coord_label.configure(text="")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  ROI ACTIONS
-    # ══════════════════════════════════════════════════════════════════
 
     def _set_roi_mode(self, mode):
         self.roi_mode = mode; self.roi_drawing = True
@@ -1408,7 +1463,6 @@ class FluoroView(ctk.CTk):
         self.status_var.set(f"ROIs {'visible' if self.show_rois else 'hidden'}")
 
     def _pan_to_annotation(self, ann: Annotation):
-        """Pan the view so annotation *ann* is centered."""
         if not self.channels:
             return
         ih, iw = self.channels[0].preview.shape
@@ -1416,9 +1470,6 @@ class FluoroView(ctk.CTk):
         self.pan_offset[1] = -(ann.y - ih / 2) * self.zoom_level
         self._schedule_update()
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SAVE / EXPORT
-    # ══════════════════════════════════════════════════════════════════
 
     def _render_fullres(self, region=None, params_list=None):
         if not self.channels:
@@ -1513,7 +1564,6 @@ class FluoroView(ctk.CTk):
                         rgb_sb = draw_scale_bar_on_image(rgb, pixel_um)
                         Image.fromarray(rgb_sb).save(
                             os.path.join(rf, f"{roi.name}-merged.tif"))
-                    # Build ROI mask once for per-channel exports
                     rh_ch, rw_ch = fy2 - fy1, fx2 - fx1
                     if roi.roi_type != "rect":
                         ch_mask = roi.get_mask(
@@ -1521,7 +1571,6 @@ class FluoroView(ctk.CTk):
                     else:
                         ch_mask = None
 
-                    # ── Per-channel images ──
                     ch_names_list = []
                     ch_means = []
                     ch_sems = []
@@ -1550,7 +1599,6 @@ class FluoroView(ctk.CTk):
                         Image.fromarray(cr_sb).save(
                             os.path.join(rf, f"{roi.name}-{p.get('name', f'ch{i+1}')}.tif"))
 
-                        # Collect stats (inside ROI mask)
                         if ch_mask is not None:
                             pixels = cn[ch_mask[:fh, :fw] > 0]
                         else:
@@ -1566,7 +1614,6 @@ class FluoroView(ctk.CTk):
                             ch_means.append(0.0)
                             ch_sems.append(0.0)
 
-                    # ── CSV stats ──
                     import csv
                     csv_path = os.path.join(rf, f"{roi.name}-stats.csv")
                     with open(csv_path, "w", newline="") as f:
@@ -1610,7 +1657,6 @@ class FluoroView(ctk.CTk):
                             else:
                                 w.writerow([nm, cn] + [0] * 13)
 
-                    # ── Bar graph PNG ──
                     try:
                         import matplotlib
                         matplotlib.use("Agg")
@@ -1643,10 +1689,8 @@ class FluoroView(ctk.CTk):
                     except Exception:
                         pass
 
-                    # ── Notes text file ──
                     roi_notes = [a for a in annotations_copy
                                  if a.linked_roi == roi.name]
-                    # Also include notes positioned inside this ROI
                     for a in annotations_copy:
                         if a.linked_roi is None:
                             if (x1 <= a.x <= x2 and y1 <= a.y <= y2
@@ -1672,7 +1716,6 @@ class FluoroView(ctk.CTk):
                 err = str(ex)
                 self.after(0, lambda: messagebox.showerror("Error", err))
 
-        # Capture annotations in main thread (thread safety)
         annotations_copy = list(self.annotations)
         threading.Thread(target=_do, daemon=True).start()
 
@@ -1689,21 +1732,15 @@ class FluoroView(ctk.CTk):
         export_roi_csv(path, self.channels, params_list, self.rois, self.annotations)
         self.status_var.set(f"CSV → {os.path.basename(path)}")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  POPUPS
-    # ══════════════════════════════════════════════════════════════════
 
     def _open_mask_popup(self):
-        """Toggle brush mask mode on the main canvas."""
         if not self.channels:
             return
         self._toggle_brush_mode()
 
     def _toggle_brush_mode(self):
-        """Toggle brush painting mode on/off."""
         self.brush_mode_active = not self.brush_mode_active
         if self.brush_mode_active:
-            # Initialize mask if needed
             if self.brush_mask is None or self.brush_mask.shape != self.channels[0].preview.shape:
                 h, w = self.channels[0].preview.shape
                 self.brush_mask = np.zeros((h, w), dtype=np.float32)
@@ -1718,7 +1755,6 @@ class FluoroView(ctk.CTk):
         self._schedule_update()
 
     def _brush_populate_channels(self):
-        """Populate per-channel adjustment cards in the brush panel."""
         for w in self._brush_ch_frame.winfo_children():
             w.destroy()
         self._brush_ch_vars.clear()
@@ -1778,7 +1814,6 @@ class FluoroView(ctk.CTk):
             self._brush_ch_vars.append(d)
 
     def _brush_apply_channel(self, idx):
-        """Apply adjustments to channel preview inside the mask (fast)."""
         if idx >= len(self._brush_ch_vars) or idx >= len(self.channels):
             return
         if self.brush_mask is None:
@@ -1800,7 +1835,6 @@ class FluoroView(ctk.CTk):
         gam_ = d["gamma"].get()
         rng = max(1, mx_ - mn_)
 
-        # Apply to preview (instant)
         px = ch.preview[mask_px].astype(np.float64)
         normed = np.clip((px - mn_) / rng, 0, 1)
         if abs(gam_ - 1.0) > 0.01:
@@ -1812,7 +1846,6 @@ class FluoroView(ctk.CTk):
         ch.preview[mask_px] = (px * (1 - alpha) + normed * prev_max * alpha).astype(
             ch.preview.dtype)
 
-        # Apply to full_data in background thread (non-blocking)
         ds = ch.ds_factor
         self.status_var.set(f"\u23F3 Applying to full-res ({ch.full_h}x{ch.full_w})...")
         self.update_idletasks()
@@ -1841,19 +1874,16 @@ class FluoroView(ctk.CTk):
                 self.after(0, lambda: self.status_var.set(f"\u274C Apply failed: {ex}"))
         threading.Thread(target=_bg, daemon=True).start()
 
-        # Invalidate tile cache so preview updates immediately
         if self._renderer:
             self._renderer.invalidate()
         self._schedule_update()
 
     def _brush_apply_all(self):
-        """Apply mask adjustments to all channels."""
         for i in range(len(self._brush_ch_vars)):
             self._brush_apply_channel(i)
         self.status_var.set("\u2705 Applied to all channels")
 
     def _brush_paint_at(self, sx, sy):
-        """Paint or erase at screen coords."""
         px, py = self._canvas_to_image(sx, sy)
         if px is None or self.brush_mask is None:
             return
@@ -1871,7 +1901,6 @@ class FluoroView(ctk.CTk):
             self.brush_mask[y1:y2, x1:x2][circle] = 1.0
         else:
             self.brush_mask[y1:y2, x1:x2][circle] = 0.0
-        # Update percentage
         try:
             pct = 100.0 * np.sum(self.brush_mask > 0.5) / max(1, self.brush_mask.size)
             self._brush_pct_label.configure(text=f"{pct:.1f}%")
@@ -1897,12 +1926,8 @@ class FluoroView(ctk.CTk):
             self._brush_pct_label.configure(text="0%")
             self._schedule_update()
 
-    # ══════════════════════════════════════════════════════════════════
-    #  CELL GROUP BRUSH
-    # ══════════════════════════════════════════════════════════════════
 
     def _toggle_cell_brush(self):
-        """Toggle cell group brush mode."""
         if self.seg_mask is None:
             from tkinter import messagebox
             messagebox.showinfo("No segmentation",
@@ -1923,7 +1948,6 @@ class FluoroView(ctk.CTk):
         self._schedule_update()
 
     def _cell_brush_new_group(self):
-        """Create a new group name from the entry field."""
         name = self._cell_group_entry.get().strip()
         if not name:
             return
@@ -1934,14 +1958,12 @@ class FluoroView(ctk.CTk):
         self.status_var.set(f"Painting cells → \"{name}\"")
 
     def _cell_brush_paint_at(self, sx, sy):
-        """Select cells under the brush cursor and add to current group."""
         if self.seg_mask is None:
             return
         px, py = self._canvas_to_image(sx, sy)
         if px is None:
             return
         ds = self.channels[0].ds_factor if self.channels else 1
-        # Find full-res coords
         fx, fy = int(px * ds), int(py * ds)
         fh, fw = self.seg_mask.shape
         bs = max(1, int(self.cell_brush_size / self.zoom_level * ds))
@@ -1951,7 +1973,7 @@ class FluoroView(ctk.CTk):
             return
         region = self.seg_mask[y1:y2, x1:x2]
         cell_ids = set(np.unique(region))
-        cell_ids.discard(0)  # remove background
+        cell_ids.discard(0)
         if not cell_ids:
             return
         name = self.current_cell_group
@@ -1962,7 +1984,6 @@ class FluoroView(ctk.CTk):
         self._schedule_update()
 
     def _update_cell_group_list(self):
-        """Refresh the group list display in the cell brush panel."""
         for w in self._cell_group_list_frame.winfo_children():
             w.destroy()
         if not self.cell_groups:
@@ -1984,7 +2005,6 @@ class FluoroView(ctk.CTk):
                 side="left", padx=1)
 
     def _select_cell_group(self, name):
-        """Switch to an existing group for painting."""
         self.current_cell_group = name
         self._cell_group_entry.delete(0, "end")
         self._cell_group_entry.insert(0, name)
@@ -1992,7 +2012,6 @@ class FluoroView(ctk.CTk):
         self.status_var.set(f"Painting cells → \"{name}\" ({len(self.cell_groups.get(name, set()))} cells)")
 
     def _render_cell_group_overlay(self, comp):
-        """Overlay cell groups with distinct colors on the composite."""
         if not self.cell_groups or self.seg_mask is None:
             return comp
         import colorsys
@@ -2024,7 +2043,6 @@ class FluoroView(ctk.CTk):
         return overlay
 
     def _open_cell_group_analysis(self):
-        """Open the cell group box plot analysis window."""
         if not self.cell_groups:
             from tkinter import messagebox
             messagebox.showinfo("No groups",
@@ -2041,9 +2059,6 @@ class FluoroView(ctk.CTk):
         CellGroupAnalysis(self, self.channels, self.channel_controls,
                           self.seg_mask, self.cell_groups)
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SEGMENTATION
-    # ══════════════════════════════════════════════════════════════════
 
     def _segmentation_menu(self):
         T = THEME
@@ -2116,7 +2131,6 @@ class FluoroView(ctk.CTk):
             messagebox.showerror("Error", str(ex))
 
     def _run_cellpose(self, model_type: str = "cyto3", rois_only: bool = False):
-        """Run Cellpose segmentation — full image or within ROIs."""
         if not self.channels:
             messagebox.showinfo("No data", "Load an image first.")
             return
@@ -2233,42 +2247,239 @@ class FluoroView(ctk.CTk):
         self._schedule_update()
         self.status_var.set("Segmentation cleared")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SINGLE-CELL ANALYSIS
-    # ══════════════════════════════════════════════════════════════════
+
+    def _get_viewport_fullres_bounds(self):
+        if not self.channels:
+            return None
+        c0 = self.channels[0]
+        ds = c0.ds_factor
+        full_h, full_w = c0.full_h, c0.full_w
+        cw = self.canvas.winfo_width()
+        ch_ = self.canvas.winfo_height()
+        if cw < 10 or ch_ < 10:
+            return None
+
+        use_fullres = self.zoom_level > ds * 0.5
+        if use_fullres:
+            fz = self.zoom_level / ds
+            cx_f = full_w / 2 - self.pan_offset[0] / fz
+            cy_f = full_h / 2 - self.pan_offset[1] / fz
+            hvw = cw / 2 / fz
+            hvh = ch_ / 2 / fz
+        else:
+            prev_h, prev_w = c0.preview.shape
+            cx_p = prev_w / 2 - self.pan_offset[0] / self.zoom_level
+            cy_p = prev_h / 2 - self.pan_offset[1] / self.zoom_level
+            vw = cw / self.zoom_level / 2
+            vh = ch_ / self.zoom_level / 2
+            cx_f = cx_p * ds
+            cy_f = cy_p * ds
+            hvw = vw * ds
+            hvh = vh * ds
+
+        x1 = int(max(0, cx_f - hvw))
+        y1 = int(max(0, cy_f - hvh))
+        x2 = int(min(full_w, cx_f + hvw))
+        y2 = int(min(full_h, cy_f + hvh))
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return y1, y2, x1, x2
 
     def _open_cell_analysis(self):
         if self.seg_mask is None:
             messagebox.showinfo("No segmentation",
                                 "Import or run segmentation first (Seg button).")
             return
-        if self.cell_data is None:
-            self.status_var.set("Quantifying cells...")
-            self.update_idletasks()
-            from fluoroview.analysis.quantification import quantify_cells
-            params_list = [c.get_params() for c in self.channel_controls]
-            ch_names = [p.get("name", f"ch{i + 1}") for i, p in enumerate(params_list)]
-            ch_arrays = [cd.full_data for cd in self.channels]
-            self.cell_data = quantify_cells(self.seg_mask, ch_arrays, ch_names)
-            self.status_var.set(f"Quantified {len(self.cell_data['cell_id'])} cells")
+
+        has_roi = bool(self.rois)
+        vp_bounds = self._get_viewport_fullres_bounds()
+        full_h = self.channels[0].full_h if self.channels else 0
+        full_w = self.channels[0].full_w if self.channels else 0
+        n_total = int(self.seg_mask.max())
+
+        scope_win = ctk.CTkToplevel(self)
+        scope_win.title("Cell Analysis \u2014 Select Region")
+        scope_win.geometry("460x340")
+        scope_win.transient(self)
+        scope_win.grab_set()
+        scope_win.configure(fg_color="#0a0b10")
+
+        ctk.CTkLabel(scope_win,
+                     text="Select analysis region",
+                     font=ctk.CTkFont(size=16, weight="bold"),
+                     text_color="#0a84ff").pack(pady=(16, 4))
+
+        ctk.CTkLabel(scope_win,
+                     text=f"Segmentation mask: {full_h} \u00d7 {full_w}  "
+                          f"({n_total:,} cells total)",
+                     font=ctk.CTkFont(size=11),
+                     text_color="#8e8e93").pack(pady=(0, 12))
+
+        fr = ctk.CTkFrame(scope_win, fg_color="transparent")
+        fr.pack(fill="x", padx=24, pady=4)
+
+        def _pick(scope):
+            scope_win.destroy()
+            self._run_cell_analysis(scope)
+
+        if has_roi:
+            roi_names = ", ".join(r.name for r in self.rois[:3])
+            if len(self.rois) > 3:
+                roi_names += f" +{len(self.rois) - 3} more"
+            roi_label = f"\U0001F4CD  ROIs ({len(self.rois)}): {roi_names}"
+        else:
+            roi_label = "\U0001F4CD  ROIs \u2014 no ROIs drawn"
+        ctk.CTkButton(
+            fr, text=roi_label, height=40, anchor="w",
+            font=ctk.CTkFont(size=12),
+            fg_color="#1c1e26" if has_roi else "#111318",
+            hover_color="#30d158" if has_roi else "#111318",
+            text_color="#e5e5ea" if has_roi else "#48494e",
+            state="normal" if has_roi else "disabled",
+            command=lambda: _pick("roi")).pack(fill="x", pady=3)
+
+        if vp_bounds:
+            vy1, vy2, vx1, vx2 = vp_bounds
+            vp_cells = len(np.unique(self.seg_mask[vy1:vy2, vx1:vx2])) - 1
+            view_label = (f"\U0001F50D  Current view "
+                          f"({vx2 - vx1} \u00d7 {vy2 - vy1} px, "
+                          f"~{max(0, vp_cells):,} cells)")
+        else:
+            view_label = "\U0001F50D  Current view"
+        ctk.CTkButton(
+            fr, text=view_label, height=40, anchor="w",
+            font=ctk.CTkFont(size=12),
+            fg_color="#1c1e26", hover_color="#0a84ff",
+            text_color="#e5e5ea",
+            command=lambda: _pick("view")).pack(fill="x", pady=3)
+
+        slide_label = (f"\U0001F5BC  Entire slide "
+                       f"({full_w} \u00d7 {full_h} px, "
+                       f"{n_total:,} cells) \u2014 may be slow")
+        ctk.CTkButton(
+            fr, text=slide_label, height=40, anchor="w",
+            font=ctk.CTkFont(size=12),
+            fg_color="#1c1e26", hover_color="#ff9f0a",
+            text_color="#e5e5ea",
+            command=lambda: _pick("full")).pack(fill="x", pady=3)
+
+        ctk.CTkButton(scope_win, text="Cancel", height=30,
+                      fg_color="#2c2e36", hover_color="#3a3c44",
+                      command=scope_win.destroy).pack(fill="x", padx=24, pady=(12, 12))
+
+    def _run_cell_analysis(self, scope):
+        from fluoroview.analysis.quantification import quantify_cells, quantify_cells_region
 
         params_list = [c.get_params() for c in self.channel_controls]
         ch_names = [p.get("name", f"ch{i + 1}") for i, p in enumerate(params_list)]
-        from fluoroview.ui.popups.cell_analysis import CellAnalysisPopup
-        CellAnalysisPopup(self, self.cell_data, self.seg_mask, ch_names)
+        ch_arrays = [cd.full_data for cd in self.channels]
+        ds = self.channels[0].ds_factor if self.channels else 1
 
-    # ══════════════════════════════════════════════════════════════════
-    #  AI ASSISTANT
-    # ══════════════════════════════════════════════════════════════════
+        if scope == "roi" and self.rois:
+            bx1 = min(r.bbox[0] for r in self.rois)
+            by1 = min(r.bbox[1] for r in self.rois)
+            bx2 = max(r.bbox[2] for r in self.rois)
+            by2 = max(r.bbox[3] for r in self.rois)
+            fy1 = int(max(0, by1 * ds))
+            fx1 = int(max(0, bx1 * ds))
+            fy2 = int(min(self.seg_mask.shape[0], by2 * ds))
+            fx2 = int(min(self.seg_mask.shape[1], bx2 * ds))
+            roi_desc = (self.rois[0].name if len(self.rois) == 1
+                        else f"{len(self.rois)} ROIs")
+            region_desc = f"{roi_desc} ({fx2 - fx1} x {fy2 - fy1} px)"
+            bounds = (fy1, fy2, fx1, fx2)
+        elif scope == "view":
+            bounds = self._get_viewport_fullres_bounds()
+            if bounds is None:
+                bounds = (0, self.seg_mask.shape[0], 0, self.seg_mask.shape[1])
+            region_desc = (f"Current view ({bounds[3] - bounds[2]} x "
+                           f"{bounds[1] - bounds[0]} px)")
+        else:
+            bounds = None
+            region_desc = "Entire slide"
+
+        self.status_var.set(f"\u23F3 Quantifying cells in {region_desc}...")
+        self.update_idletasks()
+
+        def _worker():
+            try:
+                if bounds is not None:
+                    y1, y2, x1, x2 = bounds
+                    cell_data = quantify_cells_region(
+                        self.seg_mask, ch_arrays, ch_names, y1, y2, x1, x2)
+                else:
+                    cell_data = quantify_cells(self.seg_mask, ch_arrays, ch_names)
+
+                n = len(cell_data["cell_id"])
+                self.cell_data = cell_data
+
+                def _show():
+                    self.status_var.set(
+                        f"\u2705 Quantified {n} cells in {region_desc}")
+                    if n == 0:
+                        messagebox.showinfo(
+                            "No cells",
+                            f"No segmented cells found in {region_desc}.\n"
+                            f"Try a larger region or check your segmentation mask.")
+                        return
+                    seg_crop = self.seg_mask
+                    if bounds is not None:
+                        seg_crop = self.seg_mask[bounds[0]:bounds[1],
+                                                 bounds[2]:bounds[3]]
+                    from fluoroview.ui.popups.cell_analysis import CellAnalysisPopup
+                    CellAnalysisPopup(self, cell_data, seg_crop, ch_names)
+
+                self.after(0, _show)
+
+            except Exception as ex:
+                err = str(ex)
+                self.after(0, lambda: messagebox.showerror(
+                    "Analysis Error", f"Cell analysis failed:\n{err}"))
+                self.after(0, lambda: self.status_var.set(
+                    "\u274C Cell analysis failed"))
+                import traceback; traceback.print_exc()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _open_phenotyping(self):
+        if self.seg_mask is None:
+            messagebox.showinfo(
+                "No segmentation",
+                "Import or run segmentation first (Seg button).")
+            return
+
+        params_list = [c.get_params() for c in self.channel_controls]
+        ch_names = [p.get("name", f"ch{i + 1}") for i, p in enumerate(params_list)]
+
+        if self.cell_data is None:
+            from fluoroview.analysis.quantification import quantify_cells_region
+            vp = self._get_viewport_fullres_bounds()
+            if vp is None:
+                vp = (0, self.seg_mask.shape[0], 0, self.seg_mask.shape[1])
+            y1, y2, x1, x2 = vp
+            self.status_var.set("\u23F3 Quantifying cells for phenotyping...")
+            self.update_idletasks()
+            ch_arrays = [cd.full_data for cd in self.channels]
+            self.cell_data = quantify_cells_region(
+                self.seg_mask, ch_arrays, ch_names, y1, y2, x1, x2)
+            n = len(self.cell_data["cell_id"])
+            self.status_var.set(f"Quantified {n:,} cells")
+
+        if len(self.cell_data["cell_id"]) == 0:
+            messagebox.showinfo("No cells",
+                                "No segmented cells found. Try running "
+                                "cell analysis first on a region with cells.")
+            return
+
+        from fluoroview.ui.popups.phenotype_popup import PhenotypePopup
+        PhenotypePopup(self, self.cell_data, self.seg_mask, ch_names)
+
 
     def _open_ai_chat(self):
-        """Focus the AI chat input in the left sidebar."""
         if hasattr(self, '_ai_chat_panel') and hasattr(self._ai_chat_panel, '_input_entry'):
             self._ai_chat_panel._input_entry.focus_set()
             self.status_var.set("AI chat ready")
 
-
-# ── Load UI fonts once (fixed screen-space size) ────────────────────
 
 def _load_ui_font(size: int):
     import platform as _pf
@@ -2292,7 +2503,6 @@ def _load_ui_font(size: int):
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         ]
-    # Also try by name (works cross-platform if font is installed)
     _candidates += ["Arial Bold", "Arial", "DejaVu Sans", "Segoe UI"]
     for p in _candidates:
         try:
@@ -2304,10 +2514,6 @@ def _load_ui_font(size: int):
 FluoroView._label_font = _load_ui_font(13)
 FluoroView._label_font_sm = _load_ui_font(11)
 
-
-# ══════════════════════════════════════════════════════════════════════
-#  ENTRY POINT
-# ══════════════════════════════════════════════════════════════════════
 
 def main():
     app = FluoroView()

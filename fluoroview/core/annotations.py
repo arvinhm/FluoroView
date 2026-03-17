@@ -1,13 +1,3 @@
-"""Annotation / notes data model with author-identity tracking and replies.
-
-Each annotation is stamped with the machine fingerprint of its creator.
-Only the same machine can edit or delete the annotation.  The display
-name is user-editable (stored in ``~/.fluoroview_user.json``) and
-defaults to the PC hostname.
-
-Annotations support threaded replies — anyone can reply, but only the
-reply's author machine can edit or delete that reply.
-"""
 
 from __future__ import annotations
 
@@ -52,7 +42,6 @@ def set_display_name(name: str):
 
 @dataclass
 class Reply:
-    """A single reply in an annotation thread."""
 
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     text: str = ""
@@ -80,7 +69,6 @@ class Reply:
 
 @dataclass
 class Annotation:
-    """A positioned text note with threaded replies."""
 
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     text: str = ""

@@ -1,4 +1,3 @@
-"""ROI data model — rectangle, circle, and freehand polygon regions."""
 
 from __future__ import annotations
 
@@ -7,21 +6,18 @@ from PIL import Image, ImageDraw
 
 
 class ROIData:
-    """Represents a single ROI: rectangle, circle, or freehand polygon."""
 
     _counter = 0
 
     def __init__(self, roi_type: str, bbox: tuple, points=None, name: str | None = None):
         ROIData._counter += 1
-        self.roi_type = roi_type        # 'rect', 'circle', 'freehand'
-        self.bbox = bbox                # (x1, y1, x2, y2) in preview coords
-        self.points = points or []      # freehand polygon vertices
+        self.roi_type = roi_type
+        self.bbox = bbox
+        self.points = points or []
         self.name = name or f"ROI-{ROIData._counter}"
 
-    # ── mask generation ────────────────────────────────────────────────
 
     def get_mask(self, h: int, w: int, ds_factor: float = 1) -> np.ndarray:
-        """Boolean mask of shape *(h, w)*; *ds_factor* scales preview→target."""
         mask = np.zeros((h, w), dtype=bool)
         x1, y1, x2, y2 = self.bbox
         sx1 = max(0, int(x1 * ds_factor))
@@ -47,7 +43,6 @@ class ROIData:
             mask = np.array(img) > 127
         return mask
 
-    # ── serialisation ──────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
         return {

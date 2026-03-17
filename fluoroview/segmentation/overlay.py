@@ -1,7 +1,3 @@
-"""Segmentation outline overlay rendering.
-
-Adapted from deepcell-tf ``plot_utils.make_outline_overlay``.
-"""
 
 from __future__ import annotations
 
@@ -9,7 +5,6 @@ import numpy as np
 
 
 def find_boundaries_fast(label_mask: np.ndarray) -> np.ndarray:
-    """Return a boolean boundary map without importing skimage at module level."""
     from skimage.segmentation import find_boundaries
     return find_boundaries(label_mask, mode="inner")
 
@@ -20,7 +15,6 @@ def make_outline_overlay(
     color: tuple[int, int, int] = (255, 255, 0),
     thickness: int = 1,
 ) -> np.ndarray:
-    """Draw cell outlines from *label_mask* onto *rgb* (uint8 H×W×3)."""
     overlay = rgb.copy()
     boundaries = find_boundaries_fast(label_mask)
     if thickness > 1:
@@ -31,7 +25,6 @@ def make_outline_overlay(
 
 
 def _cell_id_to_color(cell_id: int) -> tuple[int, int, int]:
-    """Map a cell ID to a unique RGB color using golden ratio HSV spread."""
     import colorsys
     golden = 0.618033988749895
     hue = (cell_id * golden) % 1.0
@@ -44,13 +37,11 @@ def make_unique_outline_overlay(
     label_mask: np.ndarray,
     thickness: int = 1,
 ) -> np.ndarray:
-    """Draw cell outlines with a unique color per cell ID."""
     overlay = rgb.copy()
     boundaries = find_boundaries_fast(label_mask)
     if thickness > 1:
         from scipy.ndimage import binary_dilation
         boundaries = binary_dilation(boundaries, iterations=thickness - 1)
-    # Get cell IDs on boundaries
     boundary_labels = label_mask[boundaries]
     unique_ids = np.unique(boundary_labels)
     unique_ids = unique_ids[unique_ids > 0]
@@ -68,7 +59,6 @@ def make_cell_color_overlay(
     cmap_name: str = "coolwarm",
     alpha: float = 0.4,
 ) -> np.ndarray:
-    """Colour each cell by a scalar value (e.g. expression level)."""
     import matplotlib.cm as cm
 
     cmap = cm.get_cmap(cmap_name)

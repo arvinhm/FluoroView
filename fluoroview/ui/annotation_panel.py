@@ -1,8 +1,3 @@
-"""Premium annotation panel using CustomTkinter.
-
-Shows annotations as styled cards with author, date, and lock status.
-Thread windows use frosted glass-dark styling.
-"""
 
 from __future__ import annotations
 
@@ -19,7 +14,6 @@ from fluoroview.ui.tooltip import ToolTip
 
 
 class AnnotationPanel(ctk.CTkFrame):
-    """Annotation list with reply threads — premium iOS-styled."""
 
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
@@ -72,7 +66,6 @@ class AnnotationPanel(ctk.CTkFrame):
 
         self.show_annotations = True
 
-    # ── public API ─────────────────────────────────────────────────────
 
     def refresh(self):
         self.listbox.delete(0, "end")
@@ -95,7 +88,6 @@ class AnnotationPanel(ctk.CTkFrame):
         self.refresh()
         self.app._schedule_update()
 
-    # ── internal ───────────────────────────────────────────────────────
 
     def _selected_ann(self) -> Annotation | None:
         sel = self.listbox.curselection()
@@ -157,13 +149,11 @@ class AnnotationPanel(ctk.CTkFrame):
         self._open_thread_window(ann, focus_reply=True)
 
     def _open_thread_window(self, ann: Annotation, focus_reply: bool = False):
-        """Open a premium iOS-styled thread view."""
         win = ctk.CTkToplevel(self.app)
         win.title(f"Thread \u2014 {ann.author}")
         win.geometry("440x500")
         win.transient(self.app)
 
-        # Header
         hdr_fr = ctk.CTkFrame(win, corner_radius=0, fg_color="#111318")
         hdr_fr.pack(fill="x")
         ctk.CTkLabel(hdr_fr,
@@ -174,7 +164,6 @@ class AnnotationPanel(ctk.CTkFrame):
                      font=ctk.CTkFont(size=12),
                      text_color="#e5e5ea").pack(anchor="w", padx=12, pady=(0, 8))
 
-        # Replies — scrollable
         replies_scroll = ctk.CTkScrollableFrame(win, fg_color="transparent")
         replies_scroll.pack(fill="both", expand=True, padx=8, pady=4)
 
@@ -226,7 +215,6 @@ class AnnotationPanel(ctk.CTkFrame):
 
         _populate_replies()
 
-        # Reply input
         input_fr = ctk.CTkFrame(win, fg_color="transparent")
         input_fr.pack(fill="x", padx=10, pady=8)
         reply_entry = ctk.CTkEntry(input_fr, placeholder_text="Type a reply…",

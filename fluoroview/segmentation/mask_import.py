@@ -1,4 +1,3 @@
-"""Import pre-computed segmentation masks from TIFF label images."""
 
 from __future__ import annotations
 
@@ -9,7 +8,6 @@ from fluoroview.segmentation.base import BaseSegmenter
 
 
 def load_mask(path: str) -> np.ndarray:
-    """Load a label-image mask where each cell has a unique integer."""
     mask = tifffile.imread(path)
     while mask.ndim > 2:
         mask = mask[0]
@@ -17,7 +15,6 @@ def load_mask(path: str) -> np.ndarray:
 
 
 class ImportedMaskSegmenter(BaseSegmenter):
-    """Pseudo-segmenter that wraps an already-computed mask."""
 
     def __init__(self, mask: np.ndarray):
         self._mask = mask

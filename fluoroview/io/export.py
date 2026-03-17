@@ -1,4 +1,3 @@
-"""Export helpers — CSV statistics, composite images, reports."""
 
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ def export_roi_csv(
     rois,
     annotations=None,
 ):
-    """Write per-ROI, per-channel intensity statistics to *path*."""
     ch_names = [p.get("name", f"ch{i + 1}") for i, p in enumerate(params_list)]
 
     dapi_idx = 0

@@ -1,4 +1,3 @@
-"""Entry point for ``python -m fluoroview``."""
 
 from fluoroview.app import main
 

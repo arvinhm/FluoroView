@@ -1,8 +1,3 @@
-"""Cell-group box-plot analysis.
-
-Given user-defined cell groups (from brush selection) and channel data,
-produce grouped box plots with per-channel statistics.
-"""
 
 from __future__ import annotations
 
@@ -20,7 +15,6 @@ from fluoroview.constants import THEME
 
 
 class CellGroupAnalysis(ctk.CTkToplevel):
-    """Grouped box-plot analysis: X = user-defined cell groups, Y = intensity."""
 
     def __init__(self, parent, channels, channel_controls, seg_mask, cell_groups):
         super().__init__(parent)
@@ -32,7 +26,7 @@ class CellGroupAnalysis(ctk.CTkToplevel):
         self.channels = channels
         self.channel_controls = channel_controls
         self.seg_mask = seg_mask
-        self.cell_groups = cell_groups  # dict[str, set[int]]
+        self.cell_groups = cell_groups
 
         self._log_var = tk.BooleanVar(value=False)
         self._stats_data = {}
@@ -41,7 +35,6 @@ class CellGroupAnalysis(ctk.CTkToplevel):
         self._build_ui()
 
     def _compute_stats(self):
-        """Compute per-channel, per-group intensity statistics."""
         if not self.cell_groups or self.seg_mask is None:
             return
 
@@ -49,7 +42,6 @@ class CellGroupAnalysis(ctk.CTkToplevel):
         stats = {}
         for gi, (gname, cell_ids) in enumerate(self.cell_groups.items()):
             stats[gname] = {}
-            # Build combined mask for this group's cells
             group_mask = np.zeros_like(self.seg_mask, dtype=bool)
             for cid in cell_ids:
                 group_mask |= (self.seg_mask == cid)
@@ -61,7 +53,6 @@ class CellGroupAnalysis(ctk.CTkToplevel):
                 if not p["visible"]:
                     continue
                 ch_name = p.get("name", f"Ch{ci+1}")
-                # Extract intensities from full data
                 region = ch.full_data[group_mask]
                 if len(region) == 0:
                     continue
@@ -83,7 +74,6 @@ class CellGroupAnalysis(ctk.CTkToplevel):
         T = THEME
         self.configure(fg_color="#0a0b10")
 
-        # Top bar
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.pack(fill="x", padx=10, pady=6)
         ctk.CTkLabel(top, text="\U0001F4CA Cell Group Analysis",
@@ -99,13 +89,11 @@ class CellGroupAnalysis(ctk.CTkToplevel):
                       fg_color="#2c2e36", hover_color="#3a3c44",
                       command=self._export_csv).pack(side="right", padx=4)
 
-        # Plot area
         self._fig, self._ax = plt.subplots(figsize=(10, 5))
         self._fig.patch.set_facecolor("#0a0b10")
         self._canvas_widget = FigureCanvasTkAgg(self._fig, self)
         self._canvas_widget.get_tk_widget().pack(fill="both", expand=True, padx=8, pady=4)
 
-        # Stats table (scrollable)
         stats_frame = ctk.CTkScrollableFrame(self, height=120, fg_color="#111318")
         stats_frame.pack(fill="x", padx=8, pady=(0, 8))
         self._stats_frame = stats_frame
@@ -130,7 +118,6 @@ class CellGroupAnalysis(ctk.CTkToplevel):
         if not group_names:
             return
 
-        # Collect all channel names across groups
         all_channels = []
         for gname in group_names:
             for ch_name in self._stats_data[gname]:
@@ -194,7 +181,6 @@ class CellGroupAnalysis(ctk.CTkToplevel):
         ax.set_title("Intensity by Cell Group & Channel",
                      color="#e5e5ea", fontsize=13, pad=10)
 
-        # Legend
         from matplotlib.patches import Patch
         legend_patches = []
         for ch_name in all_channels:
@@ -223,7 +209,6 @@ class CellGroupAnalysis(ctk.CTkToplevel):
                          text_color="#48494e").pack()
             return
 
-        # Header
         hdr = ctk.CTkFrame(self._stats_frame, fg_color="transparent")
         hdr.pack(fill="x", padx=4, pady=2)
         for col, w in [("Group", 80), ("Channel", 80), ("Cells", 50),

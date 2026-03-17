@@ -1,8 +1,3 @@
-"""Spatial queries on segmented cell data.
-
-Uses sklearn BallTree when available; falls back to brute-force numpy.
-Adapted from scope2screen data_model.py.
-"""
 
 from __future__ import annotations
 
@@ -16,7 +11,6 @@ except Exception:
 
 
 class SpatialIndex:
-    """Fast nearest-neighbour and radius queries over cell centroids."""
 
     def __init__(self, centroids_y: np.ndarray, centroids_x: np.ndarray,
                  cell_ids: np.ndarray):
@@ -44,7 +38,6 @@ class SpatialIndex:
         return self.cell_ids[dists <= radius]
 
     def all_neighbours(self, radius: float = 50):
-        """Return adjacency: ``{cell_id: [neighbour_ids]}``."""
         adj: dict[int, list[int]] = {}
         if self._tree is not None:
             indices = self._tree.query_radius(self.coords, r=radius)

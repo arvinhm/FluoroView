@@ -1,8 +1,3 @@
-"""Premium channel control card using CustomTkinter.
-
-Each channel is a rounded CTkFrame with checkbutton, color dot, name,
-sliders, and gradient histogram.
-"""
 
 from __future__ import annotations
 
@@ -14,7 +9,6 @@ from fluoroview.constants import IF_COLORS, DEFAULT_COLORS, THEME
 
 
 class ChannelControl(ctk.CTkFrame):
-    """Premium channel control — checkbox, glow dot, name, sliders."""
 
     def __init__(self, parent, index: int, name: str, vmin: float, vmax: float,
                  data_max: float, on_change, preview_data=None):
@@ -30,14 +24,12 @@ class ChannelControl(ctk.CTkFrame):
         self.visible_var = tk.BooleanVar(value=True)
         self.name_var = tk.StringVar(value=name)
 
-        # ── header: [check] [dot] [name] [A] [colour combo] ──────────
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.pack(fill="x", padx=6, pady=(6, 2))
 
         ctk.CTkCheckBox(hdr, text="", variable=self.visible_var,
                         width=24, command=self._changed).pack(side="left")
 
-        # Glow ring colour dot
         self.dot = tk.Canvas(hdr, width=16, height=16, bg="#16181f",
                              highlightthickness=0)
         self.dot.pack(side="left", padx=(4, 6))
@@ -56,14 +48,12 @@ class ChannelControl(ctk.CTkFrame):
                         values=list(IF_COLORS.keys()), width=110,
                         command=lambda v: self._changed()).pack(side="right")
 
-        # ── histogram ─────────────────────────────────────────────────
         self.hist_canvas = tk.Canvas(self, height=28, bg="#0e1017",
                                      highlightthickness=0)
         self.hist_canvas.pack(fill="x", padx=8, pady=(2, 0))
         if preview_data is not None:
             self.after(200, self._draw_histogram)
 
-        # ── sliders ───────────────────────────────────────────────────
         def _slider_row(parent_frame, label_text, from_, to_, var, init):
             r = ctk.CTkFrame(parent_frame, fg_color="transparent")
             r.pack(fill="x", padx=6, pady=1)
@@ -95,10 +85,8 @@ class ChannelControl(ctk.CTkFrame):
         self.gamma_label = _slider_row(self, "Gam", 0.1, 3.0,
                                        self.gamma_var, "1.0")
 
-        # Bottom padding
         ctk.CTkFrame(self, height=4, fg_color="transparent").pack()
 
-    # ── helpers ────────────────────────────────────────────────────────
 
     def _draw_dot(self):
         r, g, b = IF_COLORS.get(self.color_var.get(), (255, 255, 255))
@@ -157,7 +145,6 @@ class ChannelControl(ctk.CTkFrame):
         if len(pts) > 2:
             c.create_polygon(pts, fill=fill, outline=line, width=1, smooth=True)
 
-    # ── get / set params ───────────────────────────────────────────────
 
     def get_params(self) -> dict:
         cn = self.color_var.get()

@@ -1,7 +1,3 @@
-"""Segmentation backends — Cellpose (preferred) or DeepCell (optional).
-
-Detection is fully lazy — no heavy imports at startup.
-"""
 
 import importlib.util
 import os

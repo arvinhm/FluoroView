@@ -1,9 +1,3 @@
-"""Simple file-versioning system for AI-driven code modifications.
-
-Every time the AI modifies a source file, a timestamped snapshot is
-stored under ``.fluoroview_versions/``.  Users can browse the timeline
-and restore any previous version (undo / redo).
-"""
 
 from __future__ import annotations
 
@@ -15,7 +9,6 @@ from pathlib import Path
 
 
 class VersionControl:
-    """Manages snapshots of the fluoroview package source files."""
 
     def __init__(self, package_dir: str | None = None):
         if package_dir is None:
@@ -26,7 +19,6 @@ class VersionControl:
         self.manifest_path = self.versions_dir / "manifest.json"
         self._manifest: list[dict] = self._load_manifest()
 
-    # ── manifest ───────────────────────────────────────────────────────
 
     def _load_manifest(self) -> list[dict]:
         try:
@@ -37,13 +29,8 @@ class VersionControl:
     def _save_manifest(self):
         self.manifest_path.write_text(json.dumps(self._manifest, indent=2))
 
-    # ── snapshots ──────────────────────────────────────────────────────
 
     def snapshot_files(self, files: list[str], description: str = "") -> str:
-        """Create a snapshot of the given file paths before modification.
-
-        Returns the snapshot ID (timestamp-based).
-        """
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         snap_dir = self.versions_dir / ts
         snap_dir.mkdir(parents=True, exist_ok=True)
@@ -74,11 +61,9 @@ class VersionControl:
         return ts
 
     def list_versions(self) -> list[dict]:
-        """Return the full timeline of snapshots (newest last)."""
         return list(self._manifest)
 
     def restore_version(self, version_id: str) -> list[str]:
-        """Restore all files from a given snapshot. Returns restored paths."""
         entry = None
         for e in self._manifest:
             if e["id"] == version_id:
@@ -98,17 +83,13 @@ class VersionControl:
         return restored
 
     def snapshot_before_edit(self, file_path: str, description: str = "") -> str:
-        """Convenience: snapshot a single file before the AI edits it."""
         return self.snapshot_files([file_path], description=description)
 
-    # ── source tree helpers ────────────────────────────────────────────
 
     def source_files(self) -> list[Path]:
-        """Return all .py files in the package directory."""
         return sorted(self.package_dir.rglob("*.py"))
 
     def read_source_tree(self) -> dict[str, str]:
-        """Return ``{relative_path: contents}`` for all package .py files."""
         tree: dict[str, str] = {}
         for p in self.source_files():
             rel = str(p.relative_to(self.package_dir))

@@ -1,9 +1,3 @@
-"""Multi-provider AI backend — OpenAI, Google Gemini, Anthropic Claude.
-
-Each provider exposes:
-  - ``list_models(api_key)`` → list of model-ID strings
-  - ``chat(api_key, model, messages, system_prompt)`` → assistant reply text
-"""
 
 from __future__ import annotations
 
@@ -12,7 +6,6 @@ import urllib.request
 import urllib.error
 from typing import Any
 
-# ── Provider registry ──────────────────────────────────────────────────
 
 PROVIDERS = {
     "OpenAI": {
@@ -51,9 +44,6 @@ def _get_json(url: str, headers: dict | None = None, timeout: int = 30) -> Any:
         raise RuntimeError(f"HTTP {e.code}: {body_text[:300]}") from e
 
 
-# ── OpenAI ─────────────────────────────────────────────────────────────
-
-# Models to show at top of the list (most useful for coding)
 _OPENAI_PREFERRED_ORDER = [
     "codex-mini-latest",
     "o4-mini",
@@ -82,11 +72,9 @@ def openai_list_models(api_key: str) -> list[str]:
     data = _get_json(url, headers)
     all_ids = sorted(m["id"] for m in data.get("data", []))
 
-    # Filter to chat/codex models
     chat_models = [m for m in all_ids
                    if any(k in m.lower() for k in _OPENAI_KEYWORDS)]
 
-    # Sort: preferred models first, then alphabetical
     preferred_set = set(_OPENAI_PREFERRED_ORDER)
     top = [m for m in _OPENAI_PREFERRED_ORDER if m in chat_models]
     rest = [m for m in chat_models if m not in preferred_set]
@@ -107,7 +95,6 @@ def openai_chat(api_key: str, model: str, messages: list[dict],
         msgs.append({"role": "system", "content": system_prompt})
     msgs.extend(messages)
 
-    # Codex / o-series use 'max_completion_tokens', others use 'max_tokens'
     is_reasoning = any(k in model for k in ("o1", "o3", "o4", "codex"))
     body: dict = {"model": model, "messages": msgs}
     if is_reasoning:
@@ -118,8 +105,6 @@ def openai_chat(api_key: str, model: str, messages: list[dict],
     data = _post_json(url, headers, body)
     return data["choices"][0]["message"]["content"]
 
-
-# ── Google Gemini ──────────────────────────────────────────────────────
 
 def gemini_list_models(api_key: str) -> list[str]:
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
@@ -166,8 +151,6 @@ def gemini_chat(api_key: str, model: str, messages: list[dict],
     return "(no response)"
 
 
-# ── Anthropic Claude ───────────────────────────────────────────────────
-
 CLAUDE_MODELS = [
     "claude-sonnet-4-20250514",
     "claude-opus-4-20250514",
@@ -201,8 +184,6 @@ def claude_chat(api_key: str, model: str, messages: list[dict],
     content = data.get("content", [])
     return "".join(b.get("text", "") for b in content if b.get("type") == "text")
 
-
-# ── Unified dispatch ───────────────────────────────────────────────────
 
 def list_models(provider: str, api_key: str) -> list[str]:
     if provider == "OpenAI":

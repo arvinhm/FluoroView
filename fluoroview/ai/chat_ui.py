@@ -1,8 +1,3 @@
-"""AI Chat — modern inline panel using CustomTkinter.
-
-Embedded in the left sidebar below the file list.
-Features: chat history, settings, model switching.
-"""
 
 from __future__ import annotations
 
@@ -41,7 +36,6 @@ def _save_ai_config(cfg: dict):
 
 
 def _list_saved_chats() -> list[dict]:
-    """List saved chat sessions, newest first."""
     _CHAT_HISTORY_DIR.mkdir(exist_ok=True)
     chats = []
     for f in sorted(_CHAT_HISTORY_DIR.glob("*.json"), reverse=True):
@@ -96,7 +90,6 @@ _SYSTEM_PROMPT_TEMPLATE = textwrap.dedent("""\
 
 
 class AIChatPanel(ctk.CTkFrame):
-    """Modern inline AI chat panel — embeds in the left sidebar."""
 
     def __init__(self, parent, app):
         super().__init__(parent, fg_color="transparent")
@@ -129,12 +122,8 @@ class AIChatPanel(ctk.CTkFrame):
         tree_text = "".join(f"\n--- {r} ---\n{c}\n" for r, c in source_tree.items())
         self._system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(source_tree=tree_text)
 
-    # ══════════════════════════════════════════════════════════════════
-    #  UI
-    # ══════════════════════════════════════════════════════════════════
 
     def _build_ui(self):
-        # Header bar
         hdr = ctk.CTkFrame(self, fg_color="transparent")
         hdr.pack(fill="x", padx=6, pady=(4, 2))
 
@@ -146,7 +135,6 @@ class AIChatPanel(ctk.CTkFrame):
         self._set_connection_status(self._chat_ready)
         self._status_dot.pack(side="left", padx=(4, 0))
 
-        # Header buttons (right side)
         ctk.CTkButton(hdr, text="Settings", width=55, height=20,
                       font=ctk.CTkFont(size=9),
                       fg_color="#2c2e36", hover_color="#3a3c44",
@@ -156,10 +144,8 @@ class AIChatPanel(ctk.CTkFrame):
                       fg_color="#2c2e36", hover_color="#3a3c44",
                       command=self._toggle_history).pack(side="right", padx=1)
 
-        # History panel (hidden by default)
         self._history_frame = ctk.CTkScrollableFrame(self, fg_color="#111318",
                                                       corner_radius=6, height=120)
-        # Not packed by default
 
         if self._chat_ready:
             self._build_chat_view()
@@ -171,7 +157,6 @@ class AIChatPanel(ctk.CTkFrame):
             self._status_dot.configure(text_color="#30d158" if ok else "#ff453a")
 
     def _build_setup_view(self):
-        """Show connect form: provider, key, model, start."""
         self._setup_frame = ctk.CTkFrame(self, fg_color="transparent")
         self._setup_frame.pack(fill="both", expand=True, padx=6, pady=2)
 
@@ -179,7 +164,6 @@ class AIChatPanel(ctk.CTkFrame):
                      font=ctk.CTkFont(size=12, weight="bold"),
                      text_color="#e5e5ea").pack(anchor="w", pady=(4, 6))
 
-        # Provider
         ctk.CTkLabel(self._setup_frame, text="Provider",
                      text_color="#8e8e93",
                      font=ctk.CTkFont(size=10)).pack(anchor="w", pady=(2, 0))
@@ -188,7 +172,6 @@ class AIChatPanel(ctk.CTkFrame):
                         values=list(PROVIDERS.keys()), width=200,
                         height=26, font=ctk.CTkFont(size=10)).pack(fill="x", pady=2)
 
-        # API Key
         ctk.CTkLabel(self._setup_frame, text="API Key",
                      text_color="#8e8e93",
                      font=ctk.CTkFont(size=10)).pack(anchor="w", pady=(2, 0))
@@ -197,7 +180,6 @@ class AIChatPanel(ctk.CTkFrame):
                                         height=26, font=ctk.CTkFont(size=10))
         self._key_entry.pack(fill="x", pady=2)
 
-        # Model
         ctk.CTkLabel(self._setup_frame, text="Model",
                      text_color="#8e8e93",
                      font=ctk.CTkFont(size=10)).pack(anchor="w", pady=(2, 0))
@@ -213,21 +195,17 @@ class AIChatPanel(ctk.CTkFrame):
                                            font=ctk.CTkFont(size=9))
         self._model_status.pack(anchor="w")
 
-        # Auto-fetch on key change
         self._key_entry.bind("<KeyRelease>", self._on_key_change)
         self._provider_var.trace_add("write", lambda *_: self._trigger_auto_fetch())
 
-        # Start
         ctk.CTkButton(self._setup_frame, text="Connect",
                       height=28, font=ctk.CTkFont(size=11),
                       command=self._start_chat).pack(fill="x", pady=(8, 4))
 
     def _build_chat_view(self):
-        """Show the active chat interface."""
         self._chat_frame = ctk.CTkFrame(self, fg_color="transparent")
         self._chat_frame.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # Model indicator
         top = ctk.CTkFrame(self._chat_frame, fg_color="transparent")
         top.pack(fill="x", padx=4, pady=2)
         short = (self.model or "")
@@ -246,12 +224,10 @@ class AIChatPanel(ctk.CTkFrame):
                       fg_color="#2c2e36", hover_color="#30d158",
                       command=self._apply_pending_edits).pack(side="right", padx=1)
 
-        # Messages
         self._messages_scroll = ctk.CTkScrollableFrame(
             self._chat_frame, fg_color="#0e1017", corner_radius=8)
         self._messages_scroll.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # Input bar
         input_bar = ctk.CTkFrame(self._chat_frame, fg_color="transparent")
         input_bar.pack(fill="x", padx=4, pady=(0, 4))
         self._input_entry = ctk.CTkEntry(input_bar,
@@ -264,17 +240,12 @@ class AIChatPanel(ctk.CTkFrame):
                       font=ctk.CTkFont(size=10),
                       command=self._send_message).pack(side="right")
 
-        # Restore history
         self._restore_chat_display()
         n_files = len(self.vc.read_source_tree())
         self._add_system_bubble(f"Ready | {n_files} source files loaded")
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SETTINGS
-    # ══════════════════════════════════════════════════════════════════
 
     def _show_settings(self):
-        """Show settings popup to change provider/model/API key."""
         win = ctk.CTkToplevel(self.app)
         win.title("AI Settings")
         win.geometry("380x380")
@@ -354,7 +325,6 @@ class AIChatPanel(ctk.CTkFrame):
                 short = self.model if len(self.model) <= 22 else self.model[:20] + "..."
                 self._model_label.configure(
                     text=f"{self.provider} / {short}")
-            # If not yet connected, switch to chat view
             if not self._chat_ready:
                 self._chat_ready = True
                 if hasattr(self, '_setup_frame'):
@@ -367,12 +337,8 @@ class AIChatPanel(ctk.CTkFrame):
                       fg_color="#0a84ff", hover_color="#0070e0",
                       command=_save).pack(fill="x", pady=(8, 4))
 
-    # ══════════════════════════════════════════════════════════════════
-    #  CHAT HISTORY
-    # ══════════════════════════════════════════════════════════════════
 
     def _toggle_history(self):
-        """Toggle chat history panel."""
         if self._history_visible:
             self._history_frame.pack_forget()
             self._history_visible = False
@@ -384,7 +350,6 @@ class AIChatPanel(ctk.CTkFrame):
             self._refresh_history_list()
 
     def _refresh_history_list(self):
-        """Populate the history panel with saved chats."""
         for w in self._history_frame.winfo_children():
             w.destroy()
         chats = _list_saved_chats()
@@ -423,7 +388,6 @@ class AIChatPanel(ctk.CTkFrame):
         self._refresh_history_list()
 
     def _load_chat_session(self, chat_data):
-        """Load a saved chat session."""
         self.messages = chat_data.get("messages", [])
         self._pending_edits = []
         if hasattr(self, '_messages_scroll'):
@@ -431,13 +395,9 @@ class AIChatPanel(ctk.CTkFrame):
                 w.destroy()
             self._restore_chat_display()
             self._add_system_bubble(f"Loaded: {chat_data.get('title', 'Untitled')}")
-        # Hide history
         self._history_frame.pack_forget()
         self._history_visible = False
 
-    # ══════════════════════════════════════════════════════════════════
-    #  SETUP LOGIC
-    # ══════════════════════════════════════════════════════════════════
 
     def _on_key_change(self, event=None):
         key = self._key_entry.get().strip()
@@ -486,9 +446,6 @@ class AIChatPanel(ctk.CTkFrame):
         self._setup_frame.destroy()
         self._build_chat_view()
 
-    # ══════════════════════════════════════════════════════════════════
-    #  CHAT LOGIC
-    # ══════════════════════════════════════════════════════════════════
 
     def _on_enter(self, event):
         self._send_message()
@@ -531,7 +488,6 @@ class AIChatPanel(ctk.CTkFrame):
         self._set_connection_status(False)
         self._add_system_bubble(f"Error: {err[:100]}")
 
-    # ── chat bubbles ───────────────────────────────────────────────────
 
     def _add_user_bubble(self, text):
         wrapper = ctk.CTkFrame(self._messages_scroll, fg_color="transparent")
@@ -580,7 +536,6 @@ class AIChatPanel(ctk.CTkFrame):
     def _scroll_to_bottom(self):
         self.after(50, lambda: self._messages_scroll._parent_canvas.yview_moveto(1.0))
 
-    # ── edit handling ──────────────────────────────────────────────────
 
     def _extract_edits(self, text):
         pattern = r"```(?:python)?:([^\n]+)\n(.*?)```"
@@ -617,13 +572,11 @@ class AIChatPanel(ctk.CTkFrame):
             f"Applied {len(applied)} file(s), reloaded {reloaded}")
         self.app.status_var.set(f"AI edits applied to {len(applied)} file(s)")
 
-    # ── persistence ────────────────────────────────────────────────────
 
     def _save_chat_history(self):
         cfg = _load_ai_config()
         cfg["chat_history"] = self.messages[-50:]
         _save_ai_config(cfg)
-        # Also save as a chat session
         if self.messages:
             first_user = next((m["content"] for m in self.messages
                                if m["role"] == "user"), "Untitled")
@@ -650,7 +603,6 @@ class AIChatPanel(ctk.CTkFrame):
         n_files = len(self.vc.read_source_tree())
         self._add_system_bubble(f"New chat | {n_files} files loaded")
 
-    # ── hot reload ─────────────────────────────────────────────────────
 
     def _hot_reload(self, applied_paths):
         import importlib
@@ -674,5 +626,4 @@ class AIChatPanel(ctk.CTkFrame):
         return reloaded
 
 
-# Backward compatibility alias
 AIChatWindow = AIChatPanel

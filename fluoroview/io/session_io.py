@@ -1,4 +1,3 @@
-"""Read / write ``.fluoroview.npz`` session files."""
 
 from __future__ import annotations
 

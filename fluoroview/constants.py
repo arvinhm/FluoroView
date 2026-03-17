@@ -1,8 +1,3 @@
-"""Shared constants for FluoroView v2 — iOS-inspired Design System.
-
-Uses CustomTkinter for genuine modern UI with rounded widgets,
-smooth sliders, and Apple-quality aesthetics.
-"""
 
 import os
 
@@ -10,7 +5,6 @@ MAX_PREVIEW_DIM = 2500
 NUM_WORKERS = os.cpu_count() or 4
 
 IF_COLORS = {
-    # Standard fluorescence colours (first 9)
     "Blue (DAPI)":    (0, 100, 255),
     "Green (FITC)":   (0, 255, 0),
     "Red (Cy5)":      (255, 0, 0),
@@ -20,7 +14,6 @@ IF_COLORS = {
     "Yellow":         (255, 255, 0),
     "White":          (255, 255, 255),
     "Hot Pink":       (255, 50, 120),
-    # Extended palette for multiplex (up to 50 channels)
     "Lime":           (180, 255, 0),
     "Teal":           (0, 200, 180),
     "Coral":          (255, 100, 80),
@@ -80,37 +73,29 @@ LUT_PRESETS = {
                             __import__('numpy').clip(v * 3 - 2, 0, 1)),
 }
 
-# ══════════════════════════════════════════════════════════════════════
-#  iOS-INSPIRED DARK THEME — used for manual Canvas drawing, charts, etc.
-# ══════════════════════════════════════════════════════════════════════
 
 THEME = {
-    # Apple system dark backgrounds
     "BG":           "#0a0b10",
     "BG2":          "#111318",
     "BG3":          "#16181f",
     "BG4":          "#1c1e26",
 
-    # Foreground
     "FG":           "#e5e5ea",
     "FG2":          "#8e8e93",
     "DIM":          "#48494e",
 
-    # Apple system colors
-    "ACCENT":       "#0a84ff",     # iOS blue
-    "GREEN":        "#30d158",     # iOS green
-    "RED":          "#ff453a",     # iOS red
-    "ORANGE":       "#ff9f0a",     # iOS orange
-    "YELLOW":       "#ffd60a",     # iOS yellow
-    "TEAL":         "#64d2ff",     # iOS teal
-    "PURPLE":       "#bf5af2",     # iOS purple
-    "PINK":         "#ff375f",     # iOS pink
+    "ACCENT":       "#0a84ff",
+    "GREEN":        "#30d158",
+    "RED":          "#ff453a",
+    "ORANGE":       "#ff9f0a",
+    "YELLOW":       "#ffd60a",
+    "TEAL":         "#64d2ff",
+    "PURPLE":       "#bf5af2",
+    "PINK":         "#ff375f",
 
-    # Borders
     "BORDER":       "#2c2e36",
     "SEPARATOR":    "#1e2028",
 
-    # Charts
     "CHART_BG":     "#0e1017",
     "CHART_GRID":   "#1a1c24",
     "CHART_TEXT":   "#8e8e93",

@@ -1,4 +1,3 @@
-"""Channel data model and loaders for single- and multi-channel TIF files."""
 
 from __future__ import annotations
 
@@ -13,14 +12,13 @@ from fluoroview.constants import MAX_PREVIEW_DIM, NUM_WORKERS
 
 
 class ChannelData:
-    """One image channel: memory-mapped full-res array + downsampled preview."""
 
     def __init__(self, path: str, full_data, preview, ds_factor: int,
                  vmin: float, vmax: float):
         self.path = path
         self.original_path = path
         self.full_data = full_data
-        self.preview = preview          # float32
+        self.preview = preview
         self.ds_factor = ds_factor
         self.vmin = vmin
         self.vmax = vmax
@@ -28,7 +26,6 @@ class ChannelData:
         self.is_edited = False
 
     def reload_from(self, new_path: str):
-        """Reload channel data from a (possibly edited) file."""
         try:
             full = tifffile.memmap(new_path, mode="r")
         except Exception:
@@ -51,9 +48,6 @@ class ChannelData:
         else:
             self.vmin = float(self.preview.min())
             self.vmax = float(self.preview.max())
-
-
-# ── loaders ────────────────────────────────────────────────────────────────
 
 
 def _percentile_range(full, ds, h):
@@ -117,11 +111,9 @@ IMAGE_EXTENSIONS = (
 
 
 def load_any_image(path: str, max_dim: int = MAX_PREVIEW_DIM) -> "list[ChannelData]":
-    """Load any supported image format (TIFF, JPG, PNG, etc.)."""
     ext = os.path.splitext(path)[1].lower()
     if ext in (".tif", ".tiff", ".ome.tif", ".svs", ".ndpi", ".czi"):
         return load_multichannel_tif(path, max_dim)
-    # Raster formats via PIL
     from PIL import Image as PILImage
     pil = PILImage.open(path)
     arr = np.array(pil)
@@ -148,7 +140,6 @@ def load_any_image(path: str, max_dim: int = MAX_PREVIEW_DIM) -> "list[ChannelDa
 
 
 def scan_folder(folder_path: str) -> dict:
-    """Return ``{display_name: ('multi', path) | ('folder', [paths])}``."""
     results: dict = {}
     for entry in sorted(os.listdir(folder_path)):
         full = os.path.join(folder_path, entry)
@@ -159,7 +150,6 @@ def scan_folder(folder_path: str) -> dict:
             images = sorted(set(images))
             if images:
                 results[entry] = ("folder", images)
-    # Single files in folder
     all_images = []
     for ext in IMAGE_EXTENSIONS:
         all_images.extend(glob.glob(os.path.join(folder_path, ext)))
@@ -171,10 +161,8 @@ def scan_folder(folder_path: str) -> dict:
 
 
 def get_pixel_size_um(path: str) -> float:
-    """Try to extract pixel size in microns from TIFF metadata."""
     try:
         with tifffile.TiffFile(path) as tf:
-            # OME metadata
             if tf.ome_metadata:
                 import xml.etree.ElementTree as ET
                 root = ET.fromstring(tf.ome_metadata)
@@ -184,7 +172,6 @@ def get_pixel_size_um(path: str) -> float:
                     psx = pixels.get("PhysicalSizeX")
                     if psx:
                         return float(psx)
-            # Standard TIFF resolution tags
             page = tf.pages[0]
             tags = page.tags
             if "XResolution" in tags:
@@ -193,9 +180,9 @@ def get_pixel_size_um(path: str) -> float:
                     res_unit = tags.get("ResolutionUnit")
                     ppu = xr[0] / xr[1]
                     if ppu > 0:
-                        if res_unit and res_unit.value == 3:  # cm
+                        if res_unit and res_unit.value == 3:
                             return 10000.0 / ppu
-                        elif res_unit and res_unit.value == 2:  # inch
+                        elif res_unit and res_unit.value == 2:
                             return 25400.0 / ppu
     except Exception:
         pass

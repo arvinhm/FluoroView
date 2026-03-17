@@ -1,9 +1,3 @@
-"""Cellpose segmentation backend — macOS-compatible, multi-core.
-
-Forces CPU on macOS to avoid MPS/BFloat16 crashes on Apple Silicon.
-Supports Cellpose v3 and v4+ (Cellpose-SAM).
-Uses tiled parallel processing to utilize all CPU cores on large images.
-"""
 
 from __future__ import annotations
 
@@ -16,17 +10,14 @@ import numpy as np
 
 from fluoroview.segmentation.base import BaseSegmenter
 
-# Prevent MPS BFloat16 crash on Apple Silicon
 if platform.system() == "Darwin":
     os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
     os.environ.setdefault("CELLPOSE_USE_GPU", "0")
 
-# Number of worker processes for tiled segmentation
 _N_WORKERS = max(1, (os.cpu_count() or 4) - 1)
 
 
 def _segment_tile(tile_data: dict) -> dict:
-    """Segment a single tile — runs in a worker process."""
     from cellpose import models
 
     nuc = tile_data["nuclear"]
@@ -39,7 +30,6 @@ def _segment_tile(tile_data: dict) -> dict:
     x1 = tile_data["x1"]
     cell_offset = tile_data["cell_offset"]
 
-    # Build model in worker
     if hasattr(models, "CellposeModel") and not hasattr(models, "Cellpose"):
         model = models.CellposeModel(model_type=model_type, gpu=False)
     elif hasattr(models, "Cellpose"):
@@ -59,7 +49,6 @@ def _segment_tile(tile_data: dict) -> dict:
         cellprob_threshold=cellprob_threshold,
     )
     masks = result[0].astype(np.int32)
-    # Offset cell IDs to avoid collisions
     masks[masks > 0] += cell_offset
     return {"masks": masks, "y1": y1, "x1": x1,
             "h": masks.shape[0], "w": masks.shape[1],
@@ -67,20 +56,14 @@ def _segment_tile(tile_data: dict) -> dict:
 
 
 class CellposeSegmenter(BaseSegmenter):
-    """Wraps Cellpose for nuclear + whole-cell segmentation.
 
-    For large images (>2048px), automatically tiles and processes
-    in parallel across all available CPU cores.
-    """
-
-    # Tile size threshold: images larger than this get tiled
     TILE_THRESHOLD = 2048
     TILE_SIZE = 1024
     TILE_OVERLAP = 128
 
     def __init__(self, model_type: str = "cyto3", gpu: bool = False):
         self.model_type = model_type
-        self._model = None  # lazy init for single-tile mode
+        self._model = None
 
     def _get_model(self):
         if self._model is None:
@@ -105,18 +88,15 @@ class CellposeSegmenter(BaseSegmenter):
 
         h, w = nuclear.shape[:2]
 
-        # Small images: run directly (no overhead)
         if h <= self.TILE_THRESHOLD and w <= self.TILE_THRESHOLD:
             return self._segment_single(nuclear, membrane, diameter,
                                          flow_threshold, cellprob_threshold)
 
-        # Large images: tile and parallelize
         return self._segment_tiled(nuclear, membrane, diameter,
                                     flow_threshold, cellprob_threshold)
 
     def _segment_single(self, nuclear, membrane, diameter,
                          flow_threshold, cellprob_threshold):
-        """Segment without tiling (small images)."""
         model = self._get_model()
         if membrane is not None:
             img = np.stack([membrane, nuclear], axis=-1)
@@ -131,12 +111,10 @@ class CellposeSegmenter(BaseSegmenter):
 
     def _segment_tiled(self, nuclear, membrane, diameter,
                         flow_threshold, cellprob_threshold):
-        """Segment large images using tiled parallel processing."""
         h, w = nuclear.shape[:2]
         ts = self.TILE_SIZE
         ov = self.TILE_OVERLAP
 
-        # Generate tiles
         tiles = []
         cell_offset = 0
         for y0 in range(0, h, ts - ov):
@@ -156,7 +134,6 @@ class CellposeSegmenter(BaseSegmenter):
                     "cell_offset": cell_offset,
                 }
                 tiles.append(tile)
-                # Rough estimate: max cells per tile
                 cell_offset += 10000
 
         if not tiles:
@@ -165,24 +142,19 @@ class CellposeSegmenter(BaseSegmenter):
 
         n_workers = min(_N_WORKERS, len(tiles))
 
-        # Use ThreadPool to avoid model pickling issues, but each thread
-        # creates its own model — PyTorch releases GIL during forward pass
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             results = list(pool.map(_segment_tile, tiles))
 
-        # Stitch tiles back together
         combined = np.zeros((h, w), dtype=np.int32)
         for r in results:
             y1, x1 = r["y1"], r["x1"]
             rh, rw = r["h"], r["w"]
             mask_tile = r["masks"]
 
-            # For overlap regions, only write if no cell already there
             region = combined[y1:y1 + rh, x1:x1 + rw]
             new_cells = (mask_tile > 0) & (region == 0)
             region[new_cells] = mask_tile[new_cells]
 
-        # Re-label to sequential IDs
         unique_ids = np.unique(combined)
         unique_ids = unique_ids[unique_ids > 0]
         remap = np.zeros(int(combined.max()) + 1, dtype=np.int32)

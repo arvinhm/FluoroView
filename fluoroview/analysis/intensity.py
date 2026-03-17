@@ -1,4 +1,3 @@
-"""Intensity-based analysis helpers — ratio-to-DAPI, region stats."""
 
 from __future__ import annotations
 
@@ -6,7 +5,6 @@ import numpy as np
 
 
 def region_adjusted(preview: np.ndarray, params: dict, roi=None) -> np.ndarray:
-    """Return contrast-adjusted pixel values for a channel within an optional ROI."""
     if roi is not None:
         x1, y1, x2, y2 = roi.bbox
         px1, py1 = max(0, int(x1)), max(0, int(y1))
@@ -30,10 +28,6 @@ def region_adjusted(preview: np.ndarray, params: dict, roi=None) -> np.ndarray:
 
 
 def compute_ratios(channels, params_list, dapi_idx: int, roi=None):
-    """Return (names, ratios, sems, colors) for visible non-DAPI channels.
-
-    Error bars are SEM (standard error of mean = SD / sqrt(n)).
-    """
     dapi_data = region_adjusted(channels[dapi_idx].preview, params_list[dapi_idx], roi)
     dapi_nz = dapi_data[dapi_data > 0.01]
     dapi_mean = float(np.mean(dapi_nz)) if len(dapi_nz) > 10 else 1.0

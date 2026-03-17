@@ -1,4 +1,3 @@
-"""Session state — serialisable snapshot of the entire viewer."""
 
 from __future__ import annotations
 
@@ -13,12 +12,11 @@ from fluoroview.core.annotations import Annotation
 
 @dataclass
 class SessionState:
-    """Everything needed to fully restore a viewer session."""
 
     version: str = "2.0"
     file_entries: dict = field(default_factory=dict)
     current_file: str | None = None
-    channel_settings: dict = field(default_factory=dict)  # name -> [param dicts]
+    channel_settings: dict = field(default_factory=dict)
     rois: list[ROIData] = field(default_factory=list)
     annotations: list[Annotation] = field(default_factory=list)
     zoom_level: float = 1.0
@@ -30,9 +28,8 @@ class SessionState:
     channels_preview: list[np.ndarray] = field(default_factory=list)
 
     def to_arrays(self) -> dict[str, Any]:
-        """Pack into a dict suitable for ``np.savez_compressed``."""
         import json
-        
+
         class NpEncoder(json.JSONEncoder):
             def default(self, obj):
                 if isinstance(obj, np.integer): return int(obj)
@@ -63,11 +60,11 @@ class SessionState:
                      for k, v in self.cell_data.items()}, cls=NpEncoder)])
             else:
                 arrays["cell_data"] = self.cell_data
-            
+
         for i, (full, prev) in enumerate(zip(self.channels_full, self.channels_preview)):
             arrays[f"ch_{i}_full"] = full
             arrays[f"ch_{i}_prev"] = prev
-            
+
         return arrays
 
     @classmethod
@@ -95,7 +92,7 @@ class SessionState:
                     cell_data = raw
             else:
                 cell_data = raw
-        
+
         channels_full = []
         channels_preview = []
         i = 0

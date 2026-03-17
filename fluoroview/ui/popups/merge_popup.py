@@ -1,4 +1,3 @@
-"""Merge-view popup — premium CTk version."""
 
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ from fluoroview.constants import IF_COLORS, NUM_WORKERS, THEME
 
 
 class MergePopup(ctk.CTkToplevel):
-    """Channel merge viewer with per-channel colour, contrast, brightness."""
 
     def __init__(self, parent, channels, params_list, ch_names, file_name, dpi):
         super().__init__(parent)

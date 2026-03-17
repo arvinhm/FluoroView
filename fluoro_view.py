@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-FluoroView — High-Performance Fluorescence Image Viewer for macOS
-Memory-mapped TIF loading, per-channel IF colors, contrast/brightness,
-overlay compositing, ROI selection, publication-quality export.
-"""
 
 import os
 import sys
@@ -17,9 +11,8 @@ import numpy as np
 import tifffile
 from PIL import Image, ImageTk, ImageDraw, ImageFont
 
-# ─── Constants ────────────────────────────────────────────────────────────────
 
-MAX_PREVIEW_DIM = 2500  # max pixels for interactive preview (higher = sharper zoom)
+MAX_PREVIEW_DIM = 2500
 NUM_WORKERS = os.cpu_count() or 4
 
 IF_COLORS = {
@@ -38,30 +31,19 @@ DEFAULT_COLORS = ["Blue (DAPI)", "Green (FITC)", "Red (Cy5)", "Orange",
                   "Magenta (Cy3)", "Cyan", "Yellow", "White", "Hot Pink"]
 
 
-# ─── ROI Data ─────────────────────────────────────────────────────────────────
-
 class ROIData:
-    """Represents a single ROI: rectangle, circle, or freehand polygon."""
     _counter = 0
 
     def __init__(self, roi_type, bbox, points=None, name=None):
-        """
-        roi_type: 'rect', 'circle', or 'freehand'
-        bbox: (x1, y1, x2, y2) in preview coordinates
-        points: list of (x, y) for freehand polygon
-        """
         ROIData._counter += 1
         self.roi_type = roi_type
-        self.bbox = bbox  # (x1,y1,x2,y2) preview coords
+        self.bbox = bbox
         self.points = points or []
         self.name = name or f"ROI-{ROIData._counter}"
 
     def get_mask(self, h, w, ds_factor=1):
-        """Return boolean mask of shape (h, w) for this ROI.
-        Coordinates are in preview space; ds_factor scales to target resolution."""
         mask = np.zeros((h, w), dtype=bool)
         x1, y1, x2, y2 = self.bbox
-        # Scale from preview to target
         sx1 = max(0, int(x1 * ds_factor))
         sy1 = max(0, int(y1 * ds_factor))
         sx2 = min(w, int(x2 * ds_factor))
@@ -87,24 +69,20 @@ class ROIData:
         return mask
 
 
-# ─── Image Loader ─────────────────────────────────────────────────────────────
-
 class ChannelData:
-    """Holds one channel: memory-mapped full-res + downsampled preview."""
 
     def __init__(self, path, full_data, preview, ds_factor, vmin, vmax):
         self.path = path
-        self.original_path = path   # remember original for reference
-        self.full_data = full_data      # memmap or ndarray, full resolution
-        self.preview = preview          # float32 downsampled array
+        self.original_path = path
+        self.full_data = full_data
+        self.preview = preview
         self.ds_factor = ds_factor
-        self.vmin = vmin                # data min
-        self.vmax = vmax                # data max
+        self.vmin = vmin
+        self.vmax = vmax
         self.full_h, self.full_w = full_data.shape
-        self.is_edited = False          # has temp edits been applied?
+        self.is_edited = False
 
     def reload_from(self, new_path):
-        """Reload channel data from a new file (temp edited version)."""
         try:
             full = tifffile.memmap(new_path, mode='r')
         except Exception:
@@ -118,7 +96,6 @@ class ChannelData:
         self.preview = full[::ds, ::ds].astype(np.float32)
         self.path = new_path
         self.is_edited = True
-        # Update percentiles
         sample_step = max(1, self.full_h // 500)
         sample = full[::sample_step, ::ds].astype(np.float32).ravel()
         nonzero = sample[sample > 0]
@@ -131,25 +108,19 @@ class ChannelData:
 
 
 def load_channel(path, max_dim=MAX_PREVIEW_DIM):
-    """Load a single-channel TIF with memory mapping and create downsampled preview."""
     try:
-        # Try memory-mapped first
         full = tifffile.memmap(path, mode='r')
     except Exception:
         full = tifffile.imread(path)
 
-    # Handle multi-dim: squeeze to 2D
     while full.ndim > 2:
         full = full[0]
 
     h, w = full.shape
     ds = max(1, max(h, w) // max_dim)
 
-    # Downsample by slicing (fast, no interpolation needed for preview)
     preview = full[::ds, ::ds].astype(np.float32)
 
-    # Compute percentile-based min/max for better contrast defaults
-    # Sample a subset to avoid loading entire memmap
     sample_step = max(1, h // 500)
     sample = full[::sample_step, ::ds].astype(np.float32).ravel()
     nonzero = sample[sample > 0]
@@ -164,7 +135,6 @@ def load_channel(path, max_dim=MAX_PREVIEW_DIM):
 
 
 def load_multichannel_tif(path, max_dim=MAX_PREVIEW_DIM):
-    """Load a multi-channel TIF, return list of ChannelData."""
     try:
         img = tifffile.memmap(path, mode='r')
     except Exception:
@@ -173,9 +143,9 @@ def load_multichannel_tif(path, max_dim=MAX_PREVIEW_DIM):
     if img.ndim == 2:
         channels_data = [img]
     elif img.ndim == 3:
-        if img.shape[0] <= 10:  # (C, H, W)
+        if img.shape[0] <= 10:
             channels_data = [img[c] for c in range(img.shape[0])]
-        elif img.shape[2] <= 10:  # (H, W, C)
+        elif img.shape[2] <= 10:
             channels_data = [img[:, :, c] for c in range(img.shape[2])]
         else:
             channels_data = [img]
@@ -208,15 +178,8 @@ def load_multichannel_tif(path, max_dim=MAX_PREVIEW_DIM):
 
 
 def scan_folder(folder_path):
-    """
-    Scan folder for TIF files. Returns dict of {display_name: file_info}.
-    file_info is either:
-      - ('multi', path) for a multi-channel TIF
-      - ('folder', [path1, path2, ...]) for a folder of single-channel TIFs
-    """
     results = {}
 
-    # Check for subfolders containing channel TIFs
     for entry in sorted(os.listdir(folder_path)):
         full = os.path.join(folder_path, entry)
         if os.path.isdir(full):
@@ -225,7 +188,6 @@ def scan_folder(folder_path):
             if tifs:
                 results[entry] = ('folder', tifs)
 
-    # Also check for TIFs directly in the folder
     for tif in sorted(glob.glob(os.path.join(folder_path, "*.tif")) +
                      glob.glob(os.path.join(folder_path, "*.tiff"))):
         basename = os.path.splitext(os.path.basename(tif))[0]
@@ -235,10 +197,7 @@ def scan_folder(folder_path):
     return results
 
 
-# ─── Channel Control Widget ──────────────────────────────────────────────────
-
 class ChannelControl(ttk.Frame):
-    """Controls for a single channel: visibility, color, contrast, brightness."""
 
     def __init__(self, parent, index, name, vmin, vmax, data_max, on_change,
                  preview_data=None):
@@ -248,7 +207,6 @@ class ChannelControl(ttk.Frame):
         self.data_max = data_max
         self._preview_data = preview_data
 
-        # Row 0: visibility + name (editable) + color
         row0 = ttk.Frame(self)
         row0.pack(fill='x', pady=(0, 2))
 
@@ -264,7 +222,6 @@ class ChannelControl(ttk.Frame):
                              highlightcolor='#6c8eff', highlightbackground='#3a3b55')
         name_entry.pack(side='left', padx=4)
 
-        # Color selector
         default_color = DEFAULT_COLORS[index % len(DEFAULT_COLORS)]
         self.color_var = tk.StringVar(value=default_color)
         color_menu = ttk.Combobox(row0, textvariable=self.color_var,
@@ -272,20 +229,17 @@ class ChannelControl(ttk.Frame):
         color_menu.pack(side='right')
         color_menu.bind('<<ComboboxSelected>>', lambda e: self._changed())
 
-        # Color preview swatch
         self.swatch = tk.Canvas(row0, width=18, height=18, highlightthickness=1)
         self.swatch.pack(side='right', padx=4)
         self._update_swatch()
         self.color_var.trace_add('write', lambda *a: self._update_swatch())
 
-        # ── Histogram ──
         self.hist_canvas = tk.Canvas(self, width=200, height=40, bg='#1e1e2e',
                                      highlightthickness=0)
         self.hist_canvas.pack(fill='x', pady=(2, 1))
         if preview_data is not None:
             self.after(200, self._draw_histogram)
 
-        # Row 1: Contrast (min/max sliders)
         contrast_frame = ttk.Frame(self)
         contrast_frame.pack(fill='x', pady=1)
         ttk.Label(contrast_frame, text="Min:", width=4).pack(side='left')
@@ -308,7 +262,6 @@ class ChannelControl(ttk.Frame):
         self.max_label = ttk.Label(contrast_frame2, text=f"{vmax:.0f}", width=7)
         self.max_label.pack(side='left')
 
-        # Row 2: Brightness
         bright_frame = ttk.Frame(self)
         bright_frame.pack(fill='x', pady=1)
         ttk.Label(bright_frame, text="Brt:", width=4).pack(side='left')
@@ -320,7 +273,6 @@ class ChannelControl(ttk.Frame):
         self.bright_label = ttk.Label(bright_frame, text="1.00", width=7)
         self.bright_label.pack(side='left')
 
-        # Separator
         ttk.Separator(self, orient='horizontal').pack(fill='x', pady=4)
 
     def _update_swatch(self):
@@ -337,7 +289,6 @@ class ChannelControl(ttk.Frame):
         self.on_change()
 
     def _draw_histogram(self):
-        """Draw a histogram of channel pixel intensities."""
         data = self._preview_data
         if data is None:
             return
@@ -348,24 +299,20 @@ class ChannelControl(ttk.Frame):
         if w < 20 or h < 10:
             w, h = 200, 40
 
-        # Compute histogram (100 bins)
         flat = data.ravel()
-        flat = flat[flat > 0]  # skip zero background
+        flat = flat[flat > 0]
         if len(flat) < 50:
             return
         bins = 100
         hist_vals, bin_edges = np.histogram(flat, bins=bins)
         hist_vals = hist_vals.astype(np.float32)
-        # Log scale for better visualization
         hist_vals = np.log1p(hist_vals)
         max_val = hist_vals.max() if hist_vals.max() > 0 else 1
 
-        # Get channel color for the bars
         r, g, b = IF_COLORS.get(self.color_var.get(), (100, 150, 255))
         color = f"#{min(255,r+40):02x}{min(255,g+40):02x}{min(255,b+40):02x}"
         dim_color = f"#{r//3:02x}{g//3:02x}{b//3:02x}"
 
-        # Draw bars
         bar_w = w / bins
         points = [(0, h)]
         for i, val in enumerate(hist_vals):
@@ -392,7 +339,6 @@ class ChannelControl(ttk.Frame):
         }
 
     def set_params(self, params):
-        """Restore saved settings."""
         self.visible_var.set(params.get('visible', True))
         self.color_var.set(params.get('color_name', DEFAULT_COLORS[self.index % len(DEFAULT_COLORS)]))
         self.min_var.set(params.get('min', 0))
@@ -406,10 +352,7 @@ class ChannelControl(ttk.Frame):
         self._update_swatch()
 
 
-# ─── Main Application ────────────────────────────────────────────────────────
-
 class FluoroView(tk.Tk):
-    """Main application window."""
 
     def __init__(self):
         super().__init__()
@@ -417,22 +360,20 @@ class FluoroView(tk.Tk):
         self.geometry("1500x900")
         self.minsize(1000, 600)
 
-        # State
-        self.file_entries = {}   # name -> ('multi', path) or ('folder', [paths])
-        self.channels = []       # list of ChannelData
+        self.file_entries = {}
+        self.channels = []
         self.channel_controls = []
         self.current_file = None
-        self.file_settings = {}  # name -> list of param dicts (persisted per file)
+        self.file_settings = {}
         self.zoom_level = 1.0
         self.pan_offset = [0, 0]
-        # Multi-ROI state
-        self.rois = []            # list of ROIData
-        self.roi_mode = None      # None, 'rect', 'circle', 'freehand'
+        self.rois = []
+        self.roi_mode = None
         self.roi_drawing = False
         self.roi_start = None
         self.roi_freehand_pts = []
         self.show_rois = True
-        self.analysis_scope = 'all'  # 'all' or 'rois'
+        self.analysis_scope = 'all'
         self._update_pending = False
         self._composite_cache = None
         self.executor = ThreadPoolExecutor(max_workers=NUM_WORKERS)
@@ -441,12 +382,10 @@ class FluoroView(tk.Tk):
         self._bind_events()
 
     def _build_ui(self):
-        # ── Modern Dark Theme ──
         self.configure(bg='#1a1b2e')
         style = ttk.Style()
         style.theme_use('clam')
 
-        # Color palette
         BG = '#1a1b2e'
         BG2 = '#232437'
         BG3 = '#2d2e44'
@@ -481,7 +420,6 @@ class FluoroView(tk.Tk):
         style.map('TCombobox',
                  fieldbackground=[('readonly', BG3)],
                  foreground=[('readonly', FG)])
-        # Fix tk widget colors (Listbox popdowns, dialogs, etc.)
         self.option_add('*TCombobox*Listbox.background', BG3)
         self.option_add('*TCombobox*Listbox.foreground', FG)
         self.option_add('*TCombobox*Listbox.selectBackground', ACCENT2)
@@ -505,11 +443,9 @@ class FluoroView(tk.Tk):
         style.configure('TNotebook.Tab', background=BG3, foreground=DIM,
                        padding=(12, 4))
 
-        # Main paned window
         self.main_pane = ttk.PanedWindow(self, orient='horizontal')
         self.main_pane.pack(fill='both', expand=True)
 
-        # ── Left panel: file list ──
         left_frame = ttk.Frame(self.main_pane, width=250)
         self.main_pane.add(left_frame, weight=0)
 
@@ -530,15 +466,12 @@ class FluoroView(tk.Tk):
         self.file_listbox.pack(fill='both', expand=True, padx=8, pady=4)
         self.file_listbox.bind('<<ListboxSelect>>', self._on_file_select)
 
-        # File info label
         self.file_info_label = ttk.Label(left_frame, text="No file loaded", wraplength=230)
         self.file_info_label.pack(padx=8, pady=4)
 
-        # ── Center: image viewer ──
         center_frame = ttk.Frame(self.main_pane)
         self.main_pane.add(center_frame, weight=1)
 
-        # Toolbar
         toolbar = ttk.Frame(center_frame)
         toolbar.pack(fill='x', padx=4, pady=4)
 
@@ -560,23 +493,19 @@ class FluoroView(tk.Tk):
         self.coord_label = ttk.Label(toolbar, text="")
         self.coord_label.pack(side='right', padx=8)
 
-        # Canvas for image
         self.canvas = tk.Canvas(center_frame, bg='#11111b', highlightthickness=0, cursor='crosshair')
         self.canvas.pack(fill='both', expand=True)
 
-        # ── Right panel: channel controls ──
         right_outer = ttk.Frame(self.main_pane, width=280)
         self.main_pane.add(right_outer, weight=0)
 
         ttk.Label(right_outer, text="🎨 Channels (Composite Overlay)", style='Header.TLabel').pack(pady=(8, 4), padx=8, anchor='w')
 
-        # All On / All Off buttons
         toggle_frame = ttk.Frame(right_outer)
         toggle_frame.pack(fill='x', padx=8, pady=(0, 4))
         ttk.Button(toggle_frame, text="All On", command=self._all_channels_on).pack(side='left', padx=2, fill='x', expand=True)
         ttk.Button(toggle_frame, text="All Off", command=self._all_channels_off).pack(side='left', padx=2, fill='x', expand=True)
 
-        # Scrollable controls area (limited height so analysis fits below)
         scroll_frame = ttk.Frame(right_outer)
         scroll_frame.pack(fill='both', expand=True, padx=4)
 
@@ -592,7 +521,6 @@ class FluoroView(tk.Tk):
         scrollbar.pack(side='right', fill='y')
         controls_canvas.pack(side='left', fill='both', expand=True)
 
-        # Apply to all samples button
         apply_frame = ttk.Frame(right_outer)
         apply_frame.pack(fill='x', padx=8, pady=4)
         ttk.Button(apply_frame, text="📋 Apply Settings to All Samples",
@@ -600,7 +528,6 @@ class FluoroView(tk.Tk):
 
         ttk.Separator(right_outer, orient='horizontal').pack(fill='x', padx=8, pady=2)
 
-        # ── Intensity Analysis Graph ──
         analysis_header = ttk.Frame(right_outer)
         analysis_header.pack(fill='x', padx=8)
         ttk.Label(analysis_header, text="📊 Ratio to DAPI",
@@ -616,29 +543,26 @@ class FluoroView(tk.Tk):
                                          highlightthickness=0)
         self.analysis_canvas.pack(fill='x', padx=8, pady=4)
 
-        # DPI is 300 by default (no UI clutter)
         self.dpi_var = tk.StringVar(value='300')
 
-        # Status bar
         self.status_var = tk.StringVar(value="Ready — Open a folder to begin")
         ttk.Label(self, textvariable=self.status_var, relief='sunken',
                   anchor='w', padding=4).pack(fill='x', side='bottom')
 
     def _bind_events(self):
-        self.canvas.bind('<MouseWheel>', self._on_scroll)        # macOS scroll
-        self.canvas.bind('<Button-4>', self._on_scroll)          # Linux scroll up
-        self.canvas.bind('<Button-5>', self._on_scroll)          # Linux scroll down
+        self.canvas.bind('<MouseWheel>', self._on_scroll)
+        self.canvas.bind('<Button-4>', self._on_scroll)
+        self.canvas.bind('<Button-5>', self._on_scroll)
         self.canvas.bind('<ButtonPress-1>', self._on_mouse_press)
         self.canvas.bind('<B1-Motion>', self._on_mouse_drag)
         self.canvas.bind('<ButtonRelease-1>', self._on_mouse_release)
-        self.canvas.bind('<ButtonPress-2>', self._on_pan_start)  # middle button
+        self.canvas.bind('<ButtonPress-2>', self._on_pan_start)
         self.canvas.bind('<B2-Motion>', self._on_pan_drag)
-        self.canvas.bind('<ButtonPress-3>', self._on_pan_start)  # right button
+        self.canvas.bind('<ButtonPress-3>', self._on_pan_start)
         self.canvas.bind('<B3-Motion>', self._on_pan_drag)
         self.canvas.bind('<Motion>', self._on_mouse_move)
         self.canvas.bind('<Configure>', lambda e: self._schedule_update())
 
-    # ── Folder / File management ──────────────────────────────────────────
 
     def _open_folder(self):
         folder = filedialog.askdirectory(title="Select folder with TIF files")
@@ -660,14 +584,12 @@ class FluoroView(tk.Tk):
 
         self.status_var.set(f"Found {len(entries)} items in {os.path.basename(folder)}")
 
-        # Auto-load the first entry so user immediately sees the composite
         if entries and not self.current_file:
             first_name = list(entries.keys())[0]
             self.file_listbox.selection_set(0)
             self._load_file(first_name)
 
     def _open_file(self):
-        """Open individual TIF file(s) directly."""
         files = filedialog.askopenfilenames(
             title="Select TIF file(s)",
             filetypes=[("TIF files", "*.tif *.tiff"), ("All files", "*.*")]
@@ -677,7 +599,6 @@ class FluoroView(tk.Tk):
 
         for fpath in files:
             basename = os.path.splitext(os.path.basename(fpath))[0]
-            # Avoid duplicates
             if basename in self.file_entries:
                 basename = f"{basename} ({len(self.file_entries)})"
             self.file_entries[basename] = ('multi', fpath)
@@ -685,7 +606,6 @@ class FluoroView(tk.Tk):
 
         self.status_var.set(f"Added {len(files)} file(s)")
 
-        # Auto-select and load the first file if nothing is loaded
         if len(files) == 1 and not self.current_file:
             self.file_listbox.selection_clear(0, 'end')
             idx = self.file_listbox.size() - 1
@@ -717,14 +637,12 @@ class FluoroView(tk.Tk):
         self._load_file(name)
 
     def _save_current_settings(self):
-        """Save current channel settings for the active file."""
         if self.current_file and self.channel_controls:
             self.file_settings[self.current_file] = [
                 ctrl.get_params() for ctrl in self.channel_controls
             ]
 
     def _load_file(self, name):
-        # Save settings of the currently loaded file before switching
         self._save_current_settings()
 
         self.current_file = name
@@ -734,12 +652,11 @@ class FluoroView(tk.Tk):
 
         self.channels = []
         self._clear_channel_controls()
-        self.rois = []  # clear ROIs when loading new file
+        self.rois = []
         self._composite_cache = None
 
         try:
             if entry[0] == 'folder':
-                # Load individual channel TIFs in parallel
                 paths = entry[1]
                 futures = {self.executor.submit(load_channel, p): i
                            for i, p in enumerate(paths)}
@@ -749,18 +666,15 @@ class FluoroView(tk.Tk):
                     results[idx] = future.result()
                 self.channels = results
             else:
-                # Multi-channel TIF
                 self.channels = load_multichannel_tif(entry[1])
 
-            # Build channel controls
             for i, ch in enumerate(self.channels):
                 ch_name = f"Channel {i+1}"
                 if entry[0] == 'folder':
                     ch_name = os.path.splitext(os.path.basename(ch.path))[0]
-                    # Shorten the name
                     parts = ch_name.split('_')
                     if len(parts) > 1:
-                        ch_name = parts[-1]  # e.g. "ch1"
+                        ch_name = parts[-1]
 
                 ctrl = ChannelControl(
                     self.controls_frame, i, ch_name,
@@ -771,7 +685,6 @@ class FluoroView(tk.Tk):
                 ctrl.pack(fill='x', padx=2)
                 self.channel_controls.append(ctrl)
 
-            # Update info
             if self.channels:
                 ch0 = self.channels[0]
                 info = (f"{ch0.full_h} × {ch0.full_w}\n"
@@ -780,7 +693,6 @@ class FluoroView(tk.Tk):
                         f"DS factor: {ch0.ds_factor}×")
                 self.file_info_label.config(text=info)
 
-            # Restore saved settings if available
             saved = self.file_settings.get(name)
             if saved and len(saved) == len(self.channel_controls):
                 for ctrl, params in zip(self.channel_controls, saved):
@@ -812,7 +724,6 @@ class FluoroView(tk.Tk):
         self._schedule_update()
 
     def _apply_settings_to_all(self):
-        """Apply current file's channel settings (min/max/brightness/color/name) to all other files."""
         if not self.channel_controls:
             messagebox.showinfo("No data", "Load a file first.")
             return
@@ -825,7 +736,6 @@ class FluoroView(tk.Tk):
         self.status_var.set(f"Applied settings to {count} other sample(s)")
 
     def _update_analysis_graph(self):
-        """Draw a bar chart of Ratio to DAPI per channel."""
         c = self.analysis_canvas
         c.delete('all')
         if not self.channels or not self.channel_controls:
@@ -836,10 +746,8 @@ class FluoroView(tk.Tk):
         if w < 30 or h < 30:
             w, h = 260, 150
 
-        # White background
         c.create_rectangle(0, 0, w, h, fill='#ffffff', outline='')
 
-        # Update scope dropdown with ROI names
         scope_values = ['All Image'] + [roi.name for roi in self.rois]
         self.scope_combo.configure(values=scope_values)
         selected_scope = self.analysis_scope_var.get()
@@ -847,7 +755,6 @@ class FluoroView(tk.Tk):
             self.analysis_scope_var.set('All Image')
             selected_scope = 'All Image'
 
-        # Find selected ROI (if any)
         selected_roi = None
         if selected_scope != 'All Image':
             for roi in self.rois:
@@ -858,7 +765,6 @@ class FluoroView(tk.Tk):
         params_list = [ctrl.get_params() for ctrl in self.channel_controls]
 
         def _get_region_data(ch, params):
-            """Get adjusted pixel data for the current scope."""
             preview = ch.preview
             if selected_roi is not None:
                 x1, y1, x2, y2 = selected_roi.bbox
@@ -880,7 +786,6 @@ class FluoroView(tk.Tk):
             np.clip(data, 0, 1, out=data)
             return data
 
-        # Compute DAPI mean
         dapi_idx = 0
         dapi_mean = 0.0
         for i, (ch, params) in enumerate(zip(self.channels, params_list)):
@@ -897,7 +802,6 @@ class FluoroView(tk.Tk):
         if dapi_mean < 0.001:
             dapi_mean = 1.0
 
-        # Compute ratio for each non-DAPI visible channel
         ratios = []
         ratio_stds = []
         colors = []
@@ -921,7 +825,6 @@ class FluoroView(tk.Tk):
         if not ratios:
             return
 
-        # Drawing parameters
         margin_l = 40
         margin_r = 10
         margin_t = 12
@@ -935,17 +838,14 @@ class FluoroView(tk.Tk):
         bar_w = max(10, plot_w // max(1, n_bars) - 8)
         gap = max(4, (plot_w - n_bars * bar_w) // max(1, n_bars + 1))
 
-        # Axes
         c.create_line(margin_l, margin_t, margin_l, h - margin_b,
                       fill='#333333', width=1)
         c.create_line(margin_l, h - margin_b, w - margin_r, h - margin_b,
                       fill='#333333', width=1)
 
-        # Y-axis title
         c.create_text(12, h // 2, text="Ratio", anchor='center', angle=90,
                      fill='#333333', font=('Helvetica Neue', 8, 'bold'))
 
-        # Y-axis tick labels
         for frac in [0, 0.5, 1.0]:
             y = int(h - margin_b - frac * plot_h)
             val = frac * max_val
@@ -954,7 +854,6 @@ class FluoroView(tk.Tk):
             c.create_line(margin_l, y, w - margin_r, y,
                          fill='#e0e0e0', width=1)
 
-        # Draw bars
         for i in range(n_bars):
             x = margin_l + gap + i * (bar_w + gap)
             bar_h = (ratios[i] / max_val) * plot_h
@@ -963,7 +862,6 @@ class FluoroView(tk.Tk):
             c.create_rectangle(x, y_top, x + bar_w, h - margin_b,
                              fill=colors[i], outline='#333333', width=1)
 
-            # Error bar
             if ratio_stds[i] > 0:
                 err_top = h - margin_b - ((ratios[i] + ratio_stds[i]) / max_val) * plot_h
                 err_bot = h - margin_b - (max(0, ratios[i] - ratio_stds[i]) / max_val) * plot_h
@@ -972,22 +870,17 @@ class FluoroView(tk.Tk):
                 c.create_line(mid_x - 3, err_top, mid_x + 3, err_top, fill='#333333', width=1)
                 c.create_line(mid_x - 3, err_bot, mid_x + 3, err_bot, fill='#333333', width=1)
 
-            # Value label on bar
             c.create_text(x + bar_w // 2, y_top - 4, text=f"{ratios[i]:.2f}",
                          anchor='s', fill='#333333', font=('Helvetica Neue', 7))
 
-            # Channel name
             c.create_text(x + bar_w // 2, h - margin_b + 3, text=names[i],
                          anchor='n', fill='#333333', font=('Helvetica Neue', 7))
 
-        # X-axis title
         c.create_text(w // 2, h - 2, text="Ratio to DAPI", anchor='s',
                      fill='#333333', font=('Helvetica Neue', 8, 'bold'))
 
-    # ── Composite Rendering ───────────────────────────────────────────────
 
     def _schedule_update(self):
-        """Debounced update to avoid excessive re-renders during slider drags."""
         if not self._update_pending:
             self._update_pending = True
             self.after(30, self._do_update)
@@ -998,7 +891,6 @@ class FluoroView(tk.Tk):
         self._update_analysis_graph()
 
     def _compute_channel_image(self, ch_data, params):
-        """Apply contrast/brightness and color to a single channel preview. Returns float32 RGB."""
         if not params['visible']:
             return None
 
@@ -1007,17 +899,14 @@ class FluoroView(tk.Tk):
         cmax = params['max']
         brightness = params['brightness']
 
-        # Contrast stretch
         if cmax <= cmin:
             cmax = cmin + 1
         img = (img - cmin) / (cmax - cmin)
         img = np.clip(img, 0, 1)
 
-        # Brightness
         img *= brightness
         img = np.clip(img, 0, 1)
 
-        # Apply color
         r, g, b = params['color']
         rgb = np.zeros((*img.shape, 3), dtype=np.float32)
         rgb[:, :, 0] = img * (r / 255.0)
@@ -1026,11 +915,6 @@ class FluoroView(tk.Tk):
         return rgb
 
     def _render_viewport_region(self, canvas_w, canvas_h):
-        """
-        Render only the visible viewport region, loading from full-res data
-        when zoomed in beyond the preview resolution.
-        Returns an RGB uint8 array sized to the canvas.
-        """
         if not self.channels:
             return None
 
@@ -1039,22 +923,15 @@ class FluoroView(tk.Tk):
         prev_h, prev_w = ch0.preview.shape
         full_h, full_w = ch0.full_h, ch0.full_w
 
-        # Effective zoom relative to full-res pixels
-        # zoom_level=1 means 1 preview pixel = 1 screen pixel
-        # To get full-res pixel mapping: full_zoom = zoom_level / ds
-        # If zoom_level > ds, we should read from full-res data
         use_fullres = (self.zoom_level > ds * 0.5)
 
         if use_fullres:
-            # Determine which region of full-res image is visible
             src_w, src_h = full_w, full_h
-            full_zoom = self.zoom_level / ds  # zoom relative to full-res
+            full_zoom = self.zoom_level / ds
 
-            # Center of view in full-res coords
             cx_full = full_w / 2 - self.pan_offset[0] / (self.zoom_level / ds)
             cy_full = full_h / 2 - self.pan_offset[1] / (self.zoom_level / ds)
 
-            # Visible region in full-res coords
             half_vw = canvas_w / 2 / full_zoom
             half_vh = canvas_h / 2 / full_zoom
 
@@ -1086,12 +963,10 @@ class FluoroView(tk.Tk):
                 ch_rgb[:, :, 0] = data * (r / 255.0)
                 ch_rgb[:, :, 1] = data * (g / 255.0)
                 ch_rgb[:, :, 2] = data * (b / 255.0)
-                # Screen blend: 1 - (1-A)*(1-B)
                 composite = 1 - (1 - composite) * (1 - ch_rgb)
 
             composite = np.clip(composite * 255, 0, 255).astype(np.uint8)
 
-            # Resize to screen size
             out_w = int(region_w * full_zoom)
             out_h = int(region_h * full_zoom)
             if out_w < 1 or out_h < 1:
@@ -1101,48 +976,39 @@ class FluoroView(tk.Tk):
             pil_img = pil_img.resize((out_w, out_h),
                                      Image.NEAREST if full_zoom > 3 else Image.LANCZOS)
 
-            # Place in canvas-sized image
             result = Image.new('RGB', (canvas_w, canvas_h), (17, 17, 27))
-            # Where does this region go on screen?
             screen_x = int((fx1 - cx_full) * full_zoom + canvas_w / 2)
             screen_y = int((fy1 - cy_full) * full_zoom + canvas_h / 2)
             result.paste(pil_img, (screen_x, screen_y))
             return result
 
         else:
-            # Use preview data (zoomed out or moderate zoom)
-            return None  # fall through to old method
+            return None
 
     def _render_composite(self):
-        """Render the composite overlay of all visible channels."""
         if not self.channels:
             return
 
         canvas_w = self.canvas.winfo_width()
         canvas_h = self.canvas.winfo_height()
 
-        # Try viewport-based rendering for deep zoom
         viewport_img = self._render_viewport_region(canvas_w, canvas_h)
         if viewport_img is not None:
             self._display_pil_on_canvas(viewport_img)
             return
 
-        # Standard preview-based rendering
         params_list = [ctrl.get_params() for ctrl in self.channel_controls]
 
-        # Parallel channel computation
         futures = []
         for ch, params in zip(self.channels, params_list):
             futures.append(self.executor.submit(self._compute_channel_image, ch, params))
 
-        # Screen blending
         h, w = self.channels[0].preview.shape
         composite = np.zeros((h, w, 3), dtype=np.float32)
 
         for future in futures:
             result = future.result()
             if result is not None:
-                # Screen blend: 1 - (1-A)*(1-B)
                 composite = 1 - (1 - composite) * (1 - result)
 
         composite = np.clip(composite * 255, 0, 255).astype(np.uint8)
@@ -1151,14 +1017,11 @@ class FluoroView(tk.Tk):
         self._display_on_canvas(composite)
 
     def _display_pil_on_canvas(self, pil_img):
-        """Display a PIL image directly on the canvas (used by viewport rendering)."""
         self._tk_image = ImageTk.PhotoImage(pil_img)
         self.canvas.delete('all')
         self.canvas.create_image(0, 0, image=self._tk_image, anchor='nw')
-        # ROIs are drawn on the canvas after, in _display_on_canvas path
 
     def _display_on_canvas(self, rgb_array):
-        """Display an RGB array on the canvas with current zoom/pan."""
         if rgb_array is None:
             return
 
@@ -1169,7 +1032,6 @@ class FluoroView(tk.Tk):
 
         img_h, img_w = rgb_array.shape[:2]
 
-        # Apply zoom
         disp_w = int(img_w * self.zoom_level)
         disp_h = int(img_h * self.zoom_level)
 
@@ -1179,7 +1041,6 @@ class FluoroView(tk.Tk):
         pil_img = Image.fromarray(rgb_array)
         pil_img = pil_img.resize((disp_w, disp_h), Image.NEAREST if self.zoom_level > 2 else Image.LANCZOS)
 
-        # Draw all ROIs on the PIL image
         if self.rois and self.show_rois:
             draw = ImageDraw.Draw(pil_img)
             for roi in self.rois:
@@ -1197,30 +1058,24 @@ class FluoroView(tk.Tk):
                         draw.polygon(pts, outline='#00ff88', fill=None)
                 else:
                     draw.rectangle([zx1, zy1, zx2, zy2], outline='#00ff88', width=2)
-                # DOT corners for rect
                 if roi.roi_type == 'rect':
                     for cx, cy in [(zx1, zy1), (zx2, zy1), (zx1, zy2), (zx2, zy2)]:
                         draw.rectangle([cx-3, cy-3, cx+3, cy+3], fill='#00ff88')
-                # Label
                 try:
                     draw.text((zx1 + 4, zy1 - 14), roi.name, fill='#00ff88')
                 except Exception:
                     pass
 
-        # Draw in-progress freehand polygon points
         if self.roi_freehand_pts and self.roi_mode == 'freehand':
             draw = ImageDraw.Draw(pil_img)
             pts = [(int(px * self.zoom_level), int(py * self.zoom_level))
                    for px, py in self.roi_freehand_pts]
-            # Draw connecting lines
             for j in range(len(pts) - 1):
                 draw.line([pts[j], pts[j+1]], fill='#ffff00', width=2)
-            # Draw dots at each point
             for j, (px, py) in enumerate(pts):
                 r = 4 if j == 0 else 3
-                color = '#ff4444' if j == 0 else '#ffff00'  # Red start point
+                color = '#ff4444' if j == 0 else '#ffff00'
                 draw.ellipse([px - r, py - r, px + r, py + r], fill=color, outline='white')
-            # Show hint text
             if len(pts) > 2:
                 draw.text((pts[0][0] + 8, pts[0][1] - 10), "click to close",
                          fill='#ff4444')
@@ -1228,15 +1083,12 @@ class FluoroView(tk.Tk):
         self._tk_image = ImageTk.PhotoImage(pil_img)
 
         self.canvas.delete('all')
-        # Center with pan offset
         x = canvas_w // 2 + self.pan_offset[0]
         y = canvas_h // 2 + self.pan_offset[1]
         self.canvas.create_image(x, y, image=self._tk_image, anchor='center')
 
-    # ── Zoom / Pan ────────────────────────────────────────────────────────
 
     def _on_scroll(self, event):
-        # Cursor-centric zoom: keep image point under cursor fixed
         if event.num == 4 or event.delta > 0:
             factor = 1.35
         elif event.num == 5 or event.delta < 0:
@@ -1244,7 +1096,6 @@ class FluoroView(tk.Tk):
         else:
             return
 
-        # Mouse position relative to canvas center
         cx = self.canvas.winfo_width() / 2
         cy = self.canvas.winfo_height() / 2
         mx = event.x - cx - self.pan_offset[0]
@@ -1254,7 +1105,6 @@ class FluoroView(tk.Tk):
         self.zoom_level = max(0.01, self.zoom_level * factor)
         ratio = self.zoom_level / old_zoom
 
-        # Adjust pan so point under cursor stays fixed
         self.pan_offset[0] -= mx * (ratio - 1)
         self.pan_offset[1] -= my * (ratio - 1)
 
@@ -1262,7 +1112,6 @@ class FluoroView(tk.Tk):
         self._schedule_update()
 
     def _zoom_step(self, factor):
-        """Zoom in/out by a fixed factor (for +/- buttons)."""
         self.zoom_level = max(0.01, self.zoom_level * factor)
         self.zoom_label.config(text=f"Zoom: {self.zoom_level:.1%}")
         self._schedule_update()
@@ -1288,7 +1137,6 @@ class FluoroView(tk.Tk):
         self.zoom_label.config(text="Zoom: 100%")
         self._schedule_update()
 
-    # ── Mouse events ──────────────────────────────────────────────────────
 
     def _on_pan_start(self, event):
         self._pan_start_x = event.x
@@ -1303,7 +1151,6 @@ class FluoroView(tk.Tk):
         self._schedule_update()
 
     def _canvas_to_image(self, event_x, event_y):
-        """Convert canvas coordinates to image (preview) coordinates."""
         canvas_w = self.canvas.winfo_width()
         canvas_h = self.canvas.winfo_height()
         cx = canvas_w // 2 + self.pan_offset[0]
@@ -1320,16 +1167,13 @@ class FluoroView(tk.Tk):
     def _on_mouse_press(self, event):
         if self.roi_drawing:
             if self.roi_mode == 'freehand':
-                # Click to place points; close by clicking near start
                 px, py = self._canvas_to_image(event.x, event.y)
                 if px is None:
                     return
                 if len(self.roi_freehand_pts) > 2:
-                    # Check if close to first point (within 10px on screen)
                     sx, sy = self.roi_freehand_pts[0]
                     dist = ((px - sx)**2 + (py - sy)**2)**0.5
                     if dist * self.zoom_level < 12:
-                        # Close polygon — create the ROI
                         pts = self.roi_freehand_pts
                         xs = [p[0] for p in pts]
                         ys = [p[1] for p in pts]
@@ -1346,14 +1190,12 @@ class FluoroView(tk.Tk):
                 self.roi_start = (event.x, event.y)
                 self._temp_roi_bbox = None
         else:
-            # Pan with left click
             self._pan_start_x = event.x
             self._pan_start_y = event.y
             self._pan_start_offset = list(self.pan_offset)
 
     def _on_mouse_drag(self, event):
         if self.roi_drawing and self.roi_start and self.roi_mode != 'freehand':
-            # Drag for rect/circle
             canvas_w = self.canvas.winfo_width()
             canvas_h = self.canvas.winfo_height()
             cx = canvas_w // 2 + self.pan_offset[0]
@@ -1383,7 +1225,6 @@ class FluoroView(tk.Tk):
             self._temp_roi_bbox = (x1, y1, x2, y2)
             self._schedule_update()
         elif not self.roi_drawing:
-            # Pan
             dx = event.x - self._pan_start_x
             dy = event.y - self._pan_start_y
             self.pan_offset[0] = self._pan_start_offset[0] + dx
@@ -1407,7 +1248,6 @@ class FluoroView(tk.Tk):
     def _on_mouse_move(self, event):
         if not self.channels:
             return
-        # Show coordinates
         canvas_w = self.canvas.winfo_width()
         canvas_h = self.canvas.winfo_height()
         cx = canvas_w // 2 + self.pan_offset[0]
@@ -1422,7 +1262,6 @@ class FluoroView(tk.Tk):
         py = (event.y - img_top) / self.zoom_level
 
         if 0 <= px < img_w and 0 <= py < img_h:
-            # Full-res coords
             ds = self.channels[0].ds_factor
             fx, fy = int(px * ds), int(py * ds)
             self.coord_label.config(text=f"({fx}, {fy})")
@@ -1430,7 +1269,6 @@ class FluoroView(tk.Tk):
             self.coord_label.config(text="")
 
     def _set_roi_mode(self, mode):
-        """Set ROI drawing mode: 'rect', 'circle', or 'freehand'."""
         self.roi_mode = mode
         self.roi_drawing = True
         self.roi_freehand_pts = []
@@ -1439,7 +1277,6 @@ class FluoroView(tk.Tk):
         self.status_var.set(f"ROI mode: {mode} — click and drag to draw")
 
     def _clear_all_rois(self):
-        """Clear all ROIs."""
         self.rois = []
         self.roi_drawing = False
         self.roi_mode = None
@@ -1449,13 +1286,11 @@ class FluoroView(tk.Tk):
         self.status_var.set("All ROIs cleared")
 
     def _toggle_roi_visibility(self):
-        """Show/hide all ROI overlays on the image."""
         self.show_rois = not self.show_rois
         self._schedule_update()
         self.status_var.set(f"ROIs {'visible' if self.show_rois else 'hidden'}")
 
     def _save_all_rois(self):
-        """Save cropped images for all ROIs — merged + per-channel, in named folders."""
         if not self.channels:
             messagebox.showinfo("No data", "Load an image first.")
             return
@@ -1479,32 +1314,26 @@ class FluoroView(tk.Tk):
                     roi_folder = os.path.join(base_folder, roi.name)
                     os.makedirs(roi_folder, exist_ok=True)
                     x1, y1, x2, y2 = roi.bbox
-                    # Full-res region
                     fx1, fy1 = int(x1 * ds), int(y1 * ds)
                     fx2, fy2 = int(x2 * ds), int(y2 * ds)
                     region = (fx1, fy1, fx2, fy2)
                     fh = fy2 - fy1
                     fw = fx2 - fx1
 
-                    # Mask for non-rect ROIs
                     roi_mask = roi.get_mask(fh, fw, ds_factor=1)
-                    # Shift mask origin since get_mask works on full image
                     roi_mask_local = roi.get_mask(
                         self.channels[0].full_h, self.channels[0].full_w,
                         ds_factor=ds
                     )[fy1:fy2, fx1:fx2]
 
-                    # Save merged composite ROI
                     rgb = self._render_fullres_composite(region=region)
                     if rgb is not None:
                         if roi.roi_type != 'rect':
-                            # Zero out pixels outside the ROI mask
                             for c in range(3):
                                 rgb[:, :, c] = rgb[:, :, c] * roi_mask_local
                         pil = Image.fromarray(rgb)
                         pil.save(os.path.join(roi_folder, f"{roi.name}-merged.tif"))
 
-                    # Save per-channel ROI
                     for i, (ch, params) in enumerate(zip(self.channels, params_list)):
                         if not params['visible']:
                             continue
@@ -1538,7 +1367,6 @@ class FluoroView(tk.Tk):
         threading.Thread(target=do_save, daemon=True).start()
 
     def _export_csv(self):
-        """Export per-ROI, per-channel statistics to CSV."""
         if not self.channels:
             messagebox.showinfo("No data", "Load an image first.")
             return
@@ -1556,7 +1384,6 @@ class FluoroView(tk.Tk):
         params_list = [ctrl.get_params() for ctrl in self.channel_controls]
         ch_names = [p.get('name', f'ch{i+1}') for i, p in enumerate(params_list)]
 
-        # Find DAPI channel (first channel or one named DAPI)
         dapi_idx = 0
         for i, name in enumerate(ch_names):
             if 'dapi' in name.lower():
@@ -1565,7 +1392,6 @@ class FluoroView(tk.Tk):
 
         with open(path, 'w', newline='') as f:
             writer = csv.writer(f)
-            # Header
             header = ['ROI_Name', 'ROI_Type', 'Center_X', 'Center_Y',
                       'Width_px', 'Height_px', 'Channel', 'Color',
                       'Mean_Intensity', 'Std_Intensity', 'Median_Intensity',
@@ -1573,7 +1399,6 @@ class FluoroView(tk.Tk):
                       'Ratio_to_DAPI', 'Adjusted_Min', 'Adjusted_Max', 'Brightness']
             writer.writerow(header)
 
-            # Compute for ROIs or entire image
             rois_to_analyze = self.rois if self.rois else [None]
 
             for roi in rois_to_analyze:
@@ -1591,7 +1416,6 @@ class FluoroView(tk.Tk):
                     w_val = x2 - x1
                     h_val = y2 - y1
 
-                # Compute adjusted intensities per channel
                 ch_means = []
                 for i, (ch, params) in enumerate(zip(self.channels, params_list)):
                     if not params['visible']:
@@ -1611,7 +1435,6 @@ class FluoroView(tk.Tk):
                     else:
                         region_data = preview.ravel()
 
-                    # Apply current contrast/brightness
                     cmin, cmax = params['min'], params['max']
                     if cmax <= cmin:
                         cmax = cmin + 1
@@ -1646,11 +1469,6 @@ class FluoroView(tk.Tk):
         self.status_var.set(f"CSV exported → {os.path.basename(path)}")
 
     def _render_fullres_composite(self, region=None):
-        """
-        Render composite at full resolution.
-        region: (x1, y1, x2, y2) in full-res pixels, or None for entire image.
-        Returns uint8 RGB numpy array.
-        """
         if not self.channels:
             return None
 
@@ -1672,7 +1490,6 @@ class FluoroView(tk.Tk):
             ch_data, params = args
             if not params['visible']:
                 return None
-            # Read the region from full-res data
             data = ch_data.full_data[y1:y2, x1:x2].astype(np.float64)
             cmin, cmax = params['min'], params['max']
             if cmax <= cmin:
@@ -1689,7 +1506,6 @@ class FluoroView(tk.Tk):
             rgb[:, :, 2] = data * (b / 255.0)
             return rgb
 
-        # Process channels in parallel
         with ThreadPoolExecutor(max_workers=NUM_WORKERS) as pool:
             futures = list(pool.map(process_channel,
                                     [(ch, p) for ch, p in zip(self.channels, params_list)]))
@@ -1784,7 +1600,6 @@ class FluoroView(tk.Tk):
         threading.Thread(target=do_save, daemon=True).start()
 
     def _open_merge_popup(self):
-        """Open the merge view popup. Auto-loads sibling channels if only 1 is loaded."""
         if not self.channels:
             messagebox.showinfo("No data", "Load an image first.")
             return
@@ -1793,13 +1608,11 @@ class FluoroView(tk.Tk):
         params_list = [ctrl.get_params() for ctrl in self.channel_controls]
         ch_names = []
 
-        # If only 1 channel loaded, try to find sibling channel files
         if len(channels) == 1:
             ch_path = channels[0].path
             ch_dir = os.path.dirname(ch_path)
             ch_base = os.path.basename(ch_path)
 
-            # Find all TIF files in the same directory
             sibling_tifs = sorted([
                 f for f in os.listdir(ch_dir)
                 if f.lower().endswith(('.tif', '.tiff'))
@@ -1817,7 +1630,6 @@ class FluoroView(tk.Tk):
                     except Exception:
                         pass
 
-                # Build params for new channels with different default colors
                 for i in range(len(params_list), len(channels)):
                     ch = channels[i]
                     p = {
@@ -1828,11 +1640,9 @@ class FluoroView(tk.Tk):
                         'brightness': 1.0,
                     }
                     params_list.append(p)
-                # Also set first channel color
                 params_list[0]['color_name'] = DEFAULT_COLORS[0]
                 params_list[0]['color'] = IF_COLORS[DEFAULT_COLORS[0]]
 
-        # Build channel names
         for i, ch in enumerate(channels):
             name = os.path.splitext(os.path.basename(ch.path))[0]
             parts = name.split('_')
@@ -1843,7 +1653,6 @@ class FluoroView(tk.Tk):
                    int(self.dpi_var.get()))
 
     def _open_mask_popup(self):
-        """Open the brush mask adjustment popup."""
         if not self.channels:
             messagebox.showinfo("No data", "Load an image first.")
             return
@@ -1860,17 +1669,15 @@ class FluoroView(tk.Tk):
         MaskAdjustPopup(self, self.channels, params_list, ch_names,
                         self.current_file, int(self.dpi_var.get()))
 
-# ─── Merge Popup ──────────────────────────────────────────────────────────────
 
 class MergePopup(tk.Toplevel):
-    """Popup window for selecting channels to merge and viewing the composite."""
 
     def __init__(self, parent, channels, params_list, ch_names, file_name, dpi):
         super().__init__(parent)
         self.title(f"Merge View — {file_name}")
         self.geometry("1200x800")
         self.channels = channels
-        self.params_list = [dict(p) for p in params_list]  # copy
+        self.params_list = [dict(p) for p in params_list]
         self.ch_names = ch_names
         self.file_name = file_name
         self.dpi = dpi
@@ -1885,7 +1692,6 @@ class MergePopup(tk.Toplevel):
         self.after(100, self._zoom_fit)
 
     def _build_ui(self):
-        # Left: scrollable channel controls
         left = ttk.Frame(self, width=220)
         left.pack(side='left', fill='y', padx=4, pady=4)
         left.pack_propagate(False)
@@ -1899,7 +1705,6 @@ class MergePopup(tk.Toplevel):
         self.max_vars = []
         self.brt_vars = []
 
-        # Scrollable channel controls
         ctrl_canvas = tk.Canvas(left, highlightthickness=0)
         ctrl_sb = ttk.Scrollbar(left, orient='vertical', command=ctrl_canvas.yview)
         ctrl_inner = ttk.Frame(ctrl_canvas)
@@ -1914,7 +1719,6 @@ class MergePopup(tk.Toplevel):
             ch_fr = ttk.LabelFrame(ctrl_inner, text=name, padding=4)
             ch_fr.pack(fill='x', pady=3, padx=2)
 
-            # Top row: checkbox + color
             top = ttk.Frame(ch_fr)
             top.pack(fill='x')
             var = tk.BooleanVar(value=True)
@@ -1931,7 +1735,6 @@ class MergePopup(tk.Toplevel):
 
             data_max = float(self.channels[i].preview.max()) if i < len(self.channels) else 65535
 
-            # Min slider
             min_f = ttk.Frame(ch_fr)
             min_f.pack(fill='x')
             ttk.Label(min_f, text="Min:", width=4).pack(side='left')
@@ -1941,7 +1744,6 @@ class MergePopup(tk.Toplevel):
                      orient='horizontal').pack(side='left', fill='x', expand=True)
             self.min_vars.append(mv)
 
-            # Max slider
             max_f = ttk.Frame(ch_fr)
             max_f.pack(fill='x')
             ttk.Label(max_f, text="Max:", width=4).pack(side='left')
@@ -1951,7 +1753,6 @@ class MergePopup(tk.Toplevel):
                      orient='horizontal').pack(side='left', fill='x', expand=True)
             self.max_vars.append(xv)
 
-            # Brightness slider
             brt_f = ttk.Frame(ch_fr)
             brt_f.pack(fill='x')
             ttk.Label(brt_f, text="Brt:", width=4).pack(side='left')
@@ -1961,7 +1762,6 @@ class MergePopup(tk.Toplevel):
                      orient='horizontal').pack(side='left', fill='x', expand=True)
             self.brt_vars.append(bv)
 
-        # ── Bottom buttons (inside left panel, below scroll) ──
         ttk.Separator(left, orient='horizontal').pack(fill='x', pady=4)
         btn_fr = ttk.Frame(left)
         btn_fr.pack(fill='x', padx=2)
@@ -1985,7 +1785,6 @@ class MergePopup(tk.Toplevel):
 
         ttk.Button(left, text="💾 Save Merged", command=self._save_merged).pack(fill='x', padx=2, pady=4)
 
-        # Right: canvas
         self.canvas = tk.Canvas(self, bg='#11111b', highlightthickness=0, cursor='crosshair')
         self.canvas.pack(side='right', fill='both', expand=True)
 
@@ -2013,7 +1812,6 @@ class MergePopup(tk.Toplevel):
         self._render()
 
     def _get_active_params(self):
-        """Get current params with updated visibility, colors, and contrast from popup controls."""
         result = []
         for i, params in enumerate(self.params_list):
             p = dict(params)
@@ -2037,15 +1835,13 @@ class MergePopup(tk.Toplevel):
         ds = ch0.ds_factor
         params_list = self._get_active_params()
 
-        # HD mode: load full-res data for the visible viewport
         if self.hd_var.get() and self.zoom_level > ds * 0.3:
             try:
                 self._render_hd(canvas_w, canvas_h, params_list)
                 return
             except Exception:
-                pass  # fall through to preview rendering
+                pass
 
-        # Decide whether to use full-res or preview
         use_fullres = (self.zoom_level > ds * 0.5) and not self.hd_var.get()
 
         if use_fullres:
@@ -2098,7 +1894,6 @@ class MergePopup(tk.Toplevel):
             result.paste(pil_img, (screen_x, screen_y))
 
         else:
-            # Preview-based rendering
             prev_h, prev_w = ch0.preview.shape
             composite = np.zeros((prev_h, prev_w, 3), dtype=np.float32)
 
@@ -2138,7 +1933,6 @@ class MergePopup(tk.Toplevel):
         self.canvas.create_image(0, 0, image=self._tk_image, anchor='nw')
 
     def _render_hd(self, canvas_w, canvas_h, params_list):
-        """Render the visible viewport from full-resolution data."""
         ch0 = self.channels[0]
         ds = ch0.ds_factor
         full_zoom = self.zoom_level / ds
@@ -2194,7 +1988,6 @@ class MergePopup(tk.Toplevel):
         self.canvas.delete('all')
         self.canvas.create_image(0, 0, image=self._tk_image, anchor='nw')
 
-    # Zoom / Pan
     def _on_scroll(self, event):
         factor = 1.35 if event.delta > 0 else 1 / 1.35
         cx = self.canvas.winfo_width() / 2
@@ -2291,18 +2084,11 @@ class MergePopup(tk.Toplevel):
         threading.Thread(target=do_save, daemon=True).start()
 
 
-# ─── Brush Mask Adjustment Popup ──────────────────────────────────────────────
-
 class MaskAdjustPopup(tk.Toplevel):
-    """
-    Popup with a brush tool to paint a mask. Contrast/brightness adjustments
-    apply only inside the mask. Mask edges are feathered with a 15% Gaussian
-    gradient for smooth transitions.
-    """
 
     def __init__(self, parent, channels, params_list, ch_names, file_name, dpi):
         super().__init__(parent)
-        self.parent_app = parent  # reference to FluoroView for applying changes
+        self.parent_app = parent
         self.title(f"Brush Mask Adjust — {file_name}")
         self.geometry("1400x900")
         self.channels = channels
@@ -2312,12 +2098,10 @@ class MaskAdjustPopup(tk.Toplevel):
         self.file_name = file_name
         self.dpi = dpi
 
-        # Use channel preview data directly
         ch0 = channels[0]
         self.prev_h, self.prev_w = ch0.preview.shape
         self.ds = ch0.ds_factor
 
-        # Mask state
         self.mask = np.zeros((self.prev_h, self.prev_w), dtype=np.float32)
         self.feathered_mask = np.zeros_like(self.mask)
         self.mask_history = []
@@ -2325,7 +2109,6 @@ class MaskAdjustPopup(tk.Toplevel):
         self.painting = False
         self._last_paint = None
 
-        # View state
         self.zoom_level = 1.0
         self.pan_offset = [0, 0]
         self._update_pending = False
@@ -2336,7 +2119,6 @@ class MaskAdjustPopup(tk.Toplevel):
         self.after(200, self._zoom_fit)
 
     def _build_ui(self):
-        # ── Left panel: controls ──
         left = ttk.Frame(self, width=300)
         left.pack(side='left', fill='y', padx=8, pady=8)
         left.pack_propagate(False)
@@ -2344,7 +2126,6 @@ class MaskAdjustPopup(tk.Toplevel):
         ttk.Label(left, text="🖌 Brush Mask Tool",
                   font=('Helvetica', 13, 'bold')).pack(pady=(0, 8))
 
-        # Brush controls
         brush_frame = ttk.LabelFrame(left, text="Brush", padding=6)
         brush_frame.pack(fill='x', pady=4)
 
@@ -2375,17 +2156,14 @@ class MaskAdjustPopup(tk.Toplevel):
         self.mask_info = ttk.Label(brush_frame, text="Mask: 0% painted")
         self.mask_info.pack(pady=2)
 
-        # Feather info
         ttk.Label(brush_frame, text="Auto 15% edge feathering",
                   font=('Helvetica', 9, 'italic'), foreground='gray').pack()
 
         ttk.Separator(left, orient='horizontal').pack(fill='x', pady=8)
 
-        # Mask region adjustments
         adj_frame = ttk.LabelFrame(left, text="Mask Region Adjustments (per channel)", padding=6)
         adj_frame.pack(fill='both', expand=True, pady=4)
 
-        # Scrollable area for channel controls
         adj_canvas = tk.Canvas(adj_frame, highlightthickness=0)
         adj_sb = ttk.Scrollbar(adj_frame, orient='vertical', command=adj_canvas.yview)
         adj_inner = ttk.Frame(adj_canvas)
@@ -2408,7 +2186,6 @@ class MaskAdjustPopup(tk.Toplevel):
 
             data_max = float(self.channels[i].preview.max())
 
-            # Min slider
             min_fr = ttk.Frame(ch_fr)
             min_fr.pack(fill='x')
             ttk.Label(min_fr, text="Min:", width=4).pack(side='left')
@@ -2418,7 +2195,6 @@ class MaskAdjustPopup(tk.Toplevel):
                      orient='horizontal').pack(side='left', fill='x', expand=True)
             self.mask_min_vars.append(mv)
 
-            # Max slider
             max_fr = ttk.Frame(ch_fr)
             max_fr.pack(fill='x')
             ttk.Label(max_fr, text="Max:", width=4).pack(side='left')
@@ -2428,7 +2204,6 @@ class MaskAdjustPopup(tk.Toplevel):
                      orient='horizontal').pack(side='left', fill='x', expand=True)
             self.mask_max_vars.append(xv)
 
-            # Brightness slider
             brt_fr = ttk.Frame(ch_fr)
             brt_fr.pack(fill='x')
             ttk.Label(brt_fr, text="Brt:", width=4).pack(side='left')
@@ -2442,19 +2217,16 @@ class MaskAdjustPopup(tk.Toplevel):
 
         ttk.Separator(left, orient='horizontal').pack(fill='x', pady=8)
 
-        # Zoom controls
         zoom_fr = ttk.Frame(left)
         zoom_fr.pack(fill='x', pady=2)
         ttk.Button(zoom_fr, text="Fit", command=self._zoom_fit).pack(side='left', fill='x', expand=True)
         ttk.Button(zoom_fr, text="➕", command=lambda: self._zoom_step(1.5)).pack(side='left', padx=1)
         ttk.Button(zoom_fr, text="➖", command=lambda: self._zoom_step(1/1.5)).pack(side='left', padx=1)
 
-        # Apply buttons
         ttk.Button(left, text="✅ Apply to Channel", command=self._apply_to_channel).pack(fill='x', pady=2)
         ttk.Button(left, text="🔄 Apply to All", command=self._apply_to_all).pack(fill='x', pady=2)
         ttk.Button(left, text="💾 Save Result", command=self._save_result).pack(fill='x', pady=4)
 
-        # ── Canvas ──
         self.canvas = tk.Canvas(self, bg='#11111b', highlightthickness=0, cursor='circle')
         self.canvas.pack(side='right', fill='both', expand=True)
 
@@ -2474,7 +2246,6 @@ class MaskAdjustPopup(tk.Toplevel):
         self.size_label.config(text=f"{self.brush_size}px")
 
     def _canvas_to_img(self, cx, cy):
-        """Convert canvas coords to preview image coords."""
         canvas_w = self.canvas.winfo_width()
         canvas_h = self.canvas.winfo_height()
         disp_w = self.prev_w * self.zoom_level
@@ -2486,7 +2257,6 @@ class MaskAdjustPopup(tk.Toplevel):
         return ix, iy
 
     def _paint_at(self, ix, iy):
-        """Paint or erase a circle at image coords."""
         r = self.brush_size / 2
         y_min = int(max(0, iy - r))
         y_max = int(min(self.prev_h, iy + r + 1))
@@ -2506,11 +2276,9 @@ class MaskAdjustPopup(tk.Toplevel):
             self.mask[y_min:y_max, x_min:x_max][circle] = 1
 
     def _paint_line(self, x0, y0, x1, y1):
-        """Paint circles along a line from (x0,y0) to (x1,y1) for smooth strokes."""
         dx = x1 - x0
         dy = y1 - y0
         dist = max(1, int(np.sqrt(dx*dx + dy*dy)))
-        # Step size = half the brush radius for no gaps
         steps = max(1, int(dist / max(1, self.brush_size * 0.3)))
         for t in range(steps + 1):
             frac = t / max(1, steps)
@@ -2519,26 +2287,19 @@ class MaskAdjustPopup(tk.Toplevel):
             self._paint_at(ix, iy)
 
     def _feather_mask(self):
-        """Apply 15% Gaussian feathering to mask edges."""
         from scipy.ndimage import gaussian_filter, distance_transform_edt
-        # Compute feather radius as 15% of the average mask region extent
         mask_pixels = np.sum(self.mask > 0.5)
         if mask_pixels < 10:
             self.feathered_mask = self.mask.copy()
             return
 
-        # Approximate region size for feather radius
         region_extent = np.sqrt(mask_pixels)
         feather_radius = max(2, region_extent * 0.15)
 
-        # Use Gaussian blur on the binary mask for smooth edges
         self.feathered_mask = gaussian_filter(self.mask, sigma=feather_radius)
-        # Normalize: keep interior at 1.0
         max_val = self.feathered_mask.max()
         if max_val > 0:
-            # Rescale so that the interior stays at 1.0 and edges fade
             self.feathered_mask = np.clip(self.feathered_mask / max_val, 0, 1)
-            # Only feather the edges, keep solid interior
             interior = self.mask > 0.5
             self.feathered_mask[interior] = np.maximum(
                 self.feathered_mask[interior], self.mask[interior]
@@ -2591,7 +2352,6 @@ class MaskAdjustPopup(tk.Toplevel):
         self._schedule_update()
 
     def _get_mask_params(self):
-        """Get the mask-region adjustment parameters."""
         result = []
         for i, bp in enumerate(self.base_params):
             p = dict(bp)
@@ -2618,9 +2378,8 @@ class MaskAdjustPopup(tk.Toplevel):
 
         base_params = self.base_params
         mask_params = self._get_mask_params()
-        fm = self.feathered_mask  # (H, W) float32 0-1
+        fm = self.feathered_mask
 
-        # Render composites at low-res for speed
         composite_base = np.zeros((self.prev_h, self.prev_w, 3), dtype=np.float32)
         composite_mask = np.zeros((self.prev_h, self.prev_w, 3), dtype=np.float32)
 
@@ -2629,9 +2388,8 @@ class MaskAdjustPopup(tk.Toplevel):
             mp = mask_params[i]
             if not bp['visible']:
                 continue
-            preview = ch_data.preview  # use original preview
+            preview = ch_data.preview
 
-            # Base region rendering
             cmin, cmax = bp['min'], bp['max']
             if cmax <= cmin:
                 cmax = cmin + 1
@@ -2646,7 +2404,6 @@ class MaskAdjustPopup(tk.Toplevel):
             ch_b[:, :, 2] = img_b * (b / 255.0)
             composite_base = 1 - (1 - composite_base) * (1 - ch_b)
 
-            # Mask region rendering
             cmin2, cmax2 = mp['min'], mp['max']
             if cmax2 <= cmin2:
                 cmax2 = cmin2 + 1
@@ -2660,36 +2417,30 @@ class MaskAdjustPopup(tk.Toplevel):
             ch_m[:, :, 2] = img_m * (b / 255.0)
             composite_mask = 1 - (1 - composite_mask) * (1 - ch_m)
 
-        # Use raw mask during painting, feathered mask when not painting
         active_mask = self.mask if self.painting else self.feathered_mask
         fm3 = active_mask[:, :, np.newaxis]
         composite = composite_base * (1 - fm3) + composite_mask * fm3
         composite = np.clip(composite * 255, 0, 255).astype(np.uint8)
 
-        # Draw mask outline for visibility
         pil_img = Image.fromarray(composite)
 
-        # Resize for display
         disp_w = max(1, int(self.prev_w * self.zoom_level))
         disp_h = max(1, int(self.prev_h * self.zoom_level))
         pil_img = pil_img.resize((disp_w, disp_h),
                                  Image.NEAREST if self.zoom_level > 2 else Image.LANCZOS)
 
-        # 40% transparent red overlay on mask area
         if np.any(self.mask > 0.5):
             mask_resized = Image.fromarray((self.mask * 255).astype(np.uint8))
             mask_resized = mask_resized.resize((disp_w, disp_h), Image.NEAREST)
             mask_arr = np.array(mask_resized)
-            # Create RGBA red overlay: 40% opacity where mask is painted
             overlay_arr = np.zeros((disp_h, disp_w, 4), dtype=np.uint8)
             painted = mask_arr > 128
-            overlay_arr[painted] = [255, 50, 50, 100]  # 40% red
+            overlay_arr[painted] = [255, 50, 50, 100]
             overlay = Image.fromarray(overlay_arr, 'RGBA')
             pil_img = pil_img.convert('RGBA')
             pil_img = Image.alpha_composite(pil_img, overlay)
             pil_img = pil_img.convert('RGB')
 
-        # Place on canvas
         result = Image.new('RGB', (canvas_w, canvas_h), (17, 17, 27))
         x = canvas_w // 2 + self.pan_offset[0] - disp_w // 2
         y = canvas_h // 2 + self.pan_offset[1] - disp_h // 2
@@ -2699,7 +2450,6 @@ class MaskAdjustPopup(tk.Toplevel):
         self.canvas.delete('all')
         self.canvas.create_image(0, 0, image=self._tk_image, anchor='nw')
 
-    # ── Zoom / Pan ──
     def _on_scroll(self, event):
         factor = 1.35 if event.delta > 0 else 1 / 1.35
         cx = self.canvas.winfo_width() / 2
@@ -2737,7 +2487,6 @@ class MaskAdjustPopup(tk.Toplevel):
         self._schedule_update()
 
     def _get_temp_dir(self):
-        """Get or create the temp directory for edited channel files."""
         ch0 = self.channels[0]
         base_dir = os.path.dirname(ch0.original_path)
         temp_dir = os.path.join(base_dir, '.fluoro_temp')
@@ -2745,56 +2494,46 @@ class MaskAdjustPopup(tk.Toplevel):
         return temp_dir
 
     def _save_channel_temp(self, ch_idx):
-        """Apply mask edits to a single channel and save to temp file."""
         ch_data = self.channels[ch_idx]
         bp = self.base_params[ch_idx]
         mp = self._get_mask_params()[ch_idx]
         fm = self.feathered_mask
 
         from scipy.ndimage import zoom as scipy_zoom
-        # Upscale mask to full resolution
         full_h, full_w = ch_data.full_h, ch_data.full_w
         scale_y = full_h / self.prev_h
         scale_x = full_w / self.prev_w
         fm_full = scipy_zoom(fm, (scale_y, scale_x), order=1)
         fm_full = np.clip(fm_full, 0, 1)
 
-        # Read full-res data
         data = ch_data.full_data[:, :].astype(np.float64)
 
-        # Base processing
         cmin1, cmax1 = bp['min'], bp['max']
         if cmax1 <= cmin1: cmax1 = cmin1 + 1
         img_b = np.clip((data - cmin1) / (cmax1 - cmin1), 0, 1) * bp['brightness']
         np.clip(img_b, 0, 1, out=img_b)
 
-        # Mask processing
         cmin2, cmax2 = mp['min'], mp['max']
         if cmax2 <= cmin2: cmax2 = cmin2 + 1
         img_m = np.clip((data - cmin2) / (cmax2 - cmin2), 0, 1) * mp['brightness']
         np.clip(img_m, 0, 1, out=img_m)
 
-        # Blend and scale back to original data range
         blended = img_b * (1 - fm_full) + img_m * fm_full
         result = (blended * (cmax1 - cmin1) + cmin1).astype(data.dtype)
 
-        # Save to temp
         temp_dir = self._get_temp_dir()
         orig_name = os.path.splitext(os.path.basename(ch_data.original_path))[0]
         temp_path = os.path.join(temp_dir, f"{orig_name}_edited.tif")
         tifffile.imwrite(temp_path, result)
 
-        # Reload channel from temp
         ch_data.reload_from(temp_path)
         return temp_path
 
     def _apply_to_channel(self):
-        """Apply mask edits to a user-selected channel, save temp file."""
         if np.sum(self.mask > 0.5) < 5:
             messagebox.showinfo("No mask", "Paint a mask region first.", parent=self)
             return
 
-        # Let user pick which channel
         ch_names = [f"{i+1}: {n}" for i, n in enumerate(self.ch_names)]
         pick_win = tk.Toplevel(self)
         pick_win.title("Select Channel")
@@ -2831,7 +2570,6 @@ class MaskAdjustPopup(tk.Toplevel):
         ttk.Button(pick_win, text="Apply", command=do_apply).pack(pady=8)
 
     def _apply_to_all(self):
-        """Apply mask edits to ALL channels, save temp files for each."""
         if np.sum(self.mask > 0.5) < 5:
             messagebox.showinfo("No mask", "Paint a mask region first.", parent=self)
             return
@@ -2856,17 +2594,13 @@ class MaskAdjustPopup(tk.Toplevel):
         threading.Thread(target=save_all_thread, daemon=True).start()
 
     def _after_apply(self, msg):
-        """Called after temp files are saved — refresh everything."""
-        # Update the main view
         if hasattr(self.parent_app, '_schedule_update'):
             self.parent_app._schedule_update()
 
         messagebox.showinfo("Applied", msg, parent=self)
 
-        # Clear the mask
         self.mask = np.zeros_like(self.mask)
         self.feathered_mask = np.zeros_like(self.mask)
-        # Refresh base params from updated channel data
         for i, ch in enumerate(self.channels):
             self.base_params[i]['min'] = ch.vmin
             self.base_params[i]['max'] = ch.vmax
@@ -2891,7 +2625,6 @@ class MaskAdjustPopup(tk.Toplevel):
         def do_save():
             try:
                 from scipy.ndimage import zoom as scipy_zoom, gaussian_filter
-                # Upscale feathered mask to full resolution
                 scale_y = full_h / self.prev_h
                 scale_x = full_w / self.prev_w
                 fm_full = scipy_zoom(self.feathered_mask, (scale_y, scale_x), order=1)
@@ -2907,19 +2640,16 @@ class MaskAdjustPopup(tk.Toplevel):
 
                     data = ch_data.full_data[:, :].astype(np.float64)
 
-                    # Base
                     cmin1, cmax1 = bp['min'], bp['max']
                     if cmax1 <= cmin1: cmax1 = cmin1 + 1
                     img_b = np.clip((data - cmin1) / (cmax1 - cmin1), 0, 1) * bp['brightness']
                     np.clip(img_b, 0, 1, out=img_b)
 
-                    # Mask
                     cmin2, cmax2 = mp['min'], mp['max']
                     if cmax2 <= cmin2: cmax2 = cmin2 + 1
                     img_m = np.clip((data - cmin2) / (cmax2 - cmin2), 0, 1) * mp['brightness']
                     np.clip(img_m, 0, 1, out=img_m)
 
-                    # Blend
                     blended = img_b * (1 - fm_full) + img_m * fm_full
 
                     r, g, b = bp['color']
@@ -2940,8 +2670,6 @@ class MaskAdjustPopup(tk.Toplevel):
 
         threading.Thread(target=do_save, daemon=True).start()
 
-
-# ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     app = FluoroView()

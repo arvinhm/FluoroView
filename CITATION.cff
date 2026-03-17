@@ -1,9 +1,9 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
-title: "FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Image Visualization, Annotation, and Single-Cell Analysis"
+title: "FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping"
 version: 2.0.0
-date-released: 2026-02-26
+date-released: 2026-03-16
 url: "https://github.com/arvinhm/FluoroView"
 license: BSD-3-Clause
 authors:
@@ -20,6 +20,8 @@ keywords:
   - multiplex imaging
   - cell segmentation
   - single-cell analysis
+  - cell phenotyping
+  - spatial biology
   - image viewer
   - digital pathology
   - Python

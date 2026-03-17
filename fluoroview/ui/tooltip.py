@@ -1,4 +1,3 @@
-"""Premium tooltip using CustomTkinter's CTkToplevel."""
 
 from __future__ import annotations
 
@@ -9,7 +8,6 @@ from fluoroview.constants import THEME
 
 
 class ToolTip:
-    """Attach a modern tooltip to any tkinter or CTk widget."""
 
     def __init__(self, widget, text: str, delay: int = 350):
         self.widget = widget
