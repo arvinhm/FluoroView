@@ -180,14 +180,9 @@ DeepCell, UnMicst, and SCIMAP for their open-source contributions.
 
 # AI usage disclosure
 
-Generative AI tools (Anthropic Claude 4.6 Opus, via the Cursor IDE) were used
-during development for code generation, refactoring, debugging, performance
-optimization, and documentation drafting. All AI-generated outputs were reviewed,
-validated, and approved by the human authors. Core architectural decisions---
-tile-based rendering with LUT lookup tables, integer screen blending, memory-
-mapped channel arrays, machine-fingerprint annotation tracking, vectorized
-scipy.ndimage cell quantification, threshold-based phenotyping with combinatorial
-annotation, and the modular package structure---were conceived and directed
-entirely by the authors.
+Generative AI tools (Anthropic Claude 4.6 Opus) were used
+during development for debugging and performance
+optimization. All AI-generated outputs were reviewed,
+validated, and approved by the human authors. 
 
 # References
