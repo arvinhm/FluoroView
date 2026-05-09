@@ -238,7 +238,7 @@ If you use FluoroView in your research, please cite:
   title={FluoroView: An Open-Source Desktop Application for Interactive Multiplex
          Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping},
   author={Haj-Mirzaian, Arvin and Heidari, Pedram},
-  journal={Journal of Open Source Software},
+  journal={TBD},
   year={2026},
   doi={10.5281/zenodo.19059504}
 }
@@ -251,5 +251,3 @@ If you use FluoroView in your research, please cite:
 BSD 3-Clause License. See [LICENSE](LICENSE) for details.
 
 ---
-
-*FluoroView v2.0 — 42 Python modules, ~8,400 lines of code, 24 automated tests.*
