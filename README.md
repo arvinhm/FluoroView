@@ -176,7 +176,7 @@ FluoroView/
 ├── paper.md                       JOSS paper
 ├── paper.bib                      Bibliography
 ├── CITATION.cff                   Citation metadata
-├── LICENSE                        BSD 3-Clause
+├── LICENSE                        UNDER REVIEW: MIT OR BSD 3-Clause
 ├── example_data/                  Downsampled test images + segmentation mask
 ├── tests/                         Pytest test suite (24 tests)
 ├── figures/                       Paper and README figures
@@ -248,6 +248,6 @@ If you use FluoroView in your research, please cite:
 
 ## License
 
-BSD 3-Clause License. See [LICENSE](LICENSE) for details.
+License is under review. See [LICENSE](LICENSE) for details.
 
 ---
