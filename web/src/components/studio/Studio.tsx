@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Eye, Network, Sparkles, Circle, Database, Cpu } from "lucide-react";
+import { Eye, Network, Sparkles, Circle, Database, Cpu, Download, Upload } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
+import { toast } from "../../lib/toast";
 import type { ViewKey } from "../../lib/types";
 import { DATASETS, datasetById } from "../../lib/datasets";
 import ErrorBoundary from "../ErrorBoundary";
@@ -26,12 +27,36 @@ export default function Studio() {
   const datasetId = useStore((s) => s.datasetId);
   const loadDataset = useStore((s) => s.loadDataset);
   const backend = useStore((s) => s.backendOnline);
+  const exportSession = useStore((s) => s.exportSession);
+  const importSession = useStore((s) => s.importSession);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     ensureData();
   }, [ensureData]);
 
   const ready = !!tissue;
+
+  const saveSession = () => {
+    const blob = new Blob([JSON.stringify(exportSession(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "session.fluoroview.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    toast.success("Session saved", "session.fluoroview.json downloaded");
+  };
+
+  const loadSession = async (file: File) => {
+    try {
+      const data = JSON.parse(await file.text());
+      await importSession(data);
+      toast.success("Session loaded", `${data.rois?.length ?? 0} ROI(s) restored`);
+    } catch (e) {
+      toast.error("Couldn't load session", e instanceof Error ? e.message : String(e));
+    }
+  };
 
   return (
     <div className="mx-auto min-h-screen max-w-[1600px] px-3 pb-10 pt-24 sm:px-5">
@@ -79,6 +104,25 @@ export default function Studio() {
             <Cpu className="h-3.5 w-3.5 text-violet-300" />
             {backend === null ? "checking backend" : backend ? "backend online" : "on-device"}
           </span>
+          <div className="inline-flex items-center gap-1 rounded-full glass p-1">
+            <button onClick={saveSession} title="Save session (.fluoroview.json)" aria-label="Save session" className="grid h-7 w-7 place-items-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white">
+              <Download className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={() => fileRef.current?.click()} title="Load session" aria-label="Load session" className="grid h-7 w-7 place-items-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white">
+              <Upload className="h-3.5 w-3.5" />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void loadSession(f);
+                e.currentTarget.value = "";
+              }}
+            />
+          </div>
         </div>
       </div>
 

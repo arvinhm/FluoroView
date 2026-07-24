@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { CellTypeDef, ChannelDef, ChannelState, Roi, Tissue, ViewKey } from "./types";
 import { buildChannelMaps, generateTissue, CELL_TYPES, MARKERS, M, type ChannelMaps } from "./synth";
 import { kmeans, markerMatrix, pca, standardize, summarizeClusters, umapEmbed, type ClusterSummary } from "./analysis";
-import { DEFAULT_DATASET, SYNTHETIC_DEMO, type DatasetDef } from "./datasets";
+import { DEFAULT_DATASET, SYNTHETIC_DEMO, datasetById, type DatasetDef } from "./datasets";
 import { loadRealDataset } from "./loadReal";
 import { toast } from "./toast";
 
@@ -12,6 +12,18 @@ interface Analysis {
   summaries: ClusterSummary[];
   embedding: [number, number][]; // aligned to sampleIdx
   sampleIdx: number[];
+}
+
+export interface SessionData {
+  version: string;
+  datasetId: string;
+  datasetLabel?: string;
+  channels: ChannelState[];
+  rois: Roi[];
+  view: ViewKey;
+  pixelSizeUm: number | null;
+  segmented: boolean;
+  segMethod: string;
 }
 
 interface AppState {
@@ -56,6 +68,8 @@ interface AppState {
   setBackend: (v: boolean) => void;
   setHovered: (i: number | null) => void;
   setPixelSizeUm: (um: number | null) => void;
+  exportSession: () => SessionData;
+  importSession: (data: SessionData) => Promise<void>;
 }
 
 function defaultChannels(chs: ChannelDef[]): ChannelState[] {
@@ -241,6 +255,35 @@ export const useStore = create<AppState>((set, get) => ({
   setBackend: (v) => set({ backendOnline: v }),
   setHovered: (i) => set({ hovered: i }),
   setPixelSizeUm: (um) => set({ pixelSizeUm: um }),
+
+  exportSession: () => {
+    const s = get();
+    return {
+      version: "3.1",
+      datasetId: s.datasetId,
+      datasetLabel: s.datasetLabel,
+      channels: s.channels,
+      rois: s.rois,
+      view: s.view,
+      pixelSizeUm: s.pixelSizeUm,
+      segmented: s.segmented,
+      segMethod: s.segMethod,
+    };
+  },
+  importSession: async (data) => {
+    if (data.datasetId !== get().datasetId || !get().tissue) {
+      await get().loadDataset(datasetById(data.datasetId));
+    }
+    set({
+      channels: Array.isArray(data.channels) && data.channels.length ? data.channels : get().channels,
+      rois: Array.isArray(data.rois) ? data.rois : [],
+      selectedRoiId: null,
+      pixelSizeUm: data.pixelSizeUm ?? get().pixelSizeUm,
+      view: data.view ?? "viewer",
+      segmented: data.segmented ?? get().segmented,
+      segMethod: data.segMethod ?? get().segMethod,
+    });
+  },
 }));
 
 export { MARKERS, M };
