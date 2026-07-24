@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { Cell, CellTypeDef, ChannelDef, ChannelState, Roi, Tissue, ViewKey } from "./types";
+import type { BoundaryCell, Cell, CellTypeDef, ChannelDef, ChannelState, Roi, ScanMeta, Tissue, ViewKey } from "./types";
+import type { VivLoader } from "./vivSource";
 import { buildChannelMaps, generateTissue, CELL_TYPES, MARKERS, M, type ChannelMaps } from "./synth";
 import { kmeans, markerMatrix, pca, standardize, summarizeClusters, umapEmbed, type ClusterSummary } from "./analysis";
 import { DEFAULT_DATASET, SYNTHETIC_DEMO, datasetById, type DatasetDef } from "./datasets";
@@ -37,6 +38,12 @@ interface AppState {
   maps: ChannelMaps | null;
   /** True cell-boundary overlay image for the active dataset (real data), else null. */
   boundaries: HTMLImageElement | null;
+  /** Vector cell outlines (full-res mask) for the pyramid viewer, else null. */
+  boundaryPolys: BoundaryCell[] | null;
+  /** Viv multiscale pixel sources for the full-res pyramid image, else null. */
+  imageSource: VivLoader | null;
+  /** Sidecar metadata for the pyramid scan, else null. */
+  scanMeta: ScanMeta | null;
   channels: ChannelState[];
   rois: Roi[];
   analysis: Analysis | null;
@@ -95,6 +102,9 @@ export const useStore = create<AppState>((set, get) => ({
   tissue: null,
   maps: null,
   boundaries: null,
+  boundaryPolys: null,
+  imageSource: null,
+  scanMeta: null,
   channels: defaultChannels(DEFAULT_DATASET.channels),
   rois: [],
   analysis: null,
@@ -125,6 +135,9 @@ export const useStore = create<AppState>((set, get) => ({
           tissue,
           maps,
           boundaries: null, // synthetic tissue is procedural — no label mask
+          boundaryPolys: null,
+          imageSource: null,
+          scanMeta: null,
           channels: defaultChannels(ds.channels),
           rois: [],
           selectedRoiId: null,
@@ -135,16 +148,19 @@ export const useStore = create<AppState>((set, get) => ({
         });
         return;
       }
-      const { tissue, maps, channels, boundaries } = await loadRealDataset(ds);
+      const { tissue, maps, channels, boundaries, boundaryPolys, imageSource, scanMeta } = await loadRealDataset(ds);
       set({
         datasetId: ds.id,
         datasetLabel: ds.label,
         activeChannels: channels,
         cellTypes: null,
-        pixelSizeUm: ds.pixelSizeUm,
+        pixelSizeUm: scanMeta?.pixelSizeUm ?? ds.pixelSizeUm,
         tissue,
         maps,
         boundaries,
+        boundaryPolys,
+        imageSource,
+        scanMeta,
         channels: defaultChannels(channels),
         rois: [],
         selectedRoiId: null,

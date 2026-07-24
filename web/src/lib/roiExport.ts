@@ -21,17 +21,25 @@ interface Bbox {
   h: number;
 }
 
+// Bbox is expressed in WORLD (image) pixel coords. maps.scale = arrayPx per
+// worldPx, so the intensity arrays may be a bounded lower resolution than the
+// world coordinate space (the real scan's world is the native pyramid size).
 function clampedBbox(shape: Roi["shape"], maps: ChannelMaps): Bbox {
+  const s = maps.scale || 1;
+  const worldW = maps.width / s;
+  const worldH = maps.height / s;
   const b = roiBounds(shape);
   const x = Math.max(0, Math.floor(b.x));
   const y = Math.max(0, Math.floor(b.y));
-  const x2 = Math.min(maps.width, Math.ceil(b.x + b.w));
-  const y2 = Math.min(maps.height, Math.ceil(b.y + b.h));
+  const x2 = Math.min(worldW, Math.ceil(b.x + b.w));
+  const y2 = Math.min(worldH, Math.ceil(b.y + b.h));
   return { x, y, w: Math.max(1, x2 - x), h: Math.max(1, y2 - y) };
 }
 
 /** Replicate the WebGL compositor's additive LUT blend + tone-map on the CPU,
- *  cropped to the ROI bbox and masked to the ROI shape (outside = transparent). */
+ *  cropped to the ROI bbox and masked to the ROI shape (outside = transparent).
+ *  Output is rendered at the intensity arrays' resolution (bounded), so a big
+ *  full-res ROI never allocates a giant canvas. */
 function renderBlend(
   maps: ChannelMaps,
   defs: ChannelDef[],
@@ -40,31 +48,41 @@ function renderBlend(
   shape: Roi["shape"],
   bbox: Bbox
 ): HTMLCanvasElement {
+  const s = maps.scale || 1;
+  const aw = maps.width;
+  const ah = maps.height;
+  const cw = Math.max(1, Math.round(bbox.w * s));
+  const cimgH = Math.max(1, Math.round(bbox.h * s));
+  const ax0 = bbox.x * s;
+  const ay0 = bbox.y * s;
   const cv = document.createElement("canvas");
-  cv.width = bbox.w;
-  cv.height = bbox.h;
+  cv.width = cw;
+  cv.height = cimgH;
   const ctx = cv.getContext("2d")!;
-  const img = ctx.createImageData(bbox.w, bbox.h);
+  const img = ctx.createImageData(cw, cimgH);
   const cols = include.map((i) => {
     const [r, g, b] = hexToRgb(defs[i].color);
     return [r / 255, g / 255, b / 255] as [number, number, number];
   });
-  for (let py = 0; py < bbox.h; py++) {
-    for (let px = 0; px < bbox.w; px++) {
-      const ix = bbox.x + px;
-      const iy = bbox.y + py;
-      const o = (py * bbox.w + px) * 4;
-      if (!pointInShape(shape, ix + 0.5, iy + 0.5)) {
+  for (let py = 0; py < cimgH; py++) {
+    for (let px = 0; px < cw; px++) {
+      const ax = ax0 + px;
+      const ay = ay0 + py;
+      const o = (py * cw + px) * 4;
+      if (!pointInShape(shape, (ax + 0.5) / s, (ay + 0.5) / s)) {
         img.data[o + 3] = 0;
         continue;
       }
+      const mx = Math.min(aw - 1, Math.max(0, Math.round(ax)));
+      const my = Math.min(ah - 1, Math.max(0, Math.round(ay)));
+      const at = my * aw + mx;
       let R = 0;
       let G = 0;
       let B = 0;
       for (let c = 0; c < include.length; c++) {
         const i = include[c];
         const ch = channels[i];
-        const inten = maps.maps[i][iy * maps.width + ix] / 255;
+        const inten = maps.maps[i][at] / 255;
         const v = Math.pow(Math.min(4, Math.max(0, inten * ch.gain)), ch.gamma);
         R += cols[c][0] * v;
         G += cols[c][1] * v;
