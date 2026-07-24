@@ -70,3 +70,34 @@ export interface Roi {
   shape: RoiShape;
   comments: RoiComment[];
 }
+
+/** Per-channel appearance/metadata baked by the pyramid generator. */
+export interface ScanChannelMeta {
+  name: string;
+  color: string;
+  domain: [number, number];
+  contrastLimits: [number, number];
+}
+
+/** Sidecar metadata for a pyramidal OME-TIFF real scan (scan.meta.json). */
+export interface ScanMeta {
+  width: number;
+  height: number;
+  levels: number;
+  bits: number;
+  tile: number;
+  pixelSizeUm: number | null;
+  previewWidth: number;
+  previewHeight: number;
+  previewScale: number;
+  channels: ScanChannelMeta[];
+  image: string;
+  boundaries: string;
+}
+
+/** One cell's outline as a vector polygon in full-resolution pixel coords. */
+export interface BoundaryCell {
+  id: number;
+  /** closed ring [x,y] in image pixels (full resolution) */
+  path: [number, number][];
+}

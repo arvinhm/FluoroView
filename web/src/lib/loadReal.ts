@@ -1,6 +1,8 @@
-import type { Cell, ChannelDef, Tissue } from "./types";
+import type { BoundaryCell, Cell, ChannelDef, ScanMeta, Tissue } from "./types";
 import type { ChannelMaps } from "./synth";
 import type { DatasetDef } from "./datasets";
+import { parseBoundaries } from "./boundaries";
+import { loadVivImage, type VivLoader } from "./vivSource";
 
 const slug = (n: string) => n.toLowerCase().replace(/\s+/g, "_");
 
@@ -8,19 +10,6 @@ const slug = (n: string) => n.toLowerCase().replace(/\s+/g, "_");
 function dataUrl(rel: string): string {
   const base = import.meta.env.BASE_URL || "./";
   return `${base}${base.endsWith("/") ? "" : "/"}${rel}`.replace(/([^:])\/\/+/g, "$1/");
-}
-
-/** Load an <img> and wait for it to decode; returns null if it isn't available. */
-async function loadImage(url: string): Promise<HTMLImageElement | null> {
-  try {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = url;
-    await img.decode();
-    return img;
-  } catch {
-    return null;
-  }
 }
 
 async function decodeGray(url: string): Promise<{ w: number; h: number; data: Uint8ClampedArray }> {
@@ -38,7 +27,6 @@ async function decodeGray(url: string): Promise<{ w: number; h: number; data: Ui
   ctx.drawImage(img, 0, 0);
   const rgba = ctx.getImageData(0, 0, w, h).data;
   const gray = new Uint8ClampedArray(w * h);
-  // Grayscale PNGs decode with R=G=B; take the red channel (fall back to luma).
   for (let i = 0; i < w * h; i++) {
     const r = rgba[i * 4];
     const g = rgba[i * 4 + 1];
@@ -50,10 +38,16 @@ async function decodeGray(url: string): Promise<{ w: number; h: number; data: Ui
 
 export interface LoadedDataset {
   tissue: Tissue;
+  /** bounded preview intensity maps (for CPU ROI-crop export); scale = arrayPx/worldPx */
   maps: ChannelMaps;
   channels: ChannelDef[];
-  /** Precomputed true cell-boundary overlay (from the real label mask), or null. */
+  /** legacy raster boundary overlay — null for the pyramid path (we use vectors) */
   boundaries: HTMLImageElement | null;
+  /** vector cell outlines from the full-res mask (razor-sharp at any zoom) */
+  boundaryPolys: BoundaryCell[] | null;
+  /** Viv multiscale pixel-source array for the full-res pyramid image */
+  imageSource: VivLoader | null;
+  scanMeta: ScanMeta | null;
 }
 
 interface RawCell {
@@ -61,61 +55,63 @@ interface RawCell {
   x: number;
   y: number;
   area: number;
+  markers?: number[];
 }
 
+/**
+ * Load the REAL multiplex scan as a full-resolution pyramid (Viv) + vector cell
+ * boundaries. The world coordinate space is the scan's native pixel space
+ * (e.g. 8500x5625). `cells.json` carries per-channel mean intensities baked at
+ * full resolution, so analysis is accurate without holding 240 MB of pixels.
+ */
 export async function loadRealDataset(ds: DatasetDef): Promise<LoadedDataset> {
   if (!ds.basePath) throw new Error(`Dataset ${ds.id} has no basePath`);
   const base = ds.basePath;
 
-  // (a) per-channel PNGs -> single-channel intensity maps for the compositor
+  const metaRes = await fetch(dataUrl(`${base}/scan.meta.json`));
+  if (!metaRes.ok) throw new Error(`Failed to fetch scan.meta.json (${metaRes.status})`);
+  const meta = (await metaRes.json()) as ScanMeta;
+
+  // (a) bounded per-channel preview arrays for CPU ROI-crop export.
   const decoded = await Promise.all(ds.channels.map((c) => decodeGray(dataUrl(`${base}/${slug(c.name)}.png`))));
-  const w = decoded[0].w;
-  const h = decoded[0].h;
-  for (const d of decoded) {
-    if (d.w !== w || d.h !== h) throw new Error("Channel images have mismatched dimensions");
-  }
-  const maps: ChannelMaps = { width: w, height: h, scale: 1, maps: decoded.map((d) => d.data) };
+  const pw = decoded[0].w;
+  const ph = decoded[0].h;
+  const maps: ChannelMaps = { width: pw, height: ph, scale: meta.previewScale || pw / meta.width, maps: decoded.map((d) => d.data) };
 
-  // (a2) precomputed TRUE cell-boundary overlay derived from the real label mask
-  // (skimage find_boundaries, upsampled for crisp per-cell outlines). Optional —
-  // the viewer falls back to marker dots if it's absent.
-  const boundaries = await loadImage(dataUrl(`${base}/boundaries.png`));
+  // (b) cells.json — full-res centroids/area + baked per-channel mean intensity.
+  const cRes = await fetch(dataUrl(`${base}/cells.json`));
+  if (!cRes.ok) throw new Error(`Failed to fetch cells.json (${cRes.status})`);
+  const raw = (await cRes.json()) as RawCell[];
+  const nCh = ds.channels.length;
+  const cells: Cell[] = raw.map((c) => ({
+    id: c.id,
+    x: c.x,
+    y: c.y,
+    r: Math.max(2, Math.sqrt(Math.max(c.area, 1) / Math.PI)),
+    typeIndex: 0,
+    markers: c.markers && c.markers.length === nCh ? c.markers : new Array(nCh).fill(0),
+  }));
 
-  // (b) cells.json (already in PNG pixel space) -> Cell[] for overlay + analysis.
-  const res = await fetch(dataUrl(`${base}/cells.json`));
-  if (!res.ok) throw new Error(`Failed to fetch cells.json (${res.status})`);
-  const raw = (await res.json()) as RawCell[];
-  const cells: Cell[] = raw.map((c) => {
-    const px = Math.min(w - 1, Math.max(0, Math.round(c.x)));
-    const py = Math.min(h - 1, Math.max(0, Math.round(c.y)));
-    // Sample each channel's intensity as the MEAN over the cell's footprint
-    // (a small window sized from its area) rather than a single centroid pixel.
-    // This is less noisy and yields meaningful per-ROI mean±SEM bars.
-    const rad = Math.max(0, Math.min(3, Math.round(Math.sqrt(Math.max(c.area, 1) / Math.PI))));
-    const markers = decoded.map((d) => {
-      let sum = 0;
-      let cnt = 0;
-      for (let dy = -rad; dy <= rad; dy++) {
-        const yy = py + dy;
-        if (yy < 0 || yy >= h) continue;
-        for (let dx = -rad; dx <= rad; dx++) {
-          const xx = px + dx;
-          if (xx < 0 || xx >= w) continue;
-          sum += d.data[yy * w + xx];
-          cnt++;
-        }
-      }
-      return cnt ? sum / cnt / 255 : 0;
-    });
-    return {
-      id: c.id,
-      x: c.x,
-      y: c.y,
-      r: Math.max(2, Math.sqrt(Math.max(c.area, 1) / Math.PI)),
-      typeIndex: 0,
-      markers,
-    };
-  });
+  // (c) vector cell boundaries (full-res, simplified) + (d) Viv pyramid.
+  // geotiff (inside Viv) needs an ABSOLUTE URL — resolve the (relative) Vite
+  // base against the document location.
+  const imageUrl = new URL(dataUrl(`${base}/${meta.image}`), window.location.href).href;
+  const [bBuf, viv] = await Promise.all([
+    fetch(dataUrl(`${base}/${meta.boundaries}`)).then((r) => {
+      if (!r.ok) throw new Error(`Failed to fetch ${meta.boundaries} (${r.status})`);
+      return r.arrayBuffer();
+    }),
+    loadVivImage(imageUrl),
+  ]);
+  const boundaryPolys = parseBoundaries(bBuf);
 
-  return { tissue: { width: w, height: h, cells, seed: 0 }, maps, channels: ds.channels, boundaries };
+  return {
+    tissue: { width: meta.width, height: meta.height, cells, seed: 0 },
+    maps,
+    channels: ds.channels,
+    boundaries: null,
+    boundaryPolys,
+    imageSource: viv.loader,
+    scanMeta: meta,
+  };
 }
