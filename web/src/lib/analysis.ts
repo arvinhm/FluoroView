@@ -1,11 +1,18 @@
 import type { Cell } from "./types";
-import { M, MARKERS } from "./synth";
 
-/** marker indices used for phenotyping / clustering (DAPI excluded) */
-export const PANEL_IDX = MARKERS.map((_, i) => i).filter((i) => i !== 0);
+/**
+ * Marker indices used for phenotyping / clustering. Channel 0 is the nuclear
+ * (DAPI-equivalent) channel and is excluded, matching the desktop workflow.
+ */
+export function panelIndices(nChannels: number): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < nChannels; i++) out.push(i);
+  return out;
+}
 
-export function markerMatrix(cells: Cell[], cols = PANEL_IDX): number[][] {
-  return cells.map((c) => cols.map((j) => c.markers[j]));
+export function markerMatrix(cells: Cell[], cols?: number[]): number[][] {
+  const c = cols ?? panelIndices(cells[0]?.markers.length ?? 0);
+  return cells.map((cell) => c.map((j) => cell.markers[j]));
 }
 
 function mean(a: number[]) {
@@ -298,14 +305,22 @@ export interface ClusterSummary {
   topMarkers: { name: string; value: number }[];
 }
 
-export function summarizeClusters(cells: Cell[], labels: number[], k: number): ClusterSummary[] {
+export function summarizeClusters(
+  cells: Cell[],
+  labels: number[],
+  k: number,
+  channelNames: string[]
+): ClusterSummary[] {
+  const M = channelNames.length;
+  const panel = panelIndices(M);
   const out: ClusterSummary[] = [];
   for (let c = 0; c < k; c++) {
     const members = cells.filter((_, i) => labels[i] === c);
     const means = new Array(M).fill(0);
     for (const cell of members) for (let m = 0; m < M; m++) means[m] += cell.markers[m];
     for (let m = 0; m < M; m++) means[m] /= members.length || 1;
-    const top = PANEL_IDX.map((m) => ({ name: MARKERS[m].name, value: means[m] }))
+    const top = panel
+      .map((m) => ({ name: channelNames[m], value: means[m] }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 3);
     out.push({

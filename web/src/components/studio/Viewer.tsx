@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Maximize2, ZoomIn, ZoomOut, SquareDashedMousePointer, Trash2, ScanSearch, Layers } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2, ZoomIn, ZoomOut, SquareDashedMousePointer, ScanSearch, Layers } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
-import { MARKERS } from "../../lib/synth";
-import { CELL_TYPES } from "../../lib/synth";
 import { Compositor, fitRect, type ViewTransform } from "../../lib/compositor";
 import { clusterColor } from "../../lib/palette";
+import { niceNumber } from "../../lib/format";
 import { Panel, Slider, Chip } from "../ui";
 
-const UM_PER_UNIT = 0.5; // nominal micron scale for the demo tissue
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 40;
 
@@ -18,23 +16,31 @@ interface V {
   panY: number;
 }
 
-const PRESETS: { name: string; markers: string[] }[] = [
-  { name: "Immune", markers: ["DAPI", "CD3", "CD8", "CD68"] },
-  { name: "Tumor", markers: ["DAPI", "PanCK", "Ki67", "PD-L1"] },
-  { name: "Structure", markers: ["DAPI", "SMA", "CD31", "PanCK"] },
-  { name: "All", markers: MARKERS.map((m) => m.name) },
-];
-
 export default function Viewer() {
   const tissue = useStore((s) => s.tissue);
   const maps = useStore((s) => s.maps);
   const channels = useStore((s) => s.channels);
+  const activeChannels = useStore((s) => s.activeChannels);
+  const cellTypes = useStore((s) => s.cellTypes);
+  const pixelSizeUm = useStore((s) => s.pixelSizeUm);
   const rois = useStore((s) => s.rois);
   const addRoi = useStore((s) => s.addRoi);
-  const clearRois = useStore((s) => s.clearRois);
   const segmented = useStore((s) => s.segmented);
   const setSegmented = useStore((s) => s.setSegmented);
   const presetChannels = useStore((s) => s.presetChannels);
+  const showAllChannels = useStore((s) => s.showAllChannels);
+
+  const presets = useMemo(() => {
+    const names = activeChannels.map((c) => c.name);
+    const defaults = activeChannels.filter((c) => c.defaultOn).map((c) => c.name);
+    const nuclear = activeChannels.filter((c) => c.kind === "nuclear").map((c) => c.name);
+    const out: { name: string; markers: string[] }[] = [
+      { name: "Default", markers: defaults.length ? defaults : names },
+    ];
+    if (nuclear.length) out.push({ name: "Nuclei", markers: nuclear });
+    out.push({ name: "All", markers: names });
+    return out;
+  }, [activeChannels]);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const glRef = useRef<HTMLCanvasElement>(null);
@@ -85,18 +91,34 @@ export default function Viewer() {
     const toX = (tx: number) => rect.x + tx * k;
     const toY = (ty: number) => rect.y + ty * k;
 
-    // segmentation outlines
+    // segmentation overlay (handles 10k+ cells): batch by color and draw filled
+    // dots when zoomed out, outlined circles when zoomed in.
     if (segmented) {
-      ctx.lineWidth = Math.max(0.6, k * 0.9);
+      const paths = new Map<string, Path2D>();
+      const strokeMode = k > 0.9; // roughly: individual cells are big enough to outline
+      ctx.lineWidth = Math.max(0.5, Math.min(2, k * 0.8));
       for (const c of tissue.cells) {
         const sx = toX(c.x);
         const sy = toY(c.y);
         if (sx < -20 || sy < -20 || sx > cw + 20 || sy > ch + 20) continue;
-        const col = c.cluster != null ? clusterColor(c.cluster) : CELL_TYPES[c.typeIndex].color;
-        ctx.strokeStyle = hexA(col, 0.85);
-        ctx.beginPath();
-        ctx.arc(sx, sy, Math.max(1.4, c.r * k), 0, Math.PI * 2);
-        ctx.stroke();
+        const col = c.cluster != null ? clusterColor(c.cluster) : cellTypes ? cellTypes[c.typeIndex]?.color ?? "#22d3ee" : "#22d3ee";
+        let path = paths.get(col);
+        if (!path) {
+          path = new Path2D();
+          paths.set(col, path);
+        }
+        const rr = Math.max(strokeMode ? 1.4 : 0.7, c.r * k);
+        path.moveTo(sx + rr, sy);
+        path.arc(sx, sy, rr, 0, Math.PI * 2);
+      }
+      for (const [col, path] of paths) {
+        if (strokeMode) {
+          ctx.strokeStyle = hexA(col, 0.85);
+          ctx.stroke(path);
+        } else {
+          ctx.fillStyle = hexA(col, 0.85);
+          ctx.fill(path);
+        }
       }
     }
 
@@ -131,25 +153,36 @@ export default function Viewer() {
       ctx.setLineDash([]);
     }
 
-    // scale bar
-    const targetUm = 100;
-    const barPx = (targetUm / UM_PER_UNIT) * k;
-    if (barPx > 20 && barPx < cw * 0.8) {
+    // scale bar — physical microns when the pixel size is known, else pixels.
+    const targetScreen = Math.min(cw * 0.26, 170);
+    let barLabel: string;
+    let barPx: number;
+    if (pixelSizeUm && pixelSizeUm > 0) {
+      const screenPerUm = k / pixelSizeUm;
+      const um = niceNumber(targetScreen / screenPerUm);
+      barPx = um * screenPerUm;
+      barLabel = um >= 1000 ? `${um / 1000} mm` : `${um} µm`;
+    } else {
+      const px = niceNumber(targetScreen / k);
+      barPx = px * k;
+      barLabel = `${px.toLocaleString()} px`;
+    }
+    if (barPx > 24 && barPx < cw * 0.9) {
       const bx = cw - barPx - 24;
       const by = ch - 28;
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(bx, by);
       ctx.lineTo(bx + barPx, by);
       ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.font = "600 11px Inter, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(`${targetUm} µm`, bx + barPx / 2, by - 7);
+      ctx.fillText(barLabel, bx + barPx / 2, by - 7);
       ctx.textAlign = "left";
     }
-  }, [maps, tissue, rois, segmented, getVT]);
+  }, [maps, tissue, rois, segmented, getVT, cellTypes, pixelSizeUm]);
 
   const render = useCallback(() => {
     const comp = compRef.current;
@@ -236,7 +269,7 @@ export default function Viewer() {
     setGlOk(comp.ok);
     if (comp.ok) {
       comp.upload(maps);
-      comp.setChannels(channels.map((c) => ({ ...MARKERS[c.index], color: MARKERS[c.index].color, gain: c.gain, gamma: c.gamma, visible: c.visible })));
+      comp.setChannels(channels.map((c) => ({ color: activeChannels[c.index]?.color ?? "#ffffff", gain: c.gain, gamma: c.gamma, visible: c.visible })));
     }
     schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -246,10 +279,10 @@ export default function Viewer() {
   useEffect(() => {
     const comp = compRef.current;
     if (comp && comp.ok) {
-      comp.setChannels(channels.map((c) => ({ color: MARKERS[c.index].color, gain: c.gain, gamma: c.gamma, visible: c.visible })));
+      comp.setChannels(channels.map((c) => ({ color: activeChannels[c.index]?.color ?? "#ffffff", gain: c.gain, gamma: c.gamma, visible: c.visible })));
     }
     schedule();
-  }, [channels, schedule]);
+  }, [channels, activeChannels, schedule]);
 
   useEffect(() => {
     schedule();
@@ -363,7 +396,9 @@ export default function Viewer() {
       }
       if (best >= 0) {
         const c = tissue.cells[best];
-        setHoverInfo({ x: p.sx, y: p.sy, name: CELL_TYPES[c.typeIndex].name, color: CELL_TYPES[c.typeIndex].color });
+        const name = cellTypes ? cellTypes[c.typeIndex].name : c.cluster != null ? `Cluster ${c.cluster}` : `Cell #${c.id}`;
+        const color = cellTypes ? cellTypes[c.typeIndex].color : c.cluster != null ? clusterColor(c.cluster) : "#67e8f9";
+        setHoverInfo({ x: p.sx, y: p.sy, name, color });
       } else setHoverInfo(null);
     }
   };
@@ -389,8 +424,8 @@ export default function Viewer() {
       <Panel className="relative overflow-hidden p-0" strong>
         {/* toolbar */}
         <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-1.5">
-          {PRESETS.map((p) => (
-            <Chip key={p.name} onClick={() => presetChannels(p.markers)}>
+          {presets.map((p) => (
+            <Chip key={p.name} onClick={() => (p.name === "All" ? showAllChannels() : presetChannels(p.markers))}>
               {p.name}
             </Chip>
           ))}
@@ -461,11 +496,12 @@ function ToolBtn({ children, onClick, active, title }: { children: React.ReactNo
 
 function ChannelPanel() {
   const channels = useStore((s) => s.channels);
+  const activeChannels = useStore((s) => s.activeChannels);
   const toggle = useStore((s) => s.toggleChannel);
   const setGain = useStore((s) => s.setGain);
   const setGamma = useStore((s) => s.setGamma);
   const soloChannel = useStore((s) => s.soloChannel);
-  const [expanded, setExpanded] = useState<number | null>(1);
+  const [expanded, setExpanded] = useState<number | null>(0);
 
   return (
     <Panel className="flex max-h-[640px] flex-col overflow-hidden" strong>
@@ -477,7 +513,8 @@ function ChannelPanel() {
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {channels.map((c) => {
-          const mk = MARKERS[c.index];
+          const mk = activeChannels[c.index];
+          if (!mk) return null;
           const open = expanded === c.index;
           return (
             <div key={c.index} className={clsx("rounded-xl px-2 py-1.5 transition", c.visible ? "bg-white/[0.03]" : "opacity-55")}>

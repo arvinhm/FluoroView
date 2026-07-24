@@ -3,19 +3,29 @@ import { motion } from "framer-motion";
 import { Play, Network, Grid3x3, MapPin, Loader2 } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
-import { MARKERS } from "../../lib/synth";
-import { PANEL_IDX } from "../../lib/analysis";
+import { panelIndices } from "../../lib/analysis";
+import type { ChannelDef } from "../../lib/types";
 import { clusterColor } from "../../lib/palette";
-import { Panel, Slider, SectionLabel } from "../ui";
+import { Panel, Slider, SectionLabel, EmptyState } from "../ui";
 import { EmbeddingScatter, SpatialMap, MarkerHeatmap, type ColorBy } from "./charts";
 
 export default function Analysis() {
-  const tissue = useStore((s) => s.tissue)!;
+  const tissue = useStore((s) => s.tissue);
   const analysis = useStore((s) => s.analysis);
   const runClustering = useStore((s) => s.runClustering);
+  const activeChannels = useStore((s) => s.activeChannels);
+  const cellTypes = useStore((s) => s.cellTypes);
   const [k, setK] = useState(8);
   const [busy, setBusy] = useState(false);
-  const [colorBy, setColorBy] = useState<ColorBy>({ mode: "type" });
+  const [colorBy, setColorBy] = useState<ColorBy>(cellTypes ? { mode: "type" } : { mode: "marker", marker: 1 });
+
+  if (!tissue) {
+    return (
+      <Panel className="p-8" strong>
+        <EmptyState icon={<Network className="h-6 w-6" />} title="No dataset loaded" hint="Load a dataset from the Studio header to run analysis." />
+      </Panel>
+    );
+  }
 
   const run = () => {
     setBusy(true);
@@ -41,19 +51,19 @@ export default function Analysis() {
           </div>
           <button onClick={run} disabled={busy} className="btn-primary inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm disabled:opacity-60">
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            {analysis ? "Re-run clustering" : "Run clustering + UMAP"}
+            {analysis ? "Re-run clustering" : "Run clustering + embedding"}
           </button>
         </div>
 
-        <ColorControl colorBy={colorBy} setColorBy={setColorBy} hasClusters={!!analysis} />
+        <ColorControl colorBy={colorBy} setColorBy={setColorBy} hasClusters={!!analysis} channels={activeChannels} hasTypes={!!cellTypes} />
       </Panel>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel className="flex flex-col p-4">
-          <SectionLabel>UMAP embedding</SectionLabel>
+          <SectionLabel>Neighbor embedding</SectionLabel>
           <div className="relative h-[360px] w-full overflow-hidden rounded-xl bg-ink-950/60 ring-1 ring-white/5">
             {analysis ? (
-              <EmbeddingScatter tissue={tissue} embedding={analysis.embedding} sampleIdx={analysis.sampleIdx} labels={analysis.labels} colorBy={colorBy} />
+              <EmbeddingScatter tissue={tissue} embedding={analysis.embedding} sampleIdx={analysis.sampleIdx} labels={analysis.labels} colorBy={colorBy} cellTypes={cellTypes} />
             ) : (
               <Empty icon={<Network className="h-6 w-6" />} text="Run clustering to compute a neighbor embedding" />
             )}
@@ -63,7 +73,7 @@ export default function Analysis() {
         <Panel className="flex flex-col p-4">
           <SectionLabel>Spatial cell map</SectionLabel>
           <div className="relative h-[360px] w-full overflow-hidden rounded-xl ring-1 ring-white/5">
-            <SpatialMap tissue={tissue} labels={analysis?.labels} colorBy={analysis ? colorBy : { mode: "type" }} />
+            <SpatialMap tissue={tissue} labels={analysis?.labels} colorBy={analysis ? colorBy : cellTypes ? { mode: "type" } : { mode: "marker", marker: 1 }} cellTypes={cellTypes} />
           </div>
         </Panel>
       </div>
@@ -101,10 +111,10 @@ export default function Analysis() {
         </Panel>
 
         <Panel className="flex flex-col p-4">
-          <SectionLabel>Cluster × marker heatmap</SectionLabel>
+          <SectionLabel>Cluster × channel heatmap</SectionLabel>
           {analysis ? (
             <div className="flex-1">
-              <MarkerHeatmap tissue={tissue} labels={analysis.labels} k={analysis.k} />
+              <MarkerHeatmap tissue={tissue} labels={analysis.labels} k={analysis.k} channels={activeChannels} />
               <div className="mt-3 flex items-center gap-2 text-[10px] text-white/40">
                 low
                 <span className="h-2 flex-1 rounded-full" style={{ background: "linear-gradient(90deg,#0d0887,#8b0aa5,#db5c68,#febc2a,#f0f921)" }} />
@@ -112,7 +122,7 @@ export default function Analysis() {
               </div>
             </div>
           ) : (
-            <Empty icon={<MapPin className="h-6 w-6" />} text="Mean marker expression per cluster" />
+            <Empty icon={<MapPin className="h-6 w-6" />} text="Mean channel intensity per cluster" />
           )}
         </Panel>
       </div>
@@ -120,14 +130,27 @@ export default function Analysis() {
   );
 }
 
-function ColorControl({ colorBy, setColorBy, hasClusters }: { colorBy: ColorBy; setColorBy: (c: ColorBy) => void; hasClusters: boolean }) {
+function ColorControl({
+  colorBy,
+  setColorBy,
+  hasClusters,
+  channels,
+  hasTypes,
+}: {
+  colorBy: ColorBy;
+  setColorBy: (c: ColorBy) => void;
+  hasClusters: boolean;
+  channels: ChannelDef[];
+  hasTypes: boolean;
+}) {
+  const panel = panelIndices(channels.length);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs text-white/45">Color by</span>
       <div className="flex items-center gap-1 rounded-xl glass p-1">
         {hasClusters && <Seg active={colorBy.mode === "cluster"} onClick={() => setColorBy({ mode: "cluster" })}>Cluster</Seg>}
-        <Seg active={colorBy.mode === "type"} onClick={() => setColorBy({ mode: "type" })}>Cell type</Seg>
-        <Seg active={colorBy.mode === "marker"} onClick={() => setColorBy({ mode: "marker", marker: colorBy.marker ?? PANEL_IDX[0] })}>Marker</Seg>
+        {hasTypes && <Seg active={colorBy.mode === "type"} onClick={() => setColorBy({ mode: "type" })}>Cell type</Seg>}
+        <Seg active={colorBy.mode === "marker"} onClick={() => setColorBy({ mode: "marker", marker: colorBy.marker ?? panel[0] })}>Channel</Seg>
       </div>
       {colorBy.mode === "marker" && (
         <select
@@ -135,9 +158,9 @@ function ColorControl({ colorBy, setColorBy, hasClusters }: { colorBy: ColorBy; 
           onChange={(e) => setColorBy({ mode: "marker", marker: parseInt(e.target.value) })}
           className="rounded-xl glass px-3 py-1.5 text-sm text-white/80 outline-none"
         >
-          {PANEL_IDX.map((m) => (
+          {panel.map((m) => (
             <option key={m} value={m} className="bg-ink-800">
-              {MARKERS[m].name}
+              {channels[m].name}
             </option>
           ))}
         </select>

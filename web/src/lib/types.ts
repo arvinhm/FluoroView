@@ -8,6 +8,9 @@ export interface MarkerDef {
   defaultOn: boolean;
 }
 
+/** A channel definition for an active dataset (real or synthetic). */
+export type ChannelDef = MarkerDef;
+
 export interface CellTypeDef {
   name: string;
   short: string;

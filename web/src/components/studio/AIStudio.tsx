@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, ScanSearch, Dna, Play, Loader2, CheckCircle2, ArrowRight, TriangleAlert } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
-import { MARKERS } from "../../lib/synth";
+import { MARKERS, generateTissue, CELL_TYPES } from "../../lib/synth";
 import { Panel, Badge } from "../ui";
 import { SpatialMap } from "./charts";
 
@@ -36,7 +36,8 @@ export default function AIStudio() {
 }
 
 function SegmentationCard() {
-  const tissue = useStore((s) => s.tissue)!;
+  const tissue = useStore((s) => s.tissue);
+  const pixelSizeUm = useStore((s) => s.pixelSizeUm);
   const setSegmented = useStore((s) => s.setSegmented);
   const setView = useStore((s) => s.setView);
   const [model, setModel] = useState(SEG_MODELS[0]);
@@ -46,6 +47,8 @@ function SegmentationCard() {
   const timers = useRef<number[]>([]);
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  if (!tissue) return null;
 
   const run = () => {
     timers.current.forEach(clearTimeout);
@@ -75,7 +78,9 @@ function SegmentationCard() {
   };
 
   const nCells = tissue.cells.length;
-  const meanDia = (tissue.cells.reduce((a, c) => a + c.r, 0) / nCells) * 2 * 0.5;
+  const meanRadius = nCells ? tissue.cells.reduce((a, c) => a + c.r, 0) / nCells : 0;
+  const meanDia = meanRadius * 2 * (pixelSizeUm ?? 1);
+  const diaUnit = pixelSizeUm ? "µm" : "px";
 
   return (
     <Panel className="flex flex-col p-5" strong>
@@ -141,7 +146,7 @@ function SegmentationCard() {
           </div>
           <div className="grid grid-cols-3 gap-2">
             <Stat label="Cells detected" value={nCells.toLocaleString()} />
-            <Stat label="Mean diameter" value={`${meanDia.toFixed(1)} µm`} />
+            <Stat label="Mean diameter" value={`${meanDia.toFixed(1)} ${diaUnit}`} />
             <Stat label="Confidence" value="0.94" />
           </div>
           <button onClick={() => setView("viewer")} className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-cyan-300 hover:text-cyan-200">
@@ -159,7 +164,9 @@ function SegmentationCard() {
 }
 
 function HE2Expression() {
-  const tissue = useStore((s) => s.tissue)!;
+  // Self-contained synthetic immuno tissue: this experimental demo maps genes to
+  // an IO marker panel, which is independent of whichever dataset is loaded.
+  const tissue = useMemo(() => generateTissue(1500, 11), []);
   const [geneSel, setGeneSel] = useState(GENES[0]);
   const [predicted, setPredicted] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -204,7 +211,7 @@ function HE2Expression() {
           </div>
           <div className="relative h-[220px] overflow-hidden rounded-xl ring-1 ring-white/10">
             {predicted ? (
-              <SpatialMap tissue={tissue} colorBy={{ mode: "marker", marker: markerIdx }} />
+              <SpatialMap tissue={tissue} colorBy={{ mode: "marker", marker: markerIdx }} cellTypes={CELL_TYPES} />
             ) : (
               <div className="grid h-full place-items-center bg-ink-950/60 text-center text-xs text-white/35">
                 {busy ? <Loader2 className="h-5 w-5 animate-spin text-amber-300" /> : "Run prediction to paint expression"}

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
-import type { Tissue } from "../../lib/types";
-import { CELL_TYPES, MARKERS } from "../../lib/synth";
-import { PANEL_IDX } from "../../lib/analysis";
+import type { CellTypeDef, ChannelDef, Tissue } from "../../lib/types";
+import { panelIndices } from "../../lib/analysis";
 import { clusterColor, hexToRgb, ramp, rampCss } from "../../lib/palette";
 
 export type ColorBy = { mode: "cluster" | "type" | "marker"; marker?: number };
@@ -12,9 +11,10 @@ interface EmbeddingProps {
   sampleIdx: number[];
   labels: number[];
   colorBy: ColorBy;
+  cellTypes?: CellTypeDef[] | null;
 }
 
-export function EmbeddingScatter({ tissue, embedding, sampleIdx, labels, colorBy }: EmbeddingProps) {
+export function EmbeddingScatter({ tissue, embedding, sampleIdx, labels, colorBy, cellTypes }: EmbeddingProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -34,7 +34,7 @@ export function EmbeddingScatter({ tissue, embedding, sampleIdx, labels, colorBy
       const cell = tissue.cells[idx];
       const x = pad + p[0] * (W - pad * 2);
       const y = pad + p[1] * (H - pad * 2);
-      const color = colorFor(colorBy, cell.typeIndex, labels[idx], cell.markers);
+      const color = colorFor(colorBy, cell.typeIndex, labels[idx], cell.markers, cellTypes);
       const [r, g, b] = hexToRgb(color);
       const grad = ctx.createRadialGradient(x, y, 0, x, y, 4.5);
       grad.addColorStop(0, `rgba(${r},${g},${b},0.95)`);
@@ -45,7 +45,7 @@ export function EmbeddingScatter({ tissue, embedding, sampleIdx, labels, colorBy
       ctx.fill();
     });
     ctx.globalCompositeOperation = "source-over";
-  }, [tissue, embedding, sampleIdx, labels, colorBy]);
+  }, [tissue, embedding, sampleIdx, labels, colorBy, cellTypes]);
 
   return <canvas ref={ref} className="h-full w-full" />;
 }
@@ -54,9 +54,10 @@ interface SpatialProps {
   tissue: Tissue;
   labels?: number[];
   colorBy: ColorBy;
+  cellTypes?: CellTypeDef[] | null;
 }
 
-export function SpatialMap({ tissue, labels, colorBy }: SpatialProps) {
+export function SpatialMap({ tissue, labels, colorBy, cellTypes }: SpatialProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -76,13 +77,13 @@ export function SpatialMap({ tissue, labels, colorBy }: SpatialProps) {
     for (const c of tissue.cells) {
       const x = ox + c.x * s;
       const y = oy + c.y * s;
-      const color = colorFor(colorBy, c.typeIndex, labels ? labels[c.id] : c.typeIndex, c.markers);
+      const color = colorFor(colorBy, c.typeIndex, labels ? labels[c.id] : c.typeIndex, c.markers, cellTypes);
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(x, y, Math.max(1.1, c.r * s * 0.9), 0, Math.PI * 2);
+      ctx.arc(x, y, Math.max(0.8, c.r * s * 0.9), 0, Math.PI * 2);
       ctx.fill();
     }
-  }, [tissue, labels, colorBy]);
+  }, [tissue, labels, colorBy, cellTypes]);
 
   return <canvas ref={ref} className="h-full w-full rounded-xl" />;
 }
@@ -91,29 +92,30 @@ interface HeatmapProps {
   tissue: Tissue;
   labels: number[];
   k: number;
+  channels: ChannelDef[];
 }
 
-export function MarkerHeatmap({ tissue, labels, k }: HeatmapProps) {
-  // rows = clusters, cols = panel markers, value = mean expression (0..1)
+export function MarkerHeatmap({ tissue, labels, k, channels }: HeatmapProps) {
+  const panel = panelIndices(channels.length);
   const rows: number[][] = [];
   for (let c = 0; c < k; c++) {
     const members = tissue.cells.filter((cell) => labels[cell.id] === c);
-    const means = PANEL_IDX.map((m) => {
+    const means = panel.map((m) => {
       let s = 0;
       for (const cell of members) s += cell.markers[m];
       return members.length ? s / members.length : 0;
     });
     rows.push(means);
   }
-  const maxV = Math.max(0.6, ...rows.flat());
+  const maxV = Math.max(0.4, ...rows.flat());
 
   return (
     <div className="overflow-auto">
-      <div className="inline-grid gap-[2px]" style={{ gridTemplateColumns: `56px repeat(${PANEL_IDX.length}, 1fr)` }}>
+      <div className="inline-grid gap-[2px]" style={{ gridTemplateColumns: `64px repeat(${panel.length}, 1fr)` }}>
         <div />
-        {PANEL_IDX.map((m) => (
+        {panel.map((m) => (
           <div key={m} className="px-1 pb-1 text-center text-[9px] font-medium text-white/50" style={{ writingMode: "vertical-rl" as const }}>
-            {MARKERS[m].name}
+            {channels[m].name}
           </div>
         ))}
         {rows.map((row, ci) => (
@@ -142,10 +144,16 @@ function Row({ ci, row, maxV }: { ci: number; row: number[]; maxV: number }) {
   );
 }
 
-function colorFor(cb: ColorBy, typeIndex: number, label: number, markers: number[]): string {
+function colorFor(
+  cb: ColorBy,
+  typeIndex: number,
+  label: number,
+  markers: number[],
+  cellTypes?: CellTypeDef[] | null
+): string {
   if (cb.mode === "cluster") return clusterColor(label);
-  if (cb.mode === "type") return CELL_TYPES[typeIndex].color;
-  const v = markers[cb.marker ?? 0];
+  if (cb.mode === "type") return cellTypes ? cellTypes[typeIndex]?.color ?? "#22d3ee" : "#22d3ee";
+  const v = markers[cb.marker ?? 0] ?? 0;
   const [r, g, b] = ramp(v);
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }

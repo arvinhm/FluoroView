@@ -1,9 +1,10 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Eye, Network, Sparkles, Circle, Database, Cpu } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { ViewKey } from "../../lib/types";
+import { DATASETS, datasetById } from "../../lib/datasets";
 import ErrorBoundary from "../ErrorBoundary";
 
 const Viewer = lazy(() => import("./Viewer"));
@@ -21,20 +22,16 @@ export default function Studio() {
   const setView = useStore((s) => s.setView);
   const ensureData = useStore((s) => s.ensureData);
   const tissue = useStore((s) => s.tissue);
+  const loading = useStore((s) => s.loading);
+  const datasetId = useStore((s) => s.datasetId);
+  const loadDataset = useStore((s) => s.loadDataset);
   const backend = useStore((s) => s.backendOnline);
-  const [ready, setReady] = useState(!!tissue);
 
   useEffect(() => {
-    if (tissue) {
-      setReady(true);
-      return;
-    }
-    const id = setTimeout(() => {
-      ensureData();
-      setReady(true);
-    }, 40);
-    return () => clearTimeout(id);
-  }, [tissue, ensureData]);
+    ensureData();
+  }, [ensureData]);
+
+  const ready = !!tissue;
 
   return (
     <div className="mx-auto min-h-screen max-w-[1600px] px-3 pb-10 pt-24 sm:px-5">
@@ -58,14 +55,25 @@ export default function Studio() {
           ))}
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <label className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60" title="Active dataset">
             <Database className="h-3.5 w-3.5 text-cyan-300" />
-            Demo · tumor-immune margin
-          </span>
+            <select
+              value={datasetId}
+              onChange={(e) => void loadDataset(datasetById(e.target.value))}
+              className="max-w-[190px] cursor-pointer bg-transparent font-medium text-white/80 outline-none"
+              aria-label="Select dataset"
+            >
+              {DATASETS.map((d) => (
+                <option key={d.id} value={d.id} className="bg-ink-800">
+                  {d.short}
+                </option>
+              ))}
+            </select>
+          </label>
           <span className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60">
             <Circle className={clsx("h-2 w-2", tissue ? "fill-emerald-400 text-emerald-400" : "fill-amber-400 text-amber-400")} />
-            {tissue ? `${tissue.cells.length.toLocaleString()} cells` : "loading…"}
+            {tissue ? `${tissue.cells.length.toLocaleString()} cells` : loading ? "loading…" : "—"}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60">
             <Cpu className="h-3.5 w-3.5 text-violet-300" />
@@ -75,7 +83,7 @@ export default function Studio() {
       </div>
 
       {!ready ? (
-        <Loader />
+        <Loader label={loading ? "Loading dataset…" : "Preparing…"} />
       ) : (
         <ErrorBoundary scope="Studio" key={`eb-${view}`}>
           <AnimatePresence mode="wait">
@@ -86,7 +94,7 @@ export default function Studio() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
             >
-              <Suspense fallback={<Loader />}>
+              <Suspense fallback={<Loader label="Loading view…" />}>
                 {view === "viewer" && <Viewer />}
                 {view === "analysis" && <Analysis />}
                 {view === "ai" && <AIStudio />}
@@ -99,7 +107,7 @@ export default function Studio() {
   );
 }
 
-function Loader() {
+function Loader({ label }: { label: string }) {
   return (
     <div className="grid h-[60vh] place-items-center">
       <div className="text-center">
@@ -107,7 +115,7 @@ function Loader() {
           <span className="absolute inset-0 animate-spinslow rounded-full border-2 border-transparent border-t-cyan-400 border-r-violet-500" />
           <span className="absolute inset-2 animate-pulseglow rounded-full bg-gradient-to-br from-cyan-400/40 to-pink-500/40 blur-sm" />
         </div>
-        <p className="mt-5 text-sm text-white/55">Preparing demo tissue &amp; channel maps…</p>
+        <p className="mt-5 text-sm text-white/55">{label}</p>
       </div>
     </div>
   );

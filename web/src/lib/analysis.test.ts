@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { standardize, pca, kmeans, otsu, summarizeClusters } from "./analysis";
-import { generateTissue } from "./synth";
+import { generateTissue, MARKERS } from "./synth";
 
 describe("otsu", () => {
   it("finds a threshold between two well-separated modes", () => {
@@ -91,7 +91,7 @@ describe("summarizeClusters", () => {
   it("has counts summing to total and percentages summing to ~100", () => {
     const t = generateTissue(500, 3);
     const labels = t.cells.map((_, i) => i % 4);
-    const sum = summarizeClusters(t.cells, labels, 4);
+    const sum = summarizeClusters(t.cells, labels, 4, MARKERS.map((m) => m.name));
     const total = sum.reduce((a, s) => a + s.count, 0);
     expect(total).toBe(t.cells.length);
     const pct = sum.reduce((a, s) => a + s.pct, 0);
