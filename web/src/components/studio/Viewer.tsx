@@ -9,6 +9,8 @@ import { clusterColor } from "../../lib/palette";
 import { Panel, Slider, Chip } from "../ui";
 
 const UM_PER_UNIT = 0.5; // nominal micron scale for the demo tissue
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 40;
 
 interface V {
   zoom: number;
@@ -44,7 +46,11 @@ export default function Viewer() {
   const roiDrawRef = useRef<{ x0: number; y0: number; x: number; y: number } | null>(null);
   const [roiMode, setRoiMode] = useState(false);
   const [glOk, setGlOk] = useState(true);
+  const [zoomPct, setZoomPct] = useState(100);
   const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; name: string; color: string } | null>(null);
+  // Refs let native (non-passive) listeners always read the latest values.
+  const scheduleRef = useRef<() => void>(() => {});
+  const mapsRef = useRef(maps);
 
   const getVT = useCallback((): ViewTransform => {
     const el = wrapRef.current!;
@@ -156,6 +162,71 @@ export default function Viewer() {
     rafRef.current = requestAnimationFrame(render);
   }, [render]);
 
+  useEffect(() => {
+    scheduleRef.current = schedule;
+  }, [schedule]);
+  useEffect(() => {
+    mapsRef.current = maps;
+  }, [maps]);
+
+  /** Zoom keeping the image point under (clientX, clientY) fixed on screen. */
+  const zoomAtPoint = useCallback(
+    (clientX: number, clientY: number, factor: number) => {
+      const el = wrapRef.current;
+      const m = mapsRef.current;
+      if (!el || !m) return;
+      const r = el.getBoundingClientRect();
+      const sx = clientX - r.left;
+      const sy = clientY - r.top;
+      const before = fitRect(m.width, m.height, getVT());
+      const kb = m.scale * before.s;
+      const tx = (sx - before.x) / kb;
+      const ty = (sy - before.y) / kb;
+      const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, viewRef.current.zoom * factor));
+      viewRef.current.zoom = next;
+      const after = fitRect(m.width, m.height, getVT());
+      const ka = m.scale * after.s;
+      const wAfter = m.width * after.s;
+      const hAfter = m.height * after.s;
+      viewRef.current.panX = sx - tx * ka - (el.clientWidth - wAfter) / 2;
+      viewRef.current.panY = sy - ty * ka - (el.clientHeight - hAfter) / 2;
+      setZoomPct(Math.round(next * 100));
+      scheduleRef.current();
+    },
+    [getVT]
+  );
+
+  const zoomByCenter = useCallback(
+    (factor: number) => {
+      const el = wrapRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      zoomAtPoint(r.left + el.clientWidth / 2, r.top + el.clientHeight / 2, factor);
+    },
+    [zoomAtPoint]
+  );
+
+  const fit = useCallback(() => {
+    viewRef.current = { zoom: 1, panX: 0, panY: 0 };
+    setZoomPct(100);
+    scheduleRef.current();
+  }, []);
+
+  const oneToOne = useCallback(() => {
+    const el = wrapRef.current;
+    const m = mapsRef.current;
+    if (!el || !m) return;
+    const base = Math.min(el.clientWidth / m.width, el.clientHeight / m.height) || 1;
+    const zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, 1 / base));
+    viewRef.current = { zoom, panX: 0, panY: 0 };
+    setZoomPct(Math.round(zoom * 100));
+    scheduleRef.current();
+  }, []);
+
+  const onDoubleClick = (e: React.MouseEvent) => {
+    zoomAtPoint(e.clientX, e.clientY, e.altKey ? 1 / 1.6 : 1.6);
+  };
+
   // init compositor
   useEffect(() => {
     const gl = glRef.current;
@@ -194,6 +265,52 @@ export default function Viewer() {
   }, [schedule]);
 
   useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+
+  // Non-passive wheel listener so the PAGE never scrolls while zooming over the
+  // canvas. React's synthetic onWheel is registered passively and cannot
+  // preventDefault(), which is the root cause of the page-scroll bug.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault();
+      // Normalize deltaMode (0 = pixel, 1 = line, 2 = page) so mice & trackpads
+      // behave consistently.
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16;
+      else if (e.deltaMode === 2) dy *= el.clientHeight;
+      // macOS trackpad pinch arrives as ctrlKey + wheel; make it a touch finer.
+      const intensity = e.ctrlKey ? 0.01 : 0.0025;
+      const factor = Math.exp(-dy * intensity);
+      zoomAtPoint(e.clientX, e.clientY, factor);
+    };
+    el.addEventListener("wheel", onWheelNative, { passive: false });
+    return () => el.removeEventListener("wheel", onWheelNative);
+  }, [zoomAtPoint]);
+
+  // Keyboard zoom: +/= in, -/_ out, 0 fit, 1 actual pixels.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "+" || e.key === "=") {
+        e.preventDefault();
+        zoomByCenter(1.25);
+      } else if (e.key === "-" || e.key === "_") {
+        e.preventDefault();
+        zoomByCenter(1 / 1.25);
+      } else if (e.key === "0") {
+        e.preventDefault();
+        fit();
+      } else if (e.key === "1") {
+        e.preventDefault();
+        oneToOne();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomByCenter, fit, oneToOne]);
 
   const screenToTissue = (clientX: number, clientY: number) => {
     const el = wrapRef.current!;
@@ -266,36 +383,6 @@ export default function Viewer() {
     dragRef.current = null;
   };
 
-  const onWheel = (e: React.WheelEvent) => {
-    if (!maps) return;
-    const el = wrapRef.current!;
-    const r = el.getBoundingClientRect();
-    const sx = e.clientX - r.left;
-    const sy = e.clientY - r.top;
-    const before = fitRect(maps.width, maps.height, getVT());
-    const kb = maps.scale * before.s;
-    const tx = (sx - before.x) / kb;
-    const ty = (sy - before.y) / kb;
-    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-    viewRef.current.zoom = Math.max(0.5, Math.min(24, viewRef.current.zoom * factor));
-    const after = fitRect(maps.width, maps.height, getVT());
-    const ka = maps.scale * after.s;
-    // keep cursor point fixed
-    const wAfter = maps.width * after.s;
-    const hAfter = maps.height * after.s;
-    viewRef.current.panX = sx - tx * ka - (el.clientWidth - wAfter) / 2;
-    viewRef.current.panY = sy - ty * ka - (el.clientHeight - hAfter) / 2;
-    schedule();
-  };
-
-  const fit = () => {
-    viewRef.current = { zoom: 1, panX: 0, panY: 0 };
-    schedule();
-  };
-  const zoomBy = (f: number) => {
-    viewRef.current.zoom = Math.max(0.5, Math.min(24, viewRef.current.zoom * f));
-    schedule();
-  };
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -309,9 +396,10 @@ export default function Viewer() {
           ))}
         </div>
         <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
-          <ToolBtn onClick={() => zoomBy(1.2)} title="Zoom in"><ZoomIn className="h-4 w-4" /></ToolBtn>
-          <ToolBtn onClick={() => zoomBy(1 / 1.2)} title="Zoom out"><ZoomOut className="h-4 w-4" /></ToolBtn>
-          <ToolBtn onClick={fit} title="Fit"><Maximize2 className="h-4 w-4" /></ToolBtn>
+          <ToolBtn onClick={() => zoomByCenter(1.25)} title="Zoom in (+)"><ZoomIn className="h-4 w-4" /></ToolBtn>
+          <ToolBtn onClick={() => zoomByCenter(1 / 1.25)} title="Zoom out (−)"><ZoomOut className="h-4 w-4" /></ToolBtn>
+          <ToolBtn onClick={fit} title="Fit to view (0)"><Maximize2 className="h-4 w-4" /></ToolBtn>
+          <ToolBtn onClick={oneToOne} title="Actual pixels (1)"><span className="text-[11px] font-bold leading-none">1:1</span></ToolBtn>
           <ToolBtn active={roiMode} onClick={() => setRoiMode((v) => !v)} title="Draw ROI">
             <SquareDashedMousePointer className="h-4 w-4" />
           </ToolBtn>
@@ -322,12 +410,12 @@ export default function Viewer() {
 
         <div
           ref={wrapRef}
-          className={clsx("relative h-[420px] w-full sm:h-[560px] lg:h-[640px]", roiMode ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing")}
+          className={clsx("relative h-[420px] w-full select-none touch-none overscroll-contain sm:h-[560px] lg:h-[640px]", roiMode ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing")}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerLeave={() => { onPointerUp(); setHoverInfo(null); }}
-          onWheel={onWheel}
+          onDoubleClick={onDoubleClick}
         >
           <canvas ref={glRef} className="absolute inset-0 h-full w-full" />
           <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
@@ -346,7 +434,7 @@ export default function Viewer() {
             </div>
           )}
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg glass px-2.5 py-1 font-mono text-[11px] text-white/60">
-            {Math.round(viewRef.current.zoom * 100)}% · WebGL2 composite
+            {zoomPct}% · scroll = zoom · drag = pan · dbl-click = zoom
           </div>
         </div>
       </Panel>
