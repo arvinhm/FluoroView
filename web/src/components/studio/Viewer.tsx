@@ -1,0 +1,450 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Maximize2, ZoomIn, ZoomOut, SquareDashedMousePointer, Trash2, ScanSearch, Layers } from "lucide-react";
+import { clsx } from "clsx";
+import { useStore } from "../../lib/store";
+import { MARKERS } from "../../lib/synth";
+import { CELL_TYPES } from "../../lib/synth";
+import { Compositor, fitRect, type ViewTransform } from "../../lib/compositor";
+import { clusterColor } from "../../lib/palette";
+import { Panel, Slider, Chip } from "../ui";
+
+const UM_PER_UNIT = 0.5; // nominal micron scale for the demo tissue
+
+interface V {
+  zoom: number;
+  panX: number;
+  panY: number;
+}
+
+const PRESETS: { name: string; markers: string[] }[] = [
+  { name: "Immune", markers: ["DAPI", "CD3", "CD8", "CD68"] },
+  { name: "Tumor", markers: ["DAPI", "PanCK", "Ki67", "PD-L1"] },
+  { name: "Structure", markers: ["DAPI", "SMA", "CD31", "PanCK"] },
+  { name: "All", markers: MARKERS.map((m) => m.name) },
+];
+
+export default function Viewer() {
+  const tissue = useStore((s) => s.tissue);
+  const maps = useStore((s) => s.maps);
+  const channels = useStore((s) => s.channels);
+  const rois = useStore((s) => s.rois);
+  const addRoi = useStore((s) => s.addRoi);
+  const clearRois = useStore((s) => s.clearRois);
+  const segmented = useStore((s) => s.segmented);
+  const setSegmented = useStore((s) => s.setSegmented);
+  const presetChannels = useStore((s) => s.presetChannels);
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const glRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+  const compRef = useRef<Compositor | null>(null);
+  const viewRef = useRef<V>({ zoom: 1, panX: 0, panY: 0 });
+  const rafRef = useRef(0);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const roiDrawRef = useRef<{ x0: number; y0: number; x: number; y: number } | null>(null);
+  const [roiMode, setRoiMode] = useState(false);
+  const [glOk, setGlOk] = useState(true);
+  const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; name: string; color: string } | null>(null);
+
+  const getVT = useCallback((): ViewTransform => {
+    const el = wrapRef.current!;
+    return {
+      zoom: viewRef.current.zoom,
+      panX: viewRef.current.panX,
+      panY: viewRef.current.panY,
+      canvasW: el.clientWidth,
+      canvasH: el.clientHeight,
+    };
+  }, []);
+
+  const drawOverlay = useCallback(() => {
+    const overlay = overlayRef.current;
+    const el = wrapRef.current;
+    if (!overlay || !el || !maps || !tissue) return;
+    const ctx = overlay.getContext("2d");
+    if (!ctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    if (overlay.width !== cw * dpr || overlay.height !== ch * dpr) {
+      overlay.width = cw * dpr;
+      overlay.height = ch * dpr;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cw, ch);
+
+    const vt = getVT();
+    const rect = fitRect(maps.width, maps.height, vt);
+    const k = maps.scale * rect.s; // tissue units -> screen px
+    const toX = (tx: number) => rect.x + tx * k;
+    const toY = (ty: number) => rect.y + ty * k;
+
+    // segmentation outlines
+    if (segmented) {
+      ctx.lineWidth = Math.max(0.6, k * 0.9);
+      for (const c of tissue.cells) {
+        const sx = toX(c.x);
+        const sy = toY(c.y);
+        if (sx < -20 || sy < -20 || sx > cw + 20 || sy > ch + 20) continue;
+        const col = c.cluster != null ? clusterColor(c.cluster) : CELL_TYPES[c.typeIndex].color;
+        ctx.strokeStyle = hexA(col, 0.85);
+        ctx.beginPath();
+        ctx.arc(sx, sy, Math.max(1.4, c.r * k), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    // ROIs
+    ctx.lineWidth = 2;
+    ctx.font = "600 12px Inter, sans-serif";
+    for (const r of rois) {
+      const x = toX(r.x);
+      const y = toY(r.y);
+      const w = r.w * k;
+      const h = r.h * k;
+      ctx.strokeStyle = "#22d3ee";
+      ctx.fillStyle = "rgba(34,211,238,0.08)";
+      ctx.beginPath();
+      roundRect(ctx, x, y, w, h, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#67e8f9";
+      ctx.fillText(r.label, x + 6, y - 6);
+    }
+
+    // active ROI being drawn
+    const rd = roiDrawRef.current;
+    if (rd) {
+      const x = toX(Math.min(rd.x0, rd.x));
+      const y = toY(Math.min(rd.y0, rd.y));
+      const w = Math.abs(rd.x - rd.x0) * k;
+      const h = Math.abs(rd.y - rd.y0) * k;
+      ctx.strokeStyle = "#a78bfa";
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(x, y, w, h);
+      ctx.setLineDash([]);
+    }
+
+    // scale bar
+    const targetUm = 100;
+    const barPx = (targetUm / UM_PER_UNIT) * k;
+    if (barPx > 20 && barPx < cw * 0.8) {
+      const bx = cw - barPx - 24;
+      const by = ch - 28;
+      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx + barPx, by);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.font = "600 11px Inter, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(`${targetUm} µm`, bx + barPx / 2, by - 7);
+      ctx.textAlign = "left";
+    }
+  }, [maps, tissue, rois, segmented, getVT]);
+
+  const render = useCallback(() => {
+    const comp = compRef.current;
+    if (comp && comp.ok) comp.render(getVT());
+    drawOverlay();
+  }, [getVT, drawOverlay]);
+
+  const schedule = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(render);
+  }, [render]);
+
+  // init compositor
+  useEffect(() => {
+    const gl = glRef.current;
+    if (!gl || !maps) return;
+    const comp = new Compositor(gl);
+    compRef.current = comp;
+    setGlOk(comp.ok);
+    if (comp.ok) {
+      comp.upload(maps);
+      comp.setChannels(channels.map((c) => ({ ...MARKERS[c.index], color: MARKERS[c.index].color, gain: c.gain, gamma: c.gamma, visible: c.visible })));
+    }
+    schedule();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maps]);
+
+  // channel changes
+  useEffect(() => {
+    const comp = compRef.current;
+    if (comp && comp.ok) {
+      comp.setChannels(channels.map((c) => ({ color: MARKERS[c.index].color, gain: c.gain, gamma: c.gamma, visible: c.visible })));
+    }
+    schedule();
+  }, [channels, schedule]);
+
+  useEffect(() => {
+    schedule();
+  }, [rois, segmented, schedule]);
+
+  // resize
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => schedule());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [schedule]);
+
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
+
+  const screenToTissue = (clientX: number, clientY: number) => {
+    const el = wrapRef.current!;
+    const r = el.getBoundingClientRect();
+    const sx = clientX - r.left;
+    const sy = clientY - r.top;
+    const rect = fitRect(maps!.width, maps!.height, getVT());
+    const k = maps!.scale * rect.s;
+    return { tx: (sx - rect.x) / k, ty: (sy - rect.y) / k, sx, sy };
+  };
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    if (roiMode) {
+      const p = screenToTissue(e.clientX, e.clientY);
+      roiDrawRef.current = { x0: p.tx, y0: p.ty, x: p.tx, y: p.ty };
+    } else {
+      dragRef.current = { x: e.clientX, y: e.clientY };
+    }
+  };
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (roiMode && roiDrawRef.current) {
+      const p = screenToTissue(e.clientX, e.clientY);
+      roiDrawRef.current.x = p.tx;
+      roiDrawRef.current.y = p.ty;
+      schedule();
+      return;
+    }
+    if (dragRef.current) {
+      const dx = e.clientX - dragRef.current.x;
+      const dy = e.clientY - dragRef.current.y;
+      dragRef.current = { x: e.clientX, y: e.clientY };
+      viewRef.current.panX += dx;
+      viewRef.current.panY += dy;
+      schedule();
+      return;
+    }
+    // hover to identify nearest cell
+    if (tissue && maps) {
+      const p = screenToTissue(e.clientX, e.clientY);
+      let best = -1;
+      let bd = 18 * 18;
+      for (const c of tissue.cells) {
+        const dd = (c.x - p.tx) ** 2 + (c.y - p.ty) ** 2;
+        if (dd < bd) {
+          bd = dd;
+          best = c.id;
+        }
+      }
+      if (best >= 0) {
+        const c = tissue.cells[best];
+        setHoverInfo({ x: p.sx, y: p.sy, name: CELL_TYPES[c.typeIndex].name, color: CELL_TYPES[c.typeIndex].color });
+      } else setHoverInfo(null);
+    }
+  };
+
+  const onPointerUp = () => {
+    if (roiMode && roiDrawRef.current) {
+      const rd = roiDrawRef.current;
+      const x = Math.min(rd.x0, rd.x);
+      const y = Math.min(rd.y0, rd.y);
+      const w = Math.abs(rd.x - rd.x0);
+      const h = Math.abs(rd.y - rd.y0);
+      if (w > 8 && h > 8) {
+        addRoi({ id: Date.now(), x, y, w, h, label: `ROI-${rois.length + 1}` });
+      }
+      roiDrawRef.current = null;
+    }
+    dragRef.current = null;
+  };
+
+  const onWheel = (e: React.WheelEvent) => {
+    if (!maps) return;
+    const el = wrapRef.current!;
+    const r = el.getBoundingClientRect();
+    const sx = e.clientX - r.left;
+    const sy = e.clientY - r.top;
+    const before = fitRect(maps.width, maps.height, getVT());
+    const kb = maps.scale * before.s;
+    const tx = (sx - before.x) / kb;
+    const ty = (sy - before.y) / kb;
+    const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+    viewRef.current.zoom = Math.max(0.5, Math.min(24, viewRef.current.zoom * factor));
+    const after = fitRect(maps.width, maps.height, getVT());
+    const ka = maps.scale * after.s;
+    // keep cursor point fixed
+    const wAfter = maps.width * after.s;
+    const hAfter = maps.height * after.s;
+    viewRef.current.panX = sx - tx * ka - (el.clientWidth - wAfter) / 2;
+    viewRef.current.panY = sy - ty * ka - (el.clientHeight - hAfter) / 2;
+    schedule();
+  };
+
+  const fit = () => {
+    viewRef.current = { zoom: 1, panX: 0, panY: 0 };
+    schedule();
+  };
+  const zoomBy = (f: number) => {
+    viewRef.current.zoom = Math.max(0.5, Math.min(24, viewRef.current.zoom * f));
+    schedule();
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+      <Panel className="relative overflow-hidden p-0" strong>
+        {/* toolbar */}
+        <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-1.5">
+          {PRESETS.map((p) => (
+            <Chip key={p.name} onClick={() => presetChannels(p.markers)}>
+              {p.name}
+            </Chip>
+          ))}
+        </div>
+        <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+          <ToolBtn onClick={() => zoomBy(1.2)} title="Zoom in"><ZoomIn className="h-4 w-4" /></ToolBtn>
+          <ToolBtn onClick={() => zoomBy(1 / 1.2)} title="Zoom out"><ZoomOut className="h-4 w-4" /></ToolBtn>
+          <ToolBtn onClick={fit} title="Fit"><Maximize2 className="h-4 w-4" /></ToolBtn>
+          <ToolBtn active={roiMode} onClick={() => setRoiMode((v) => !v)} title="Draw ROI">
+            <SquareDashedMousePointer className="h-4 w-4" />
+          </ToolBtn>
+          <ToolBtn active={segmented} onClick={() => setSegmented(!segmented, "manual")} title="Toggle segmentation">
+            <ScanSearch className="h-4 w-4" />
+          </ToolBtn>
+        </div>
+
+        <div
+          ref={wrapRef}
+          className={clsx("relative h-[420px] w-full sm:h-[560px] lg:h-[640px]", roiMode ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing")}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerLeave={() => { onPointerUp(); setHoverInfo(null); }}
+          onWheel={onWheel}
+        >
+          <canvas ref={glRef} className="absolute inset-0 h-full w-full" />
+          <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
+          {!glOk && (
+            <div className="absolute inset-0 grid place-items-center text-sm text-white/60">
+              WebGL2 unavailable in this browser.
+            </div>
+          )}
+          {hoverInfo && (
+            <div
+              className="pointer-events-none absolute z-20 flex items-center gap-1.5 rounded-lg glass-strong px-2 py-1 text-xs"
+              style={{ left: hoverInfo.x + 14, top: hoverInfo.y + 14 }}
+            >
+              <span className="h-2 w-2 rounded-full" style={{ background: hoverInfo.color }} />
+              {hoverInfo.name}
+            </div>
+          )}
+          <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg glass px-2.5 py-1 font-mono text-[11px] text-white/60">
+            {Math.round(viewRef.current.zoom * 100)}% · WebGL2 composite
+          </div>
+        </div>
+      </Panel>
+
+      <ChannelPanel />
+    </div>
+  );
+}
+
+function ToolBtn({ children, onClick, active, title }: { children: React.ReactNode; onClick: () => void; active?: boolean; title: string }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={clsx(
+        "grid h-9 w-9 place-items-center rounded-xl glass text-white/70 transition hover:text-white",
+        active && "!bg-cyan-400/20 text-cyan-200 ring-1 ring-cyan-300/40"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ChannelPanel() {
+  const channels = useStore((s) => s.channels);
+  const toggle = useStore((s) => s.toggleChannel);
+  const setGain = useStore((s) => s.setGain);
+  const setGamma = useStore((s) => s.setGamma);
+  const soloChannel = useStore((s) => s.soloChannel);
+  const [expanded, setExpanded] = useState<number | null>(1);
+
+  return (
+    <Panel className="flex max-h-[640px] flex-col overflow-hidden" strong>
+      <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-bold">
+          <Layers className="h-4 w-4 text-cyan-300" /> Channels
+        </div>
+        <span className="text-xs text-white/40">{channels.filter((c) => c.visible).length}/{channels.length} on</span>
+      </div>
+      <div className="flex-1 overflow-y-auto px-2 py-2">
+        {channels.map((c) => {
+          const mk = MARKERS[c.index];
+          const open = expanded === c.index;
+          return (
+            <div key={c.index} className={clsx("rounded-xl px-2 py-1.5 transition", c.visible ? "bg-white/[0.03]" : "opacity-55")}>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => toggle(c.index)}
+                  className="grid h-6 w-6 place-items-center rounded-md"
+                  style={{ background: c.visible ? `${mk.color}33` : "transparent", boxShadow: `inset 0 0 0 1px ${mk.color}66` }}
+                >
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.visible ? mk.color : "transparent", boxShadow: c.visible ? `0 0 8px ${mk.color}` : "none" }} />
+                </button>
+                <button onClick={() => setExpanded(open ? null : c.index)} className="flex-1 text-left text-sm font-semibold">
+                  {mk.name}
+                  <span className="ml-1.5 text-[10px] font-normal text-white/35">{mk.kind}</span>
+                </button>
+                <button onClick={() => soloChannel(c.index)} className="rounded-md px-1.5 py-0.5 text-[10px] text-white/40 hover:bg-white/10 hover:text-white">
+                  solo
+                </button>
+              </div>
+              {open && (
+                <div className="mt-2 space-y-2 px-1 pb-1">
+                  <LabeledSlider label="Gain" value={c.gain} min={0.2} max={3} onChange={(v) => setGain(c.index, v)} accent={mk.color} />
+                  <LabeledSlider label="Gamma" value={c.gamma} min={0.3} max={2.4} onChange={(v) => setGamma(c.index, v)} accent={mk.color} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+function LabeledSlider({ label, value, min, max, onChange, accent }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void; accent: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-12 text-[11px] text-white/45">{label}</span>
+      <Slider value={value} min={min} max={max} onChange={onChange} accent={accent} />
+      <span className="w-8 text-right font-mono text-[11px] text-white/55">{value.toFixed(1)}</span>
+    </div>
+  );
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function hexA(hex: string, a: number) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}

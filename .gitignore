@@ -7,3 +7,5 @@ build/
 .fluoroview_versions/
 example/
 .pytest_cache/
+node_modules/
+PROJECT_MEMORY.md
