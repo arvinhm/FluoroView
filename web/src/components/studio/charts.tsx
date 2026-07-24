@@ -77,7 +77,8 @@ export function SpatialMap({ tissue, labels, colorBy, cellTypes }: SpatialProps)
     for (const c of tissue.cells) {
       const x = ox + c.x * s;
       const y = oy + c.y * s;
-      const color = colorFor(colorBy, c.typeIndex, labels ? labels[c.id] : c.typeIndex, c.markers, cellTypes);
+      const label = c.cluster != null ? c.cluster : c.typeIndex;
+      const color = colorFor(colorBy, c.typeIndex, label, c.markers, cellTypes);
       ctx.fillStyle = color;
       ctx.beginPath();
       ctx.arc(x, y, Math.max(0.8, c.r * s * 0.9), 0, Math.PI * 2);
@@ -99,7 +100,7 @@ export function MarkerHeatmap({ tissue, labels, k, channels }: HeatmapProps) {
   const panel = panelIndices(channels.length);
   const rows: number[][] = [];
   for (let c = 0; c < k; c++) {
-    const members = tissue.cells.filter((cell) => labels[cell.id] === c);
+    const members = tissue.cells.filter((cell) => cell.cluster === c);
     const means = panel.map((m) => {
       let s = 0;
       for (const cell of members) s += cell.markers[m];

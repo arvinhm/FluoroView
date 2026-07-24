@@ -42,10 +42,12 @@ interface AppState {
   soloChannel: (i: number) => void;
   showAllChannels: () => void;
   presetChannels: (names: string[]) => void;
+  selectedRoiId: number | null;
   addRoi: (r: Roi) => void;
   updateRoi: (id: number, patch: Partial<Roi>) => void;
   removeRoi: (id: number) => void;
   clearRois: () => void;
+  selectRoi: (id: number | null) => void;
   runClustering: (k: number) => void;
   setSegmented: (v: boolean, method?: string) => void;
   setBackend: (v: boolean) => void;
@@ -97,6 +99,7 @@ export const useStore = create<AppState>((set, get) => ({
           maps,
           channels: defaultChannels(ds.channels),
           rois: [],
+          selectedRoiId: null,
           analysis: null,
           segmented: false,
           segMethod: "",
@@ -115,6 +118,7 @@ export const useStore = create<AppState>((set, get) => ({
         maps,
         channels: defaultChannels(channels),
         rois: [],
+        selectedRoiId: null,
         analysis: null,
         // cells.json IS a real segmentation mask, so the overlay is valid immediately.
         segmented: true,
@@ -160,10 +164,12 @@ export const useStore = create<AppState>((set, get) => ({
     }));
   },
 
-  addRoi: (r) => set((s) => ({ rois: [...s.rois, r] })),
+  selectedRoiId: null,
+  addRoi: (r) => set((s) => ({ rois: [...s.rois, r], selectedRoiId: r.id })),
   updateRoi: (id, patch) => set((s) => ({ rois: s.rois.map((r) => (r.id === id ? { ...r, ...patch } : r)) })),
-  removeRoi: (id) => set((s) => ({ rois: s.rois.filter((r) => r.id !== id) })),
-  clearRois: () => set({ rois: [] }),
+  removeRoi: (id) => set((s) => ({ rois: s.rois.filter((r) => r.id !== id), selectedRoiId: s.selectedRoiId === id ? null : s.selectedRoiId })),
+  clearRois: () => set({ rois: [], selectedRoiId: null }),
+  selectRoi: (id) => set({ selectedRoiId: id }),
 
   runClustering: (k) => {
     const t = get().tissue;

@@ -49,11 +49,24 @@ export interface ChannelState {
 
 export type ViewKey = "home" | "viewer" | "analysis" | "ai";
 
+/** ROI geometry in image/tissue pixel coordinates. */
+export type RoiShape =
+  | { kind: "rect"; x: number; y: number; w: number; h: number }
+  | { kind: "circle"; cx: number; cy: number; r: number }
+  | { kind: "polygon"; points: [number, number][] };
+
+export interface RoiComment {
+  id: number;
+  author: string;
+  text: string;
+  createdAt: number;
+  replies: RoiComment[];
+}
+
 export interface Roi {
   id: number;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
   label: string;
+  color: string;
+  shape: RoiShape;
+  comments: RoiComment[];
 }
