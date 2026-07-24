@@ -1,4 +1,4 @@
-import type { BoundaryCell, Cell, ChannelDef, ScanMeta, Tissue } from "./types";
+import type { BoundaryCell, Cell, ChannelDef, ChannelHistogram, ScanMeta, Tissue } from "./types";
 import type { ChannelMaps } from "./synth";
 import type { DatasetDef } from "./datasets";
 import { parseBoundaries } from "./boundaries";
@@ -48,6 +48,13 @@ export interface LoadedDataset {
   /** Viv multiscale pixel-source array for the full-res pyramid image */
   imageSource: VivLoader | null;
   scanMeta: ScanMeta | null;
+  /** Per-channel histograms measured at load time (uploads); else computed lazily. */
+  channelStats?: ChannelHistogram[] | null;
+  /** True when the dataset ships/carries a real segmentation. */
+  segmented?: boolean;
+  segMethod?: string;
+  /** Honest, user-facing notes about how this dataset was loaded. */
+  notes?: string[];
 }
 
 interface RawCell {
