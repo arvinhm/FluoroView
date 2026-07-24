@@ -1,8 +1,13 @@
 import type { ChannelMaps } from "./synth";
 import { hexToRgb } from "./palette";
 
-// The shader packs up to 12 single-channel intensity maps into 3 RGBA textures.
-const MAX_CHANNELS = 12;
+// The compositor is data-driven: it packs N single-channel intensity maps into
+// ceil(N/4) RGBA textures and only composites the channels the loaded dataset
+// actually has (`uCount`). Capacity is 4 textures = 16 channels, which covers
+// both the 5-channel real scan and the 12-plex synthetic demo with headroom.
+const CHANS_PER_TEX = 4;
+const MAX_TEX = 4;
+const MAX_CHANNELS = CHANS_PER_TEX * MAX_TEX; // 16
 
 export interface ViewTransform {
   zoom: number;
@@ -27,6 +32,12 @@ void main(){
   gl_Position = vec4(aPos,0.0,1.0);
 }`;
 
+// Additive LUT blend + Reinhard-ish tone map. The loop is bounded by the real
+// channel count (`uCount`) and guards gamma so it NEVER evaluates pow(0.0, 0.0)
+// — that expression is undefined in GLSL and returns NaN on many GPUs, and
+// `uColor * NaN` (0.0 * NaN == NaN) would poison the whole pixel and render the
+// composite BLACK. This bit the 5-channel real dataset (channels 5..11 unused,
+// gamma left at 0) while the 12-plex synthetic panel happened to dodge it.
 const FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -34,22 +45,28 @@ out vec4 outColor;
 uniform sampler2D uTex0;
 uniform sampler2D uTex1;
 uniform sampler2D uTex2;
-uniform vec3 uColor[12];
-uniform float uGain[12];
-uniform float uGamma[12];
-uniform float uActive[12];
+uniform sampler2D uTex3;
+uniform vec3 uColor[${MAX_CHANNELS}];
+uniform float uGain[${MAX_CHANNELS}];
+uniform float uGamma[${MAX_CHANNELS}];
+uniform float uActive[${MAX_CHANNELS}];
+uniform int uCount;
 void main(){
-  vec4 a = texture(uTex0, vUv);
-  vec4 b = texture(uTex1, vUv);
-  vec4 c = texture(uTex2, vUv);
-  float inten[12];
-  inten[0]=a.r; inten[1]=a.g; inten[2]=a.b; inten[3]=a.a;
-  inten[4]=b.r; inten[5]=b.g; inten[6]=b.b; inten[7]=b.a;
-  inten[8]=c.r; inten[9]=c.g; inten[10]=c.b; inten[11]=c.a;
+  vec4 t0 = texture(uTex0, vUv);
+  vec4 t1 = texture(uTex1, vUv);
+  vec4 t2 = texture(uTex2, vUv);
+  vec4 t3 = texture(uTex3, vUv);
+  float inten[${MAX_CHANNELS}];
+  inten[0]=t0.r; inten[1]=t0.g; inten[2]=t0.b; inten[3]=t0.a;
+  inten[4]=t1.r; inten[5]=t1.g; inten[6]=t1.b; inten[7]=t1.a;
+  inten[8]=t2.r; inten[9]=t2.g; inten[10]=t2.b; inten[11]=t2.a;
+  inten[12]=t3.r; inten[13]=t3.g; inten[14]=t3.b; inten[15]=t3.a;
   vec3 col = vec3(0.0);
-  for(int i=0;i<12;i++){
-    float v = inten[i]*uActive[i];
-    v = pow(clamp(v*uGain[i],0.0,4.0), uGamma[i]);
+  for(int i=0;i<${MAX_CHANNELS};i++){
+    if(i >= uCount) break;          // never touch channels the dataset lacks
+    if(uActive[i] < 0.5) continue;  // channel toggled off
+    float v = clamp(inten[i]*uGain[i], 0.0, 4.0);
+    v = pow(v, max(uGamma[i], 1e-3)); // guard: gamma>0 so pow is always defined
     col += uColor[i]*v;
   }
   col = col/(col+vec3(0.82));
@@ -65,6 +82,7 @@ export class Compositor {
   private loc: Record<string, WebGLUniformLocation | null> = {};
   imgW = 0;
   imgH = 0;
+  count = 0;
   ok = false;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -81,12 +99,13 @@ export class Compositor {
     const aPos = gl.getAttribLocation(prog, "aPos");
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-    for (const n of ["uTex0", "uTex1", "uTex2", "uColor", "uGain", "uGamma", "uActive"]) {
+    for (const n of ["uTex0", "uTex1", "uTex2", "uTex3", "uColor", "uGain", "uGamma", "uActive", "uCount"]) {
       this.loc[n] = gl.getUniformLocation(prog, n);
     }
     gl.uniform1i(this.loc.uTex0, 0);
     gl.uniform1i(this.loc.uTex1, 1);
     gl.uniform1i(this.loc.uTex2, 2);
+    gl.uniform1i(this.loc.uTex3, 3);
     this.ok = true;
   }
 
@@ -95,15 +114,19 @@ export class Compositor {
     if (!gl) return;
     this.imgW = maps.width;
     this.imgH = maps.height;
+    // Data-driven: the number of composited channels comes from the dataset.
+    this.count = Math.min(maps.maps.length, MAX_CHANNELS);
     const px = maps.width * maps.height;
     for (const t of this.tex) gl.deleteTexture(t);
     this.tex = [];
-    for (let t = 0; t < 3; t++) {
+    // Always create all MAX_TEX textures so every sampler has a complete,
+    // valid (zero-filled where unused) texture bound.
+    for (let t = 0; t < MAX_TEX; t++) {
       const rgba = new Uint8Array(px * 4);
-      for (let k = 0; k < 4; k++) {
-        const marker = t * 4 + k;
-        if (marker >= maps.maps.length || marker >= MAX_CHANNELS) break;
-        const src = maps.maps[marker];
+      for (let k = 0; k < CHANS_PER_TEX; k++) {
+        const ch = t * CHANS_PER_TEX + k;
+        if (ch >= this.count) break;
+        const src = maps.maps[ch];
         for (let i = 0; i < px; i++) rgba[i * 4 + k] = src[i];
       }
       const tex = gl.createTexture()!;
@@ -116,17 +139,21 @@ export class Compositor {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.tex.push(tex);
     }
+    if (this.prog) {
+      gl.useProgram(this.prog);
+      gl.uniform1i(this.loc.uCount, this.count);
+    }
   }
 
   setChannels(chs: ChannelUniform[]) {
     const gl = this.gl;
     if (!gl || !this.prog) return;
     gl.useProgram(this.prog);
-    const colors = new Float32Array(36);
-    const gain = new Float32Array(12);
-    const gamma = new Float32Array(12);
-    const active = new Float32Array(12);
-    for (let i = 0; i < 12; i++) {
+    const colors = new Float32Array(MAX_CHANNELS * 3);
+    const gain = new Float32Array(MAX_CHANNELS);
+    const gamma = new Float32Array(MAX_CHANNELS);
+    const active = new Float32Array(MAX_CHANNELS);
+    for (let i = 0; i < MAX_CHANNELS; i++) {
       const ch = chs[i];
       if (ch) {
         const [r, g, b] = hexToRgb(ch.color);
@@ -136,12 +163,15 @@ export class Compositor {
         gain[i] = ch.gain;
         gamma[i] = ch.gamma;
         active[i] = ch.visible ? 1 : 0;
+      } else {
+        gamma[i] = 1; // safe default; never left at 0
       }
     }
     gl.uniform3fv(this.loc.uColor, colors);
     gl.uniform1fv(this.loc.uGain, gain);
     gl.uniform1fv(this.loc.uGamma, gamma);
     gl.uniform1fv(this.loc.uActive, active);
+    gl.uniform1i(this.loc.uCount, this.count);
   }
 
   render(view: ViewTransform) {
