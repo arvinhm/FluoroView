@@ -36,7 +36,51 @@ export function scaleRgb(hex: string, opacity: number): [number, number, number]
   return [r * o, g * o, b * o];
 }
 
-// viridis-ish continuous ramp for expression heatmaps
+// True viridis (Smith & van der Walt), sampled at 10 anchors — perceptually
+// uniform and safe for red–green colour blindness, which is why it is the
+// default for per-cell scalar maps.
+const VIRIDIS_ANCHORS: [number, number, number][] = [
+  [68, 1, 84],
+  [72, 40, 120],
+  [62, 74, 137],
+  [49, 104, 142],
+  [38, 130, 142],
+  [31, 158, 137],
+  [53, 183, 121],
+  [109, 205, 89],
+  [180, 222, 44],
+  [253, 231, 37],
+];
+
+function interp(anchors: [number, number, number][], t: number): [number, number, number] {
+  const x = Math.max(0, Math.min(1, Number.isFinite(t) ? t : 0)) * (anchors.length - 1);
+  const i = Math.floor(x);
+  const f = x - i;
+  const a = anchors[i];
+  const b = anchors[Math.min(anchors.length - 1, i + 1)];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+export function viridis(t: number): [number, number, number] {
+  return interp(VIRIDIS_ANCHORS, t);
+}
+
+export function viridisCss(t: number): string {
+  const [r, g, b] = viridis(t);
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}
+
+/** CSS gradient stops for a viridis colour-bar legend. */
+export function viridisGradient(stops = 8): string {
+  const parts: string[] = [];
+  for (let i = 0; i < stops; i++) {
+    const t = i / (stops - 1);
+    parts.push(`${viridisCss(t)} ${Math.round(t * 100)}%`);
+  }
+  return `linear-gradient(90deg, ${parts.join(", ")})`;
+}
+
+// Plasma-like ramp kept for the existing marker heatmaps (named `ramp` since v3.0).
 const VIRIDIS: [number, number, number][] = [
   [13, 8, 135],
   [84, 2, 163],

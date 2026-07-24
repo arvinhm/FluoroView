@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { CellTypeDef, ChannelDef, Tissue } from "../../lib/types";
 import { panelIndices } from "../../lib/analysis";
-import { clusterColor, ramp, rampCss } from "../../lib/palette";
+import { clusterColor, ramp, rampCss, viridisCss } from "../../lib/palette";
 
 export type ColorBy = { mode: "cluster" | "type" | "marker"; marker?: number };
 
@@ -66,12 +66,29 @@ export function EmbeddingScatter({ tissue, embedding, sampleIdx, labels, colorBy
 
 interface SpatialProps {
   tissue: Tissue;
+  /** Per-cell class label (cell order); overrides `cell.cluster` when given. */
   labels?: number[];
   colorBy: ColorBy;
   cellTypes?: CellTypeDef[] | null;
+  /**
+   * Per-cell scalar (cell order) drawn on a viridis ramp — used for niche
+   * scores, predicted expression, or any other continuous per-cell quantity.
+   * Takes precedence over `colorBy`.
+   */
+  values?: number[];
+  /** [lo,hi] for `values`; measured from the data when omitted. */
+  valueDomain?: [number, number];
+  /** Multiplier on the drawn cell radius (dense maps read better a bit larger). */
+  radiusScale?: number;
 }
 
-export function SpatialMap({ tissue, labels, colorBy, cellTypes }: SpatialProps) {
+/**
+ * Cells in tissue space. Colour comes from (in order of precedence) a
+ * continuous `values` array on a viridis ramp, an explicit `labels` array, or
+ * the cell's own cluster/type via `colorBy`. Dots are batched per colour so
+ * tens of thousands of cells draw in a handful of fills.
+ */
+export function SpatialMap({ tissue, labels, colorBy, cellTypes, values, valueDomain, radiusScale = 0.9 }: SpatialProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const canvas = ref.current;
@@ -89,13 +106,40 @@ export function SpatialMap({ tissue, labels, colorBy, cellTypes }: SpatialProps)
     const s = Math.min(W / tissue.width, H / tissue.height);
     const ox = (W - tissue.width * s) / 2;
     const oy = (H - tissue.height * s) / 2;
+
+    let lo = 0;
+    let hi = 1;
+    if (values && values.length) {
+      if (valueDomain) [lo, hi] = valueDomain;
+      else {
+        lo = Infinity;
+        hi = -Infinity;
+        for (const v of values) {
+          if (!Number.isFinite(v)) continue;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+        if (!Number.isFinite(lo)) (lo = 0), (hi = 1);
+      }
+    }
+    const span = hi - lo || 1;
+    // Quantising the ramp to 48 steps keeps the number of fill batches small
+    // without any visible banding.
+    const STEPS = 48;
+
     const paths = new Map<string, Path2D>();
-    for (const c of tissue.cells) {
+    tissue.cells.forEach((c, i) => {
       const x = ox + c.x * s;
       const y = oy + c.y * s;
-      const label = c.cluster != null ? c.cluster : c.typeIndex;
-      const color = colorFor(colorBy, c.typeIndex, label, c.markers, cellTypes);
-      const rr = Math.max(0.8, c.r * s * 0.9);
+      let color: string;
+      if (values && values.length) {
+        const t = Math.round(((values[i] - lo) / span) * (STEPS - 1)) / (STEPS - 1);
+        color = viridisCss(t);
+      } else {
+        const label = labels?.[i] ?? (c.cluster != null ? c.cluster : c.typeIndex);
+        color = colorFor(colorBy, c.typeIndex, label, c.markers, cellTypes);
+      }
+      const rr = Math.max(0.8, c.r * s * radiusScale);
       let path = paths.get(color);
       if (!path) {
         path = new Path2D();
@@ -103,12 +147,12 @@ export function SpatialMap({ tissue, labels, colorBy, cellTypes }: SpatialProps)
       }
       path.moveTo(x + rr, y);
       path.arc(x, y, rr, 0, Math.PI * 2);
-    }
+    });
     for (const [color, path] of paths) {
       ctx.fillStyle = color;
       ctx.fill(path);
     }
-  }, [tissue, labels, colorBy, cellTypes]);
+  }, [tissue, labels, colorBy, cellTypes, values, valueDomain, radiusScale]);
 
   return <canvas ref={ref} className="h-full w-full rounded-xl" />;
 }

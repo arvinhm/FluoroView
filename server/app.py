@@ -9,6 +9,8 @@ call for model-backed work on the user's own images:
                             else a real scikit-image watershed pipeline)
   POST /api/cluster         standardize -> PCA -> KMeans (+ UMAP if installed)
   POST /api/he2expression   EXPERIMENTAL H&E -> per-cell expression (research only)
+  POST /api/spatial/*       CoSMoS spatial statistics — CARE / CAMSE / MOSAIC
+                            (research use only; see spatial.py)
 
 The web app works fully without this server (on-device demo). When the server is
 running, the client can offload heavy/real computation here.
@@ -25,6 +27,8 @@ import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from spatial import router as spatial_router
 
 __version__ = "3.0.0"
 
@@ -44,6 +48,9 @@ CAPS = {
     "torch": _has("torch"),
     "skimage": _has("skimage"),
     "sklearn": _has("sklearn"),
+    "scipy": _has("scipy"),
+    # CoSMoS ships with the server and needs only numpy, so it is always on.
+    "cosmos": True,
 }
 
 app = FastAPI(title="FluoroView v3 API", version=__version__)
@@ -53,6 +60,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(spatial_router)
 
 
 @app.get("/api/health")

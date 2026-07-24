@@ -31,6 +31,12 @@ export interface Cell {
   cluster?: number;
   /** assigned after phenotyping */
   phenotype?: string;
+  /**
+   * Tissue compartment this cell sits in (index into the active compartment
+   * list). Undefined means "unknown", which makes CoSMoS fall back to a global
+   * permutation null instead of a compartment-stratified one.
+   */
+  compartmentIndex?: number;
 }
 
 export interface Tissue {
@@ -88,7 +94,7 @@ export interface ChannelPreset {
   builtin?: boolean;
 }
 
-export type ViewKey = "home" | "viewer" | "analysis" | "ai";
+export type ViewKey = "home" | "viewer" | "analysis" | "spatial" | "ai";
 
 /** ROI geometry in image/tissue pixel coordinates. */
 export type RoiShape =
