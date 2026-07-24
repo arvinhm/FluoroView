@@ -1,8 +1,10 @@
-import { useMemo } from "react";
-import { BarChart3 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { BarChart3, Download, Loader2 } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { cellsInRoi, channelStats, shapeArea, shapeKindLabel } from "../../lib/roi";
 import { clusterColor } from "../../lib/palette";
+import { exportRoisZip } from "../../lib/roiExport";
+import { toast } from "../../lib/toast";
 import { Panel, EmptyState } from "../ui";
 import RoiComments from "./RoiComments";
 
@@ -13,7 +15,26 @@ export default function RoiAnalysis() {
   const activeChannels = useStore((s) => s.activeChannels);
   const cellTypes = useStore((s) => s.cellTypes);
 
+  const maps = useStore((s) => s.maps);
+  const channelStates = useStore((s) => s.channels);
+  const pixelSizeUm = useStore((s) => s.pixelSizeUm);
+  const datasetLabel = useStore((s) => s.datasetLabel);
+  const [exporting, setExporting] = useState(false);
+
   const roi = rois.find((r) => r.id === selectedRoiId) ?? null;
+
+  const doExport = async () => {
+    if (!roi || !tissue || !maps) return;
+    setExporting(true);
+    try {
+      await exportRoisZip([roi], { maps, defs: activeChannels, channels: channelStates, cells: tissue.cells, pixelSizeUm, datasetLabel }, `${roi.label.replace(/\s+/g, "_")}.zip`);
+      toast.success("ROI exported", `${roi.label}.zip — masked channels, composite, stats & chart.`);
+    } catch (e) {
+      toast.error("Export failed", e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const data = useMemo(() => {
     if (!roi || !tissue) return null;
@@ -59,6 +80,15 @@ export default function RoiAnalysis() {
             {shapeKindLabel(roi.shape)} · {cells.length.toLocaleString()} cells · {Math.round(shapeArea(roi.shape)).toLocaleString()} px²
           </span>
         </div>
+        <button
+          onClick={doExport}
+          disabled={exporting}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-white/15 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:bg-white/[0.07] disabled:opacity-60"
+          title="Export this ROI as a .zip (masked channels, composite, stats CSV, chart)"
+        >
+          {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+          Export ROI (.zip)
+        </button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Layers, Trash2, MapPin } from "lucide-react";
+import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Layers, Trash2, MapPin, Download, Loader2 } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { RoiShape } from "../../lib/types";
@@ -7,6 +7,8 @@ import { Compositor, fitRect, type ViewTransform } from "../../lib/compositor";
 import { clusterColor } from "../../lib/palette";
 import { niceNumber } from "../../lib/format";
 import { roiBounds, shapeArea, shapeKindLabel, translateShape, pointInShape, cellsInRoi } from "../../lib/roi";
+import { exportRoisZip } from "../../lib/roiExport";
+import { toast } from "../../lib/toast";
 import { Panel, Slider, Chip } from "../ui";
 import RoiAnalysis from "./RoiAnalysis";
 
@@ -659,11 +661,30 @@ function ChannelPanel() {
 function RoiListPanel() {
   const rois = useStore((s) => s.rois);
   const tissue = useStore((s) => s.tissue);
+  const maps = useStore((s) => s.maps);
+  const activeChannels = useStore((s) => s.activeChannels);
+  const channelStates = useStore((s) => s.channels);
+  const pixelSizeUm = useStore((s) => s.pixelSizeUm);
+  const datasetLabel = useStore((s) => s.datasetLabel);
   const selectedRoiId = useStore((s) => s.selectedRoiId);
   const selectRoi = useStore((s) => s.selectRoi);
   const removeRoi = useStore((s) => s.removeRoi);
   const updateRoi = useStore((s) => s.updateRoi);
   const clearRois = useStore((s) => s.clearRois);
+  const [exporting, setExporting] = useState(false);
+
+  const exportAll = async () => {
+    if (!tissue || !maps) return;
+    setExporting(true);
+    try {
+      await exportRoisZip(rois, { maps, defs: activeChannels, channels: channelStates, cells: tissue.cells, pixelSizeUm, datasetLabel }, "fluoroview-rois.zip");
+      toast.success("ROIs exported", `${rois.length} ROI folder${rois.length > 1 ? "s" : ""} in fluoroview-rois.zip`);
+    } catch (e) {
+      toast.error("Export failed", e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <Panel className="p-4" strong>
@@ -673,9 +694,14 @@ function RoiListPanel() {
           <span className="font-normal text-white/40">({rois.length})</span>
         </div>
         {rois.length > 0 && (
-          <button onClick={clearRois} className="text-xs text-white/45 transition hover:text-rose-300">
-            Clear all
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={exportAll} disabled={exporting} className="inline-flex items-center gap-1.5 text-xs text-white/60 transition hover:text-cyan-300 disabled:opacity-50">
+              {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Export all (.zip)
+            </button>
+            <button onClick={clearRois} className="text-xs text-white/45 transition hover:text-rose-300">
+              Clear all
+            </button>
+          </div>
         )}
       </div>
       {rois.length === 0 ? (
