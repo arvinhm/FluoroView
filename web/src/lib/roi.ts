@@ -68,3 +68,31 @@ export function cellsInRoi(cells: Cell[], s: RoiShape): Cell[] {
 export function shapeKindLabel(s: RoiShape): string {
   return s.kind === "rect" ? "Rectangle" : s.kind === "circle" ? "Circle" : "Polygon";
 }
+
+export interface ChannelStat {
+  mean: number;
+  sem: number;
+  sd: number;
+  median: number;
+  min: number;
+  max: number;
+  n: number;
+}
+
+/** Per-channel intensity statistics over a set of cells. */
+export function channelStats(cells: Cell[], channel: number): ChannelStat {
+  const vals: number[] = [];
+  for (const c of cells) {
+    const v = c.markers[channel];
+    if (v != null && !Number.isNaN(v)) vals.push(v);
+  }
+  const n = vals.length;
+  if (n === 0) return { mean: 0, sem: 0, sd: 0, median: 0, min: 0, max: 0, n: 0 };
+  const mean = vals.reduce((a, b) => a + b, 0) / n;
+  const variance = n > 1 ? vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1) : 0;
+  const sd = Math.sqrt(variance);
+  const sem = sd / Math.sqrt(n);
+  const sorted = [...vals].sort((a, b) => a - b);
+  const median = sorted[Math.floor(n / 2)];
+  return { mean, sem, sd, median, min: sorted[0], max: sorted[n - 1], n };
+}

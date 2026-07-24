@@ -8,6 +8,7 @@ import { clusterColor } from "../../lib/palette";
 import { niceNumber } from "../../lib/format";
 import { roiBounds, shapeArea, shapeKindLabel, translateShape, pointInShape, cellsInRoi } from "../../lib/roi";
 import { Panel, Slider, Chip } from "../ui";
+import RoiAnalysis from "./RoiAnalysis";
 
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 40;
@@ -575,6 +576,7 @@ export default function Viewer() {
       <ChannelPanel />
       </div>
       <RoiListPanel />
+      {rois.length > 0 && <RoiAnalysis />}
     </div>
   );
 }
