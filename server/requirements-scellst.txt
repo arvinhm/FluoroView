@@ -1,0 +1,63 @@
+# requirements-scellst.txt
+# -----------------------------------------------------------------------------
+# EXTRA Python deps to enable the REAL, model-backed "H&E -> Spatial
+# Transcriptomics" path in FluoroView v3 via sCellST.
+#
+# These are OPTIONAL and HEAVY (GPU + CUDA 11.8). The FluoroView backend and web
+# app run fine WITHOUT any of this — the /api/he2st endpoint and the frontend
+# both fall back to the transparent numpy/TS estimator. Install this ONLY on a
+# GPU box where you intend to run true sCellST inference.
+#
+# License note: sCellST is CC BY-NC 4.0 (non-commercial). HEST data is gated on
+# HuggingFace and MoCo v3 / CellViT carry their own research licenses. Do not
+# ship these in a commercial tier without clearing licensing. See SCELLST_OVERVIEW.md.
+#
+# sCellST pins Python >=3.10,<3.11. Versions below match its pyproject.toml.
+# -----------------------------------------------------------------------------
+
+# --- core DL stack (GPU, CUDA 11.8) ------------------------------------------
+# Install torch/torchvision from the cu118 index, NOT plain PyPI:
+#   pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cu118
+torch==2.4.1                 # heavy; GPU/CUDA 11.8 build required
+torchvision==0.19.1          # heavy; ResNet backbones + transforms v2
+
+# torch-scatter must match torch+cu118 (MIL instance->bag aggregation):
+#   pip install torch-scatter -f https://data.pyg.org/whl/torch-2.4.1+cu118.html
+torch-scatter>=2.1.2,<2.2    # heavy; build/index must match torch & CUDA
+
+# --- training / config / inference orchestration -----------------------------
+lightning>=2.6,<3            # PyTorch Lightning (train + predict loops)
+omegaconf>=2.3,<3            # sCellST config system
+loguru>=0.7                  # sCellST logging
+
+# --- single-cell / spatial data tooling --------------------------------------
+scanpy>=1.10,<2              # HVG selection, AnnData preprocessing
+anndata>=0.10,<0.11          # prediction container (.h5ad output)
+squidpy>=1.5,<1.6.6          # spatially-variable-gene selection (optional gene mode)
+scikit-misc>=0.5.2           # required by scanpy HVG (seurat_v3 flavor)
+h5py>=3.10                   # cell-embedding + prediction HDF5 IO
+pyarrow>=16.1,<21            # sCellST IO
+
+# --- data source (HEST) ------------------------------------------------------
+# HEST provides slide IO (OpenSlide), CellViT cell segmentation, and gated ST data.
+# It is a git dependency (no PyPI release pinned by sCellST):
+#   pip install "hest @ git+https://github.com/mahmoodlab/HEST.git"
+# hest @ git+https://github.com/mahmoodlab/HEST.git   # VERY heavy; brings OpenSlide, CellViT, datasets<4
+datasets<4.0.0               # HuggingFace datasets (HEST download); needs `huggingface-cli login`
+
+# --- self-supervised encoder (OPTIONAL, recommended by authors) --------------
+# MoCo v3 lives in the sCellST repo under external/cell_SSL (installed editable:
+#   poetry add --editable ./external/cell_SSL). Not a PyPI package. Skip to use
+# ImageNet ResNet50 embeddings instead (lower accuracy per the tutorial).
+
+# --- sCellST itself ----------------------------------------------------------
+# Not on PyPI. Install from source (Poetry is what the authors use):
+#   git clone https://github.com/sysbio-curie/sCellST.git
+#   cd sCellST && poetry install && poetry add --editable ./external/cell_SSL
+# Then set env for the FluoroView backend:
+#   SCELLST_MIL_CKPT=/abs/path/to/models/mil/<tag>/best_model.ckpt   (you TRAIN this)
+#   SCELLST_SSL_WEIGHTS=imagenet   # or /abs/path/to/moco_model_best.pth.tar
+#
+# NOTE: There are NO downloadable pretrained sCellST weights. You must train the
+# MIL head on HEST spatial-transcriptomics data (the repo tutorial does this on
+# one breast slide, TENX39, in ~10-15 min on a GPU). See NOTES_REAL_VS_DEMO.md.

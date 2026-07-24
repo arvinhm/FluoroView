@@ -24,10 +24,11 @@ import os
 from typing import Optional
 
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import he2st
 from spatial import router as spatial_router
 
 __version__ = "3.0.0"
@@ -51,6 +52,11 @@ CAPS = {
     "scipy": _has("scipy"),
     # CoSMoS ships with the server and needs only numpy, so it is always on.
     "cosmos": True,
+    # sCellST is an optional, non-commercial, GPU-only dependency and ships no
+    # pretrained weights — both facts are surfaced so the UI can be honest about
+    # whether the user is seeing model output or the documented fallback.
+    "scellst": he2st.scellst_importable(),
+    "scellst_weights": he2st.scellst_weights_path() is not None,
 }
 
 app = FastAPI(title="FluoroView v3 API", version=__version__)
@@ -71,6 +77,8 @@ def health():
         "version": __version__,
         "capabilities": CAPS,
         "segmentation_backend": _preferred_seg_backend(),
+        # "scellst" only when the model AND a trained checkpoint are both present.
+        "he2st_backend": "scellst" if he2st.scellst_ready() else "experimental-fallback",
     }
 
 
@@ -224,6 +232,62 @@ def he2expression(req: ExprRequest):
         "validated": False,
         "note": "Morphology-derived estimate; connect trained weights for model-backed prediction.",
     }
+
+
+# ---- H&E -> spatial transcriptomics (EXPERIMENTAL, research only) -----------
+class He2stCell(BaseModel):
+    id: Optional[int] = None
+    x: float
+    y: float
+    r: float = 4.0
+    typeIndex: int = 0
+    markers: Optional[list[float]] = None
+
+
+class He2stRequest(BaseModel):
+    cells: list[He2stCell]
+    genes: Optional[list[str]] = None
+    # Base64 PNG/JPEG of the H&E field. Required for the real sCellST path,
+    # which embeds an image crop around each nucleus.
+    image_b64: Optional[str] = None
+    patch_size: int = 48
+    seed: int = 0
+
+
+@app.get("/api/he2st/panel")
+def he2st_panel():
+    """The gene panel the fallback can produce, tagged by programme."""
+    return {
+        "genes": he2st.gene_panel_with_programs(),
+        "backend": "scellst" if he2st.scellst_ready() else "experimental-fallback",
+        "license": he2st.LICENSE,
+        "licenseUrl": he2st.LICENSE_URL,
+        "attribution": he2st.ATTRIBUTION,
+    }
+
+
+@app.post("/api/he2st")
+def he2st_predict(req: He2stRequest):
+    """
+    Per-cell gene expression from an H&E field.
+
+    Uses sCellST when the package, a trained checkpoint and an image are all
+    present; otherwise returns the transparent morphology-derived fallback. The
+    response always names the model that produced it and never 500s on a missing
+    optional dependency.
+    """
+    if not req.cells:
+        raise HTTPException(422, "No cells supplied.")
+    if len(req.cells) > 200_000:
+        raise HTTPException(413, f"{len(req.cells):,} cells is too many for one request; tile the field.")
+    cells = [c.model_dump() for c in req.cells]
+    for i, c in enumerate(cells):
+        if c.get("id") is None:
+            c["id"] = i
+    try:
+        return he2st.predict(cells, req.genes, req.image_b64, req.patch_size, req.seed)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
 
 
 if __name__ == "__main__":
