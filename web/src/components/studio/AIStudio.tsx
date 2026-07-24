@@ -1,10 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, ScanSearch, Dna, Play, Loader2, CheckCircle2, ArrowRight, TriangleAlert, Upload } from "lucide-react";
+import { Sparkles, ScanSearch, Dna, Play, Loader2, CheckCircle2, ArrowRight, TriangleAlert, Upload, Search, X } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
-import { MARKERS, generateTissue, CELL_TYPES } from "../../lib/synth";
+import { generateTissue } from "../../lib/synth";
 import { decodeLabelTiff, labelsToCells } from "../../lib/maskImport";
+import {
+  fetchHe2st,
+  predictHe2st,
+  GENE_PANEL,
+  HE2ST_ATTRIBUTION,
+  HE2ST_DOI_URL,
+  HE2ST_LICENSE,
+  HE2ST_LICENSE_URL,
+  HE2ST_REPO_URL,
+  type He2stResult,
+} from "../../lib/he2st";
+import { viridisGradient } from "../../lib/palette";
 import { toast } from "../../lib/toast";
 import { Panel, Badge } from "../ui";
 import { SpatialMap } from "./charts";
@@ -14,18 +26,6 @@ const SEG_MODELS = [
   { id: "stardist-he", name: "StarDist (H&E)", desc: "Star-convex nuclei for brightfield histology", target: "H&E" },
   { id: "instanseg", name: "InstanSeg", desc: "Fast instance segmentation, multiplex-ready", target: "fluorescence" },
   { id: "mesmer", name: "Mesmer (DeepCell)", desc: "Nuclear + whole-cell for tissue imaging", target: "fluorescence" },
-];
-
-const GENES = [
-  { gene: "EPCAM", marker: "PanCK", note: "epithelial / tumor" },
-  { gene: "MKI67", marker: "Ki67", note: "proliferation" },
-  { gene: "CD3D", marker: "CD3", note: "T cells" },
-  { gene: "CD8A", marker: "CD8", note: "cytotoxic T" },
-  { gene: "MS4A1", marker: "CD20", note: "B cells" },
-  { gene: "CD68", marker: "CD68", note: "macrophages" },
-  { gene: "CD274", marker: "PD-L1", note: "immune checkpoint" },
-  { gene: "PECAM1", marker: "CD31", note: "endothelium" },
-  { gene: "ACTA2", marker: "SMA", note: "smooth muscle / CAF" },
 ];
 
 export default function AIStudio() {
@@ -212,41 +212,109 @@ function SegmentationCard() {
   );
 }
 
+const DEFAULT_GENES = ["EPCAM", "MKI67", "CD3D", "CD8A", "MS4A1", "CD68", "ACTA2", "PECAM1"];
+
+/**
+ * H&E → Spatial Transcriptomics.
+ *
+ * Predicts a per-cell value for each selected gene and paints it on a viridis
+ * map. The real sCellST path is used when the backend has the package, a trained
+ * checkpoint and an H&E image; otherwise this is the transparent
+ * morphology-derived fallback — and the card says which, every time.
+ */
 function HE2Expression() {
-  // Self-contained synthetic immuno tissue: this experimental demo maps genes to
-  // an IO marker panel, which is independent of whichever dataset is loaded.
+  // Self-contained synthetic immuno tissue with a 12-plex protein panel, so the
+  // card works regardless of which dataset is loaded in the Viewer.
   const tissue = useMemo(() => generateTissue(1500, 11), []);
-  const [geneSel, setGeneSel] = useState(GENES[0]);
-  const [predicted, setPredicted] = useState(false);
+  const backendOnline = useStore((s) => s.backendOnline);
+
+  const [selected, setSelected] = useState<string[]>(DEFAULT_GENES);
+  const [query, setQuery] = useState("");
+  const [painted, setPainted] = useState<string | null>(null);
+  const [result, setResult] = useState<He2stResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const markerIdx = MARKERS.findIndex((m) => m.name === geneSel.marker);
+  const matches = useMemo(() => {
+    const q = query.trim().toUpperCase();
+    if (!q) return [];
+    return GENE_PANEL.filter((g) => g.gene.includes(q) || g.program.toUpperCase().includes(q)).slice(0, 8);
+  }, [query]);
 
-  const predict = () => {
-    setBusy(true);
-    setPredicted(false);
-    setTimeout(() => {
-      setBusy(false);
-      setPredicted(true);
-    }, 900);
+  const toggleGene = (gene: string) => {
+    setSelected((cur) => (cur.includes(gene) ? cur.filter((g) => g !== gene) : [...cur, gene]));
+    setResult(null);
   };
+
+  const predict = async () => {
+    if (!selected.length) {
+      setError("Pick at least one gene.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      // Prefer the backend: it is the only place real sCellST can live.
+      let out: He2stResult;
+      if (backendOnline) {
+        try {
+          out = await fetchHe2st(tissue.cells, selected, null);
+        } catch {
+          out = predictHe2st(tissue.cells, selected);
+        }
+      } else {
+        out = predictHe2st(tissue.cells, selected);
+      }
+      setResult(out);
+      setPainted(out.genes[0] ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const paintedIdx = result && painted ? result.genes.indexOf(painted) : -1;
+  const values = useMemo(() => {
+    if (!result || paintedIdx < 0) return null;
+    return result.expression.map((row) => row[paintedIdx] ?? 0);
+  }, [result, paintedIdx]);
+  const domain = useMemo((): [number, number] | undefined => {
+    if (!values || !values.length) return undefined;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const v of values) {
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return [lo, hi];
+  }, [values]);
+
+  const isReal = result?.model === "scellst";
 
   return (
     <Panel className="flex flex-col p-5" strong>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-400/15 ring-1 ring-amber-400/30">
             <Dna className="h-5 w-5 text-amber-300" />
           </span>
           <div>
-            <h3 className="text-base font-bold">H&amp;E → Single-cell Expression</h3>
-            <p className="text-xs text-white/50">Predict transcript abundance from morphology</p>
+            <h3 className="text-base font-bold">H&amp;E → Spatial Transcriptomics</h3>
+            <p className="text-xs text-white/50">Per-cell gene expression predicted from morphology</p>
           </div>
         </div>
-        <Badge tone="amber">Experimental</Badge>
+        <div className="flex items-center gap-1.5">
+          {result && (
+            <span className={clsx("rounded-full px-2 py-0.5 text-[10px] font-bold ring-1", isReal ? "bg-emerald-400/15 text-emerald-200 ring-emerald-400/30" : "bg-white/[0.06] text-white/60 ring-white/15")}>
+              {isReal ? "sCellST model" : "morphology fallback"} · {result.engine}
+            </span>
+          )}
+          <Badge tone="amber">Experimental</Badge>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <div className="mb-1 text-[11px] font-medium text-white/45">Input · H&amp;E</div>
           <div className="relative h-[220px] overflow-hidden rounded-xl ring-1 ring-white/10">
@@ -255,46 +323,135 @@ function HE2Expression() {
         </div>
         <div>
           <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-white/45">
-            <span>Predicted · {geneSel.gene}</span>
-            {predicted && <span className="text-amber-300">viridis</span>}
+            <span>Predicted · {painted ?? "—"}</span>
+            {values && <span className="text-amber-300">viridis</span>}
           </div>
           <div className="relative h-[220px] overflow-hidden rounded-xl ring-1 ring-white/10">
-            {predicted ? (
-              <SpatialMap tissue={tissue} colorBy={{ mode: "marker", marker: markerIdx }} cellTypes={CELL_TYPES} />
+            {values ? (
+              <SpatialMap tissue={tissue} colorBy={{ mode: "cluster" }} values={values} valueDomain={domain} radiusScale={1.15} />
             ) : (
-              <div className="grid h-full place-items-center bg-ink-950/60 text-center text-xs text-white/35">
-                {busy ? <Loader2 className="h-5 w-5 animate-spin text-amber-300" /> : "Run prediction to paint expression"}
+              <div className="grid h-full place-items-center bg-ink-950/60 px-4 text-center text-xs text-white/35">
+                {busy ? <Loader2 className="h-5 w-5 animate-spin text-amber-300" /> : "Pick genes, then run the prediction to paint per-cell values"}
               </div>
             )}
           </div>
+          {values && domain && (
+            <div className="mt-1 flex items-center gap-2 text-[10px] text-white/40">
+              <span>{domain[0].toFixed(2)}</span>
+              <span className="h-2 flex-1 rounded-full" style={{ background: viridisGradient() }} />
+              <span>{domain[1].toFixed(2)}</span>
+              <span className="text-white/30">a.u.</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* searchable multi-gene panel */}
+      <div className="mt-3">
+        <div className="relative">
+          <div className="flex items-center gap-2 rounded-xl bg-white/[0.05] px-2.5 py-1.5">
+            <Search className="h-3.5 w-3.5 flex-shrink-0 text-white/35" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${GENE_PANEL.length} genes or a programme (tumor, tcell, fibroblast…)`}
+              className="min-w-0 flex-1 bg-transparent text-xs text-white/85 outline-none placeholder:text-white/30"
+              aria-label="Search genes"
+            />
+            <span className="flex-shrink-0 text-[10px] text-white/35">{selected.length} selected</span>
+          </div>
+          {matches.length > 0 && (
+            <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-white/10 bg-ink-900/98 shadow-panel">
+              {matches.map((m) => (
+                <button
+                  key={m.gene}
+                  onClick={() => {
+                    toggleGene(m.gene);
+                    setQuery("");
+                  }}
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-white/80 transition hover:bg-white/[0.07]"
+                >
+                  <span className="font-mono">{m.gene}</span>
+                  <span className="text-[10px] text-white/40">
+                    {m.program}
+                    {selected.includes(m.gene) ? " · remove" : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-1">
+          {selected.map((g) => (
+            <button
+              key={g}
+              onClick={() => toggleGene(g)}
+              title="Remove from the panel"
+              className="inline-flex items-center gap-1 rounded-full bg-white/[0.07] px-2 py-0.5 font-mono text-[10px] text-white/75 transition hover:bg-rose-400/20 hover:text-rose-100"
+            >
+              {g} <X className="h-2.5 w-2.5" />
+            </button>
+          ))}
+          {!selected.length && <span className="text-[10px] text-white/35">No genes selected.</span>}
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <select
-          value={geneSel.gene}
-          onChange={(e) => {
-            setGeneSel(GENES.find((g) => g.gene === e.target.value)!);
-            setPredicted(false);
-          }}
-          className="rounded-xl glass px-3 py-2 text-sm text-white/85 outline-none"
-        >
-          {GENES.map((g) => (
-            <option key={g.gene} value={g.gene} className="bg-ink-800">
-              {g.gene} — {g.note}
-            </option>
-          ))}
-        </select>
-        <button onClick={predict} disabled={busy} className="btn-primary inline-flex items-center gap-2 rounded-xl px-5 py-2 text-sm disabled:opacity-70">
+        <button onClick={() => void predict()} disabled={busy} className="btn-primary inline-flex items-center gap-2 rounded-xl px-5 py-2 text-sm disabled:opacity-70">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
           Predict expression
         </button>
+        {result && (
+          <div className="flex flex-wrap items-center gap-1">
+            {result.genes.map((g) => (
+              <button
+                key={g}
+                onClick={() => setPainted(g)}
+                className={clsx("rounded-lg px-2 py-1 font-mono text-[10px] transition", painted === g ? "bg-amber-400/25 text-amber-50 ring-1 ring-amber-300/40" : "bg-white/[0.05] text-white/55 hover:text-white")}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {error && (
+        <div className="mt-2 flex items-start gap-2 rounded-xl border border-rose-400/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-100">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-rose-300" /> {error}
+        </div>
+      )}
 
       <div className="mt-3 flex items-start gap-2 rounded-xl bg-amber-400/[0.06] px-3 py-2.5 text-[11px] leading-relaxed text-amber-200/80 ring-1 ring-amber-400/20">
         <TriangleAlert className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
-        Experimental research preview. Demo predictions are derived from tissue morphology as a stand-in
-        for a trained model and are <span className="font-semibold">not validated for clinical or diagnostic use</span>.
+        <div>
+          <b className="text-amber-100">EXPERIMENTAL — not for clinical or diagnostic use.</b>{" "}
+          {isReal ? (
+            <>These values come from a trained sCellST checkpoint and are still unvalidated research output.</>
+          ) : (
+            <>
+              The default is a <b>transparent morphology-derived fallback, not validated model output</b> — sCellST ships no pretrained weights, so real inference needs a
+              checkpoint you train yourself (set <code className="rounded bg-black/30 px-1">SCELLST_MIL_CKPT</code> on the backend). Values are arbitrary units, not
+              transcript counts.
+            </>
+          )}
+          <div className="mt-1.5 text-amber-100/60">
+            {HE2ST_ATTRIBUTION}{" "}
+            <a href={HE2ST_LICENSE_URL} target="_blank" rel="noreferrer" className="underline decoration-dotted hover:text-amber-100">
+              {HE2ST_LICENSE}
+            </a>{" "}
+            ·{" "}
+            <a href={HE2ST_REPO_URL} target="_blank" rel="noreferrer" className="underline decoration-dotted hover:text-amber-100">
+              source
+            </a>{" "}
+            ·{" "}
+            <a href={HE2ST_DOI_URL} target="_blank" rel="noreferrer" className="underline decoration-dotted hover:text-amber-100">
+              paper
+            </a>
+            . Non-commercial licence — clear it before any commercial use.
+          </div>
+          {result?.fallbackReason && <div className="mt-1 text-amber-100/50">Why: {result.fallbackReason}</div>}
+        </div>
       </div>
     </Panel>
   );

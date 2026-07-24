@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Eye, Network, Sparkles, Circle, Database, Cpu, Download, Upload, FolderUp, Info, X } from "lucide-react";
+import { Eye, Network, Sparkles, Circle, Database, Cpu, Download, Upload, FolderUp, Info, X, Radar } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import { toast } from "../../lib/toast";
@@ -11,12 +11,14 @@ import ErrorBoundary from "../ErrorBoundary";
 
 const Viewer = lazy(() => import("./Viewer"));
 const Analysis = lazy(() => import("./Analysis"));
+const Spatial = lazy(() => import("./Spatial"));
 const AIStudio = lazy(() => import("./AIStudio"));
 const UploadDialog = lazy(() => import("./UploadDialog"));
 
 const TABS: { key: ViewKey; label: string; icon: typeof Eye }[] = [
   { key: "viewer", label: "Viewer", icon: Eye },
   { key: "analysis", label: "Analysis", icon: Network },
+  { key: "spatial", label: "Spatial", icon: Radar },
   { key: "ai", label: "AI Studio", icon: Sparkles },
 ];
 
@@ -210,6 +212,7 @@ export default function Studio() {
               <Suspense fallback={<Loader label="Loading view…" />}>
                 {view === "viewer" && <Viewer />}
                 {view === "analysis" && <Analysis />}
+                {view === "spatial" && <Spatial />}
                 {view === "ai" && <AIStudio />}
               </Suspense>
             </motion.div>
