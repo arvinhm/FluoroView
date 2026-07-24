@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Microscope, Github, ArrowUpRight } from "lucide-react";
+import { Microscope, Github, ArrowUpRight, Bot } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../lib/store";
+import { useAssistant } from "./AssistantChat";
 import type { ViewKey } from "../lib/types";
 
 const LINKS: { key: ViewKey; label: string }[] = [
@@ -15,6 +16,7 @@ const LINKS: { key: ViewKey; label: string }[] = [
 export default function Nav() {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
+  const toggleAssistant = useAssistant((s) => s.toggle);
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -74,6 +76,14 @@ export default function Nav() {
         </nav>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={toggleAssistant}
+            className="grid h-9 w-9 place-items-center rounded-xl glass text-white/70 transition hover:text-white"
+            aria-label="Open AI assistant"
+            title="AI assistant (bring your own key)"
+          >
+            <Bot className="h-4 w-4" />
+          </button>
           <a
             href="https://github.com/arvinhm/FluoroView"
             target="_blank"

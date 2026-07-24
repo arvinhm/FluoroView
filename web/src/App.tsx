@@ -5,6 +5,7 @@ import Nav from "./components/Nav";
 import Landing from "./components/Landing";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Toaster from "./components/Toaster";
+import AssistantChat from "./components/AssistantChat";
 import { useStore } from "./lib/store";
 import { useTheme } from "./lib/theme";
 import { pingBackend } from "./lib/api";
@@ -70,6 +71,7 @@ export default function App() {
           )}
         </AnimatePresence>
       </ErrorBoundary>
+      <AssistantChat />
       <Toaster />
     </>
   );
