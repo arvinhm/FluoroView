@@ -4,6 +4,7 @@ import { useStore } from "../../lib/store";
 import { cellsInRoi, channelStats, shapeArea, shapeKindLabel } from "../../lib/roi";
 import { clusterColor } from "../../lib/palette";
 import { Panel, EmptyState } from "../ui";
+import RoiComments from "./RoiComments";
 
 export default function RoiAnalysis() {
   const rois = useStore((s) => s.rois);
@@ -149,6 +150,8 @@ export default function RoiAnalysis() {
           )}
         </div>
       </div>
+
+      <RoiComments roi={roi} />
     </Panel>
   );
 }

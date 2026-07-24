@@ -165,6 +165,12 @@ export default function Viewer() {
       ctx.fill();
       ctx.fillStyle = r.color;
       ctx.fillText(r.label, lx + 5, ly - 6);
+      if (r.comments.length) {
+        ctx.fillStyle = "#f0abfc";
+        ctx.beginPath();
+        ctx.arc(lx + tw + 14, ly - 10, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // active shape being drawn
@@ -717,6 +723,7 @@ function RoiListPanel() {
                   <span>{shapeKindLabel(r.shape)}</span>
                   <span className="text-white/70">{n.toLocaleString()} cells</span>
                   <span>{area.toLocaleString()} px²</span>
+                  {r.comments.length > 0 && <span className="text-fuchsia-300">{r.comments.length} note{r.comments.length > 1 ? "s" : ""}</span>}
                 </div>
               </div>
             );

@@ -48,6 +48,9 @@ interface AppState {
   removeRoi: (id: number) => void;
   clearRois: () => void;
   selectRoi: (id: number | null) => void;
+  addComment: (roiId: number, author: string, text: string) => void;
+  addReply: (roiId: number, parentId: number, author: string, text: string) => void;
+  removeComment: (roiId: number, commentId: number) => void;
   runClustering: (k: number) => void;
   setSegmented: (v: boolean, method?: string) => void;
   setBackend: (v: boolean) => void;
@@ -57,6 +60,12 @@ interface AppState {
 
 function defaultChannels(chs: ChannelDef[]): ChannelState[] {
   return chs.map((c, i) => ({ index: i, visible: c.defaultOn, gain: 1.15, gamma: 0.9 }));
+}
+
+let idSeq = 0;
+function genId(): number {
+  idSeq += 1;
+  return Date.now() * 1000 + (idSeq % 1000);
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -170,6 +179,43 @@ export const useStore = create<AppState>((set, get) => ({
   removeRoi: (id) => set((s) => ({ rois: s.rois.filter((r) => r.id !== id), selectedRoiId: s.selectedRoiId === id ? null : s.selectedRoiId })),
   clearRois: () => set({ rois: [], selectedRoiId: null }),
   selectRoi: (id) => set({ selectedRoiId: id }),
+
+  addComment: (roiId, author, text) =>
+    set((s) => ({
+      rois: s.rois.map((r) =>
+        r.id === roiId
+          ? { ...r, comments: [...r.comments, { id: genId(), author, text, createdAt: Date.now(), replies: [] }] }
+          : r
+      ),
+    })),
+  addReply: (roiId, parentId, author, text) =>
+    set((s) => ({
+      rois: s.rois.map((r) =>
+        r.id === roiId
+          ? {
+              ...r,
+              comments: r.comments.map((c) =>
+                c.id === parentId
+                  ? { ...c, replies: [...c.replies, { id: genId(), author, text, createdAt: Date.now(), replies: [] }] }
+                  : c
+              ),
+            }
+          : r
+      ),
+    })),
+  removeComment: (roiId, commentId) =>
+    set((s) => ({
+      rois: s.rois.map((r) =>
+        r.id === roiId
+          ? {
+              ...r,
+              comments: r.comments
+                .filter((c) => c.id !== commentId)
+                .map((c) => ({ ...c, replies: c.replies.filter((rp) => rp.id !== commentId) })),
+            }
+          : r
+      ),
+    })),
 
   runClustering: (k) => {
     const t = get().tissue;
