@@ -7,11 +7,16 @@ import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { RoiShape } from "../../lib/types";
 import { fitRect, type ViewTransform } from "../../lib/compositor";
-import { hexToRgb, clusterColor } from "../../lib/palette";
+import { clusterColor, scaleRgb } from "../../lib/palette";
 import { niceNumber } from "../../lib/format";
 import { roiBounds, translateShape, pointInShape } from "../../lib/roi";
+import { histogramFromLoader } from "../../lib/histogram";
+import { chaikinClosed, dedupeRing } from "../../lib/geometry";
+import GammaContrastExtension from "../../lib/viv/GammaContrastExtension";
 import { Panel } from "../ui";
 import RoiAnalysis from "./RoiAnalysis";
+import { Minimap, type ViewportRect } from "./Minimap";
+import { ScaleBarCalibrator } from "./ScaleBarCalibrator";
 import { ChannelPanel, RoiListPanel, ToolBtn, roundRect, hexA } from "./ViewerPanels";
 
 const ZOOM_MIN = 0.5;
@@ -59,7 +64,16 @@ export default function VivDeckViewer() {
   const setSegmented = useStore((s) => s.setSegmented);
   const presetChannels = useStore((s) => s.presetChannels);
   const showAllChannels = useStore((s) => s.showAllChannels);
+  const setChannelStat = useStore((s) => s.setChannelStat);
+  const maps = useStore((s) => s.maps);
   const [roiTool, setRoiTool] = useState<RoiTool>("pan");
+
+  // Display-only smoothed outlines (Chaikin). The TRUE mask/centroids still
+  // drive analysis & ROI membership — smoothing never touches accuracy.
+  const smoothedBoundaries = useMemo(() => {
+    if (!boundaryPolys) return null;
+    return boundaryPolys.map((b) => ({ id: b.id, path: chaikinClosed(dedupeRing(b.path, 0.6), 2) }));
+  }, [boundaryPolys]);
 
   // world image size (native full-resolution pixels)
   const imgW = scanMeta?.width ?? tissue?.width ?? 1;
@@ -82,6 +96,7 @@ export default function VivDeckViewer() {
   const prevRoiCount = useRef(0);
   const deckRef = useRef<Deck | null>(null);
   const viewRef = useRef<V>({ zoom: 1, panX: 0, panY: 0 });
+  const minimapRectRef = useRef<ViewportRect>({ x0: 0, y0: 0, x1: 1, y1: 1 });
   const rafRef = useRef(0);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const drawRef = useRef<DrawState | null>(null);
@@ -114,32 +129,31 @@ export default function VivDeckViewer() {
     const layers: unknown[] = [];
     if (imageSource && imageSource.length) {
       const n = activeChannels.length;
-      const selections = activeChannels.map((_, i) => ({ c: i, z: 0, t: 0 }));
-      const colors = activeChannels.map((c) => hexToRgb(c.color) as [number, number, number]);
-      const channelsVisible = activeChannels.map((_, i) => channels[i]?.visible ?? false);
-      const contrastLimits = activeChannels.map((_, i) => {
-        const base = scanMeta?.channels[i]?.contrastLimits ?? [0, 255];
-        const gain = channels[i]?.gain ?? 1;
-        const hi = Math.max(base[0] + 1, Math.min(scanMeta?.bits === 16 ? 65535 : 255, base[1] / Math.max(0.05, gain)));
-        return [base[0], hi] as [number, number];
-      });
+      const selections = activeChannels.map((_, i) => ({ c: i, z: 0, t: 0 })).slice(0, n);
+      // Per-channel appearance → Viv props. Opacity is folded into the LUT color
+      // (additive blend), gamma is applied by GammaContrastExtension.
+      const colors = channels.map((c) => scaleRgb(c.color, c.opacity));
+      const channelsVisible = channels.map((c) => c.visible);
+      const contrastLimits = channels.map((c) => [c.contrastLimits[0], c.contrastLimits[1]] as [number, number]);
+      const gammas = channels.map((c) => c.gamma);
       layers.push(
         new MultiscaleImageLayer({
           id: "viv-image",
           loader: imageSource,
-          selections: selections.slice(0, n),
+          selections,
           contrastLimits,
           colors,
           channelsVisible,
-          extensions: [new ColorPaletteExtension()],
+          gammas,
+          extensions: [new ColorPaletteExtension(), new GammaContrastExtension()],
         } as never)
       );
     }
-    if (segmented && boundaryPolys && boundaryPolys.length) {
+    if (segmented && smoothedBoundaries && smoothedBoundaries.length) {
       layers.push(
         new PolygonLayer({
           id: "cell-boundaries",
-          data: boundaryPolys,
+          data: smoothedBoundaries,
           getPolygon: (d: { path: [number, number][] }) => d.path,
           stroked: true,
           filled: false,
@@ -154,7 +168,7 @@ export default function VivDeckViewer() {
       );
     }
     return layers;
-  }, [imageSource, activeChannels, channels, scanMeta, segmented, boundaryPolys]);
+  }, [imageSource, activeChannels, channels, segmented, smoothedBoundaries]);
 
   const drawOverlay = useCallback(() => {
     const overlay = overlayRef.current;
@@ -251,8 +265,9 @@ export default function VivDeckViewer() {
       barLabel = `${px.toLocaleString()} px`;
     }
     if (barPx > 24 && barPx < cw * 0.9) {
+      // Sit above the bottom-right minimap so the two never overlap.
       const bx = cw - barPx - 24;
-      const by = ch - 28;
+      const by = ch - 140;
       ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -271,7 +286,34 @@ export default function VivDeckViewer() {
     const deck = deckRef.current;
     if (deck) deck.setProps({ viewState: deckViewState() } as never);
     drawOverlay();
-  }, [deckViewState, drawOverlay]);
+    const el = wrapRef.current;
+    if (el) {
+      const rect = fitRect(imgW, imgH, getVT());
+      const s = rect.s || 1;
+      minimapRectRef.current = {
+        x0: -rect.x / s / imgW,
+        y0: -rect.y / s / imgH,
+        x1: (el.clientWidth - rect.x) / s / imgW,
+        y1: (el.clientHeight - rect.y) / s / imgH,
+      };
+    }
+  }, [deckViewState, drawOverlay, getVT, imgW, imgH]);
+
+  /** Recenter the view so world point (wx,wy) sits at the viewport center. */
+  const centerOnWorld = useCallback(
+    (wx: number, wy: number) => {
+      const el = wrapRef.current;
+      if (!el) return;
+      const cw = el.clientWidth;
+      const ch = el.clientHeight;
+      const rect = fitRect(imgW, imgH, getVT());
+      const s = rect.s;
+      viewRef.current.panX = cw / 2 - (cw - imgW * s) / 2 - wx * s;
+      viewRef.current.panY = ch / 2 - (ch - imgH * s) / 2 - wy * s;
+      scheduleRef.current();
+    },
+    [getVT, imgW, imgH]
+  );
 
   const schedule = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -308,6 +350,28 @@ export default function VivDeckViewer() {
     const deck = deckRef.current;
     if (deck) deck.setProps({ layers: buildLayers() } as never);
   }, [buildLayers]);
+
+  // Compute per-channel histograms + auto contrast from the coarsest pyramid
+  // level once the image source is ready (a few thousand pixels → ~1 frame).
+  useEffect(() => {
+    if (!imageSource || !imageSource.length) return;
+    let cancelled = false;
+    void (async () => {
+      const chs = useStore.getState().channels;
+      for (let i = 0; i < chs.length; i++) {
+        try {
+          const hist = await histogramFromLoader(imageSource as never, { c: chs[i].index, z: 0, t: 0 }, 128, chs[i].domain);
+          if (cancelled) return;
+          setChannelStat(i, hist, true);
+        } catch {
+          /* channel raster unavailable — leave stats null (panel degrades gracefully) */
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [imageSource, setChannelStat]);
 
   useEffect(() => {
     schedule();
@@ -594,9 +658,13 @@ export default function VivDeckViewer() {
                 {hoverInfo.name}
               </div>
             )}
-            <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg glass px-2.5 py-1 font-mono text-[11px] text-white/60">
-              {zoomPct}% · {roiTool === "pan" ? "scroll = zoom · drag = pan" : `${roiTool} ROI — drag to draw · Esc cancels`}
+            <div className="absolute bottom-3 left-3 z-20 flex flex-col items-start gap-1.5">
+              <ScaleBarCalibrator />
+              <div className="pointer-events-none rounded-lg glass px-2.5 py-1 font-mono text-[11px] text-white/60">
+                {zoomPct}% · {roiTool === "pan" ? "scroll = zoom · drag = pan" : `${roiTool} ROI — drag to draw · Esc cancels`}
+              </div>
             </div>
+            <Minimap maps={maps} channels={channels} rectRef={minimapRectRef} onNavigate={(nx, ny) => centerOnWorld(nx * imgW, ny * imgH)} />
           </div>
         </Panel>
 

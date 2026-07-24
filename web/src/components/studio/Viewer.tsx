@@ -1,17 +1,33 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Layers, Trash2, MapPin, Download, Loader2, MessageSquare } from "lucide-react";
+import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
-import type { RoiShape } from "../../lib/types";
-import { Compositor, fitRect, type ViewTransform } from "../../lib/compositor";
+import type { ChannelState, RoiShape } from "../../lib/types";
+import { Compositor, fitRect, type ChannelUniform, type ViewTransform } from "../../lib/compositor";
 import { clusterColor } from "../../lib/palette";
 import { niceNumber } from "../../lib/format";
-import { roiBounds, shapeArea, shapeKindLabel, translateShape, pointInShape, cellsInRoi } from "../../lib/roi";
-import { exportRoisZip } from "../../lib/roiExport";
-import { toast } from "../../lib/toast";
+import { roiBounds, translateShape, pointInShape } from "../../lib/roi";
 import { Panel, Chip } from "../ui";
 import RoiAnalysis from "./RoiAnalysis";
+import { Minimap, type ViewportRect } from "./Minimap";
+import { ScaleBarCalibrator } from "./ScaleBarCalibrator";
 import { ChannelPanel, RoiListPanel, ToolBtn, roundRect, hexA } from "./ViewerPanels";
+
+/** Map channel appearance → compositor uniforms (contrast window normalized to 0..1). */
+function toUniforms(channels: ChannelState[]): ChannelUniform[] {
+  return channels.map((c) => {
+    const [dlo, dhi] = c.domain;
+    const range = Math.max(1, dhi - dlo);
+    return {
+      color: c.color,
+      lo: (c.contrastLimits[0] - dlo) / range,
+      hi: (c.contrastLimits[1] - dlo) / range,
+      gamma: c.gamma,
+      opacity: c.opacity,
+      visible: c.visible,
+    };
+  });
+}
 
 // The deck.gl + Viv pyramid viewer is heavy (deck.gl/luma/geotiff); only pull it
 // in when a real pyramid scan is active. The synthetic demo keeps the light
@@ -88,6 +104,7 @@ function CompositorViewer() {
   const prevRoiCount = useRef(0);
   const compRef = useRef<Compositor | null>(null);
   const viewRef = useRef<V>({ zoom: 1, panX: 0, panY: 0 });
+  const minimapRectRef = useRef<ViewportRect>({ x0: 0, y0: 0, x1: 1, y1: 1 });
   const rafRef = useRef(0);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const drawRef = useRef<DrawState | null>(null);
@@ -255,7 +272,7 @@ function CompositorViewer() {
     }
     if (barPx > 24 && barPx < cw * 0.9) {
       const bx = cw - barPx - 24;
-      const by = ch - 28;
+      const by = ch - 140; // sit above the bottom-right minimap
       ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.lineWidth = 3;
       ctx.beginPath();
@@ -274,7 +291,36 @@ function CompositorViewer() {
     const comp = compRef.current;
     if (comp && comp.ok) comp.render(getVT());
     drawOverlay();
+    const el = wrapRef.current;
+    const m = mapsRef.current;
+    if (el && m) {
+      const rect = fitRect(m.width, m.height, getVT());
+      const s = rect.s || 1;
+      minimapRectRef.current = {
+        x0: -rect.x / s / m.width,
+        y0: -rect.y / s / m.height,
+        x1: (el.clientWidth - rect.x) / s / m.width,
+        y1: (el.clientHeight - rect.y) / s / m.height,
+      };
+    }
   }, [getVT, drawOverlay]);
+
+  /** Recenter so array point (ax,ay) sits at the viewport center. */
+  const centerOnWorld = useCallback(
+    (ax: number, ay: number) => {
+      const el = wrapRef.current;
+      const m = mapsRef.current;
+      if (!el || !m) return;
+      const cw = el.clientWidth;
+      const ch = el.clientHeight;
+      const rect = fitRect(m.width, m.height, getVT());
+      const s = rect.s;
+      viewRef.current.panX = cw / 2 - (cw - m.width * s) / 2 - ax * s;
+      viewRef.current.panY = ch / 2 - (ch - m.height * s) / 2 - ay * s;
+      scheduleRef.current();
+    },
+    [getVT]
+  );
 
   const schedule = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -355,7 +401,7 @@ function CompositorViewer() {
     setGlOk(comp.ok);
     if (comp.ok) {
       comp.upload(maps);
-      comp.setChannels(channels.map((c) => ({ color: activeChannels[c.index]?.color ?? "#ffffff", gain: c.gain, gamma: c.gamma, visible: c.visible })));
+      comp.setChannels(toUniforms(channels));
     }
     schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -365,10 +411,10 @@ function CompositorViewer() {
   useEffect(() => {
     const comp = compRef.current;
     if (comp && comp.ok) {
-      comp.setChannels(channels.map((c) => ({ color: activeChannels[c.index]?.color ?? "#ffffff", gain: c.gain, gamma: c.gamma, visible: c.visible })));
+      comp.setChannels(toUniforms(channels));
     }
     schedule();
-  }, [channels, activeChannels, schedule]);
+  }, [channels, schedule]);
 
   useEffect(() => {
     schedule();
@@ -627,9 +673,21 @@ function CompositorViewer() {
               {hoverInfo.name}
             </div>
           )}
-          <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg glass px-2.5 py-1 font-mono text-[11px] text-white/60">
-            {zoomPct}% · {roiTool === "pan" ? "scroll = zoom · drag = pan" : `${roiTool} ROI — drag to draw · Esc cancels`}
+          <div className="absolute bottom-3 left-3 z-20 flex flex-col items-start gap-1.5">
+            <ScaleBarCalibrator />
+            <div className="pointer-events-none rounded-lg glass px-2.5 py-1 font-mono text-[11px] text-white/60">
+              {zoomPct}% · {roiTool === "pan" ? "scroll = zoom · drag = pan" : `${roiTool} ROI — drag to draw · Esc cancels`}
+            </div>
           </div>
+          <Minimap
+            maps={maps}
+            channels={channels}
+            rectRef={minimapRectRef}
+            onNavigate={(nx, ny) => {
+              const m = mapsRef.current;
+              if (m) centerOnWorld(nx * m.width, ny * m.height);
+            }}
+          />
         </div>
       </Panel>
 

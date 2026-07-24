@@ -1,11 +1,14 @@
-import { useState } from "react";
-import { Layers, MapPin, MessageSquare, Trash2, Download, Loader2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { Layers, MapPin, MessageSquare, Trash2, Download, Loader2, Wand2, Bookmark, Upload, X, RotateCcw } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import { cellsInRoi, shapeArea, shapeKindLabel } from "../../lib/roi";
 import { exportRoisZip } from "../../lib/roiExport";
+import { appearanceOf, presetToJson, newPresetId } from "../../lib/presets";
+import { formatArea } from "../../lib/format";
 import { toast } from "../../lib/toast";
 import { Panel, Slider, Chip } from "../ui";
+import { ChannelHistogram } from "./ChannelHistogram";
 
 /** Toolbar icon button shared by both viewer engines. */
 export function ToolBtn({ children, onClick, active, title }: { children: React.ReactNode; onClick: () => void; active?: boolean; title: string }) {
@@ -29,52 +32,91 @@ export function ChannelPreset({ children, onClick }: { children: React.ReactNode
 
 export function ChannelPanel() {
   const channels = useStore((s) => s.channels);
+  const channelStats = useStore((s) => s.channelStats);
   const activeChannels = useStore((s) => s.activeChannels);
   const toggle = useStore((s) => s.toggleChannel);
-  const setGain = useStore((s) => s.setGain);
-  const setGamma = useStore((s) => s.setGamma);
   const soloChannel = useStore((s) => s.soloChannel);
-  // On the Viv pyramid path, per-channel appearance is a contrast window: Gain
-  // maps to contrast limits. True per-channel gamma (shader-hook extension) is a
-  // v3.3 item, so we hide the gamma control there rather than show a no-op.
-  const isPyramid = useStore((s) => !!s.imageSource);
+  const setContrastLimits = useStore((s) => s.setContrastLimits);
+  const setChannelColor = useStore((s) => s.setChannelColor);
+  const setOpacity = useStore((s) => s.setOpacity);
+  const setGamma = useStore((s) => s.setGamma);
+  const autoContrast = useStore((s) => s.autoContrast);
+  const autoContrastAll = useStore((s) => s.autoContrastAll);
+  const resetChannel = useStore((s) => s.resetChannel);
   const [expanded, setExpanded] = useState<number | null>(0);
 
   return (
-    <Panel className="flex max-h-[640px] flex-col overflow-hidden" strong>
+    <Panel className="flex max-h-[720px] flex-col overflow-hidden" strong>
       <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-bold">
           <Layers className="h-4 w-4 text-cyan-300" /> Channels
         </div>
-        <span className="text-xs text-white/40">{channels.filter((c) => c.visible).length}/{channels.length} on</span>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={autoContrastAll}
+            className="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2 py-1 text-[10px] font-semibold text-white/70 transition hover:bg-white/[0.12] hover:text-white"
+            title="Auto-contrast every channel"
+          >
+            <Wand2 className="h-3 w-3" /> Auto all
+          </button>
+          <PresetsMenu />
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {channels.map((c) => {
           const mk = activeChannels[c.index];
           if (!mk) return null;
           const open = expanded === c.index;
+          const stat = channelStats[c.index] ?? null;
           return (
             <div key={c.index} className={clsx("rounded-xl px-2 py-1.5 transition", c.visible ? "bg-white/[0.03]" : "opacity-55")}>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => toggle(c.index)}
-                  className="grid h-6 w-6 place-items-center rounded-md"
-                  style={{ background: c.visible ? `${mk.color}33` : "transparent", boxShadow: `inset 0 0 0 1px ${mk.color}66` }}
+                  className="grid h-6 w-6 flex-shrink-0 place-items-center rounded-md"
+                  title={c.visible ? "Hide channel" : "Show channel"}
+                  style={{ background: c.visible ? `${c.color}33` : "transparent", boxShadow: `inset 0 0 0 1px ${c.color}66` }}
                 >
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.visible ? mk.color : "transparent", boxShadow: c.visible ? `0 0 8px ${mk.color}` : "none" }} />
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: c.visible ? c.color : "transparent", boxShadow: c.visible ? `0 0 8px ${c.color}` : "none" }} />
                 </button>
-                <button onClick={() => setExpanded(open ? null : c.index)} className="flex-1 text-left text-sm font-semibold">
+                <button onClick={() => setExpanded(open ? null : c.index)} className="min-w-0 flex-1 truncate text-left text-sm font-semibold">
                   {mk.name}
                   <span className="ml-1.5 text-[10px] font-normal text-white/35">{mk.kind}</span>
                 </button>
-                <button onClick={() => soloChannel(c.index)} className="rounded-md px-1.5 py-0.5 text-[10px] text-white/40 hover:bg-white/10 hover:text-white">
+                <span className="font-mono text-[10px] text-white/40">
+                  {fmtLimit(c.contrastLimits[0])}–{fmtLimit(c.contrastLimits[1])}
+                </span>
+                <button onClick={() => soloChannel(c.index)} className="rounded-md px-1.5 py-0.5 text-[10px] text-white/40 hover:bg-white/10 hover:text-white" title="Show only this channel">
                   solo
                 </button>
               </div>
               {open && (
-                <div className="mt-2 space-y-2 px-1 pb-1">
-                  <LabeledSlider label={isPyramid ? "Contrast" : "Gain"} value={c.gain} min={0.2} max={3} onChange={(v) => setGain(c.index, v)} accent={mk.color} />
-                  {!isPyramid && <LabeledSlider label="Gamma" value={c.gamma} min={0.3} max={2.4} onChange={(v) => setGamma(c.index, v)} accent={mk.color} />}
+                <div className="mt-2 space-y-2.5 px-1 pb-1.5">
+                  <ChannelHistogram
+                    hist={stat}
+                    domain={c.domain}
+                    value={c.contrastLimits}
+                    color={c.color}
+                    onChange={(lo, hi) => setContrastLimits(c.index, lo, hi)}
+                    onAuto={() => autoContrast(c.index)}
+                    onReset={() => resetChannel(c.index)}
+                  />
+                  <LabeledSlider label="γ" value={c.gamma} min={0.2} max={4} step={0.05} onChange={(v) => setGamma(c.index, v)} accent={c.color} fixed={2} />
+                  <LabeledSlider label="opacity" value={c.opacity} min={0} max={1} step={0.01} onChange={(v) => setOpacity(c.index, v)} accent={c.color} fixed={2} />
+                  <div className="flex items-center gap-2">
+                    <span className="w-12 text-[11px] text-white/45">color</span>
+                    <label className="relative h-6 w-9 cursor-pointer overflow-hidden rounded-md ring-1 ring-white/15" title="Channel color" style={{ background: c.color }}>
+                      <input type="color" value={toHex6(c.color)} onChange={(e) => setChannelColor(c.index, e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+                    </label>
+                    <div className="flex flex-wrap gap-1">
+                      {SWATCHES.map((s) => (
+                        <button key={s} onClick={() => setChannelColor(c.index, s)} className="h-4 w-4 rounded-full ring-1 ring-white/20 transition hover:scale-110" style={{ background: s }} title={s} aria-label={`Set color ${s}`} />
+                      ))}
+                    </div>
+                    <button onClick={() => resetChannel(c.index)} className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-white/45 transition hover:bg-white/10 hover:text-white" title="Reset contrast, gamma & opacity">
+                      <RotateCcw className="h-3 w-3" />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -82,6 +124,122 @@ export function ChannelPanel() {
         })}
       </div>
     </Panel>
+  );
+}
+
+const SWATCHES = ["#0050ff", "#ff00ff", "#00dc5a", "#00dcff", "#ffbf00", "#ff2d55", "#ffffff"];
+
+function fmtLimit(v: number): string {
+  return v >= 100 || v === 0 ? Math.round(v).toString() : v.toFixed(1);
+}
+
+function toHex6(hex: string): string {
+  const h = hex.replace("#", "");
+  if (h.length === 3) return "#" + h.split("").map((c) => c + c).join("");
+  return "#" + h.slice(0, 6).padEnd(6, "0");
+}
+
+/** Save / apply / import / export full-appearance presets (offline, localStorage). */
+function PresetsMenu() {
+  const presets = useStore((s) => s.presets);
+  const datasetId = useStore((s) => s.datasetId);
+  const channels = useStore((s) => s.channels);
+  const activePresetId = useStore((s) => s.activePresetId);
+  const savePreset = useStore((s) => s.savePreset);
+  const applyPreset = useStore((s) => s.applyPreset);
+  const deletePreset = useStore((s) => s.deletePreset);
+  const importPresetJson = useStore((s) => s.importPresetJson);
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const mine = presets.filter((p) => p.datasetId === datasetId);
+
+  const exportCurrent = () => {
+    const preset = { id: newPresetId(), name: name.trim() || "FluoroView preset", datasetId, channels: appearanceOf(channels), createdAt: Date.now() };
+    const blob = new Blob([presetToJson(preset)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${preset.name.replace(/\s+/g, "_")}.fvpreset.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    toast.success("Preset exported", `${preset.name}.fvpreset.json`);
+  };
+
+  const doImport = async (file: File) => {
+    const ok = importPresetJson(await file.text());
+    if (ok) toast.success("Preset imported", "Channel appearance applied");
+    else toast.error("Import failed", "Not a valid preset file");
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 rounded-lg bg-white/[0.06] px-2 py-1 text-[10px] font-semibold text-white/70 transition hover:bg-white/[0.12] hover:text-white"
+        title="Save / load channel presets"
+      >
+        <Bookmark className="h-3 w-3" /> Presets
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-8 z-40 w-60 rounded-xl border border-white/10 bg-ink-900/95 p-2.5 shadow-panel backdrop-blur-xl">
+            <div className="mb-2 flex items-center gap-1.5">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Preset name"
+                className="min-w-0 flex-1 rounded-md bg-white/[0.06] px-2 py-1 text-xs text-white/85 outline-none focus:bg-white/[0.1]"
+              />
+              <button
+                onClick={() => {
+                  if (!name.trim()) return;
+                  savePreset(name.trim());
+                  setName("");
+                  toast.success("Preset saved", name.trim());
+                }}
+                className="rounded-md bg-cyan-400/20 px-2 py-1 text-[11px] font-semibold text-cyan-200 transition hover:bg-cyan-400/30"
+              >
+                Save
+              </button>
+            </div>
+            <div className="max-h-44 space-y-0.5 overflow-y-auto">
+              {mine.length === 0 && <p className="px-1 py-2 text-[11px] text-white/40">No presets yet for this dataset.</p>}
+              {mine.map((p) => (
+                <div key={p.id} className={clsx("group flex items-center gap-1 rounded-md px-1.5 py-1 text-xs transition hover:bg-white/[0.06]", activePresetId === p.id && "bg-white/[0.06]")}>
+                  <button onClick={() => applyPreset(p.id)} className="min-w-0 flex-1 truncate text-left text-white/80" title={`Apply ${p.name}`}>
+                    {p.name}
+                  </button>
+                  <button onClick={() => deletePreset(p.id)} className="rounded p-0.5 text-white/30 transition hover:bg-white/10 hover:text-rose-300" aria-label="Delete preset">
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center gap-1.5 border-t border-white/10 pt-2">
+              <button onClick={() => fileRef.current?.click()} className="inline-flex flex-1 items-center justify-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] text-white/70 transition hover:bg-white/[0.12] hover:text-white">
+                <Upload className="h-3 w-3" /> Import
+              </button>
+              <button onClick={exportCurrent} className="inline-flex flex-1 items-center justify-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] text-white/70 transition hover:bg-white/[0.12] hover:text-white">
+                <Download className="h-3 w-3" /> Export
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void doImport(f);
+                  e.currentTarget.value = "";
+                }}
+              />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -141,7 +299,7 @@ export function RoiListPanel() {
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {rois.map((r) => {
             const n = tissue ? cellsInRoi(tissue.cells, r.shape).length : 0;
-            const area = Math.round(shapeArea(r.shape));
+            const area = formatArea(shapeArea(r.shape), pixelSizeUm);
             const sel = r.id === selectedRoiId;
             return (
               <div
@@ -187,7 +345,7 @@ export function RoiListPanel() {
                 <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-white/50">
                   <span>{shapeKindLabel(r.shape)}</span>
                   <span className="text-white/70">{n.toLocaleString()} cells</span>
-                  <span>{area.toLocaleString()} px²</span>
+                  <span>{area}</span>
                   {r.comments.length > 0 && <span className="text-fuchsia-300">{r.comments.length} note{r.comments.length > 1 ? "s" : ""}</span>}
                 </div>
               </div>
@@ -199,12 +357,12 @@ export function RoiListPanel() {
   );
 }
 
-export function LabeledSlider({ label, value, min, max, onChange, accent }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void; accent: string }) {
+export function LabeledSlider({ label, value, min, max, step, onChange, accent, fixed = 1 }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; accent: string; fixed?: number }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-12 text-[11px] text-white/45">{label}</span>
-      <Slider value={value} min={min} max={max} onChange={onChange} accent={accent} />
-      <span className="w-8 text-right font-mono text-[11px] text-white/55">{value.toFixed(1)}</span>
+      <span className="w-12 flex-shrink-0 text-[11px] text-white/45">{label}</span>
+      <Slider value={value} min={min} max={max} step={step} onChange={onChange} accent={accent} />
+      <span className="w-9 flex-shrink-0 text-right font-mono text-[11px] text-white/55">{value.toFixed(fixed)}</span>
     </div>
   );
 }

@@ -14,6 +14,20 @@ export function fmt(x: number, digits = 2): string {
   return x.toFixed(digits);
 }
 
+/**
+ * Format an area (given in image px²) using the pixel-size calibration when
+ * available: µm² below 1 mm², mm² above it; falls back to px² when uncalibrated
+ * (never fabricates physical units).
+ */
+export function formatArea(areaPx: number, pixelSizeUm: number | null): string {
+  if (pixelSizeUm && pixelSizeUm > 0) {
+    const um2 = areaPx * pixelSizeUm * pixelSizeUm;
+    if (um2 >= 1e6) return `${(um2 / 1e6).toLocaleString(undefined, { maximumFractionDigits: 2 })} mm²`;
+    return `${Math.round(um2).toLocaleString()} µm²`;
+  }
+  return `${Math.round(areaPx).toLocaleString()} px²`;
+}
+
 /** Relative time like "just now", "3m ago", "2h ago", or a date. */
 export function timeAgo(ts: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((now - ts) / 1000));
