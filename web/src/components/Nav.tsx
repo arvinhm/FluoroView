@@ -4,6 +4,7 @@ import { Microscope, Github, ArrowUpRight, Bot } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../lib/store";
 import { useAssistant } from "./AssistantChat";
+import ThemeMenu from "./ThemeMenu";
 import type { ViewKey } from "../lib/types";
 
 const LINKS: { key: ViewKey; label: string }[] = [
@@ -76,6 +77,7 @@ export default function Nav() {
         </nav>
 
         <div className="flex items-center gap-2">
+          <ThemeMenu />
           <button
             onClick={toggleAssistant}
             className="grid h-9 w-9 place-items-center rounded-xl glass text-white/70 transition hover:text-white"

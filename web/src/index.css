@@ -8,6 +8,8 @@
   --edge-strong: rgba(255, 255, 255, 0.16);
   --glass: rgba(255, 255, 255, 0.045);
   --glass-2: rgba(255, 255, 255, 0.07);
+  --accent: #22d3ee;
+  --accent-2: #67e8f9;
 }
 
 @layer base {
@@ -25,11 +27,11 @@
     overflow-x: hidden;
   }
   ::selection {
-    background: rgba(34, 211, 238, 0.35);
+    background: color-mix(in srgb, var(--accent) 40%, transparent);
     color: #fff;
   }
   :where(button, a, input, select, [tabindex]):focus-visible {
-    outline: 2px solid #22d3ee;
+    outline: 2px solid var(--accent);
     outline-offset: 2px;
     border-radius: 6px;
   }
@@ -148,3 +150,75 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* ---- Accent theming: retint the app's primary cyan accent to --accent ---- */
+.text-cyan-300,
+.text-cyan-300\/80,
+.text-cyan-200,
+.text-cyan-400 {
+  color: var(--accent) !important;
+}
+
+/* ---- Light theme --------------------------------------------------------- */
+[data-theme="light"] {
+  color-scheme: light;
+  --edge: rgba(2, 6, 23, 0.1);
+  --edge-strong: rgba(2, 6, 23, 0.16);
+  --glass: rgba(255, 255, 255, 0.62);
+  --glass-2: rgba(255, 255, 255, 0.82);
+}
+[data-theme="light"] body {
+  background: #eef2f9;
+  color: #0f172a;
+}
+[data-theme="light"] .bg-ink-950 {
+  background-color: #eef2f9 !important;
+}
+[data-theme="light"] .glass,
+[data-theme="light"] .glass-strong {
+  box-shadow: 0 16px 44px -22px rgba(2, 6, 23, 0.28);
+}
+/* white text -> dark slate (opacities bumped up a touch for legibility) */
+[data-theme="light"] .text-white { color: #0f172a !important; }
+[data-theme="light"] .text-white\/90 { color: rgb(15 23 42 / 0.9) !important; }
+[data-theme="light"] .text-white\/85 { color: rgb(15 23 42 / 0.85) !important; }
+[data-theme="light"] .text-white\/80 { color: rgb(15 23 42 / 0.82) !important; }
+[data-theme="light"] .text-white\/75 { color: rgb(15 23 42 / 0.78) !important; }
+[data-theme="light"] .text-white\/70 { color: rgb(15 23 42 / 0.74) !important; }
+[data-theme="light"] .text-white\/65 { color: rgb(15 23 42 / 0.7) !important; }
+[data-theme="light"] .text-white\/60 { color: rgb(15 23 42 / 0.66) !important; }
+[data-theme="light"] .text-white\/55 { color: rgb(15 23 42 / 0.62) !important; }
+[data-theme="light"] .text-white\/50 { color: rgb(15 23 42 / 0.58) !important; }
+[data-theme="light"] .text-white\/45 { color: rgb(15 23 42 / 0.54) !important; }
+[data-theme="light"] .text-white\/40 { color: rgb(15 23 42 / 0.5) !important; }
+[data-theme="light"] .text-white\/35 { color: rgb(15 23 42 / 0.46) !important; }
+[data-theme="light"] .text-white\/25 { color: rgb(15 23 42 / 0.4) !important; }
+/* white overlays -> subtle dark tints */
+[data-theme="light"] .bg-white\/12 { background-color: rgb(2 6 23 / 0.08) !important; }
+[data-theme="light"] .bg-white\/10 { background-color: rgb(2 6 23 / 0.06) !important; }
+[data-theme="light"] .bg-white\/5 { background-color: rgb(2 6 23 / 0.04) !important; }
+[data-theme="light"] .bg-white\/\[0\.08\] { background-color: rgb(2 6 23 / 0.06) !important; }
+[data-theme="light"] .bg-white\/\[0\.07\] { background-color: rgb(2 6 23 / 0.05) !important; }
+[data-theme="light"] .bg-white\/\[0\.06\] { background-color: rgb(2 6 23 / 0.05) !important; }
+[data-theme="light"] .bg-white\/\[0\.05\] { background-color: rgb(2 6 23 / 0.04) !important; }
+[data-theme="light"] .bg-white\/\[0\.04\] { background-color: rgb(2 6 23 / 0.035) !important; }
+[data-theme="light"] .bg-white\/\[0\.03\] { background-color: rgb(2 6 23 / 0.03) !important; }
+[data-theme="light"] .bg-white\/\[0\.02\] { background-color: rgb(2 6 23 / 0.025) !important; }
+/* borders + rings */
+[data-theme="light"] .border-white\/10 { border-color: rgb(2 6 23 / 0.12) !important; }
+[data-theme="light"] .border-white\/15 { border-color: rgb(2 6 23 / 0.15) !important; }
+[data-theme="light"] .border-white\/20 { border-color: rgb(2 6 23 / 0.18) !important; }
+[data-theme="light"] .ring-white\/5 { --tw-ring-color: rgb(2 6 23 / 0.08) !important; }
+[data-theme="light"] .ring-white\/10 { --tw-ring-color: rgb(2 6 23 / 0.12) !important; }
+[data-theme="light"] .ring-white\/15 { --tw-ring-color: rgb(2 6 23 / 0.16) !important; }
+[data-theme="light"] .ring-white\/20 { --tw-ring-color: rgb(2 6 23 / 0.18) !important; }
+[data-theme="light"] .ring-white\/25 { --tw-ring-color: rgb(2 6 23 / 0.2) !important; }
+/* common hovers */
+[data-theme="light"] .hover\:bg-white\/10:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.08\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.07\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.06\]:hover,
+[data-theme="light"] .hover\:bg-white\/\[0\.05\]:hover {
+  background-color: rgb(2 6 23 / 0.07) !important;
+}
+[data-theme="light"] .hover\:text-white:hover { color: #0f172a !important; }
