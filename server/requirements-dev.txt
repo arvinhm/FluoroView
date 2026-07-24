@@ -1,0 +1,4 @@
+# Test/dev dependencies for the FluoroView backend.
+-r requirements.txt
+pytest>=8.0
+httpx>=0.27

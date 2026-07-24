@@ -242,8 +242,16 @@ function scaleToUnit(pos: [number, number][]) {
   }
 }
 
-/** Otsu threshold on a [0,1] intensity vector, returned in [0,1]. */
+/**
+ * Otsu threshold on a [0,1] intensity vector, returned in [0,1].
+ *
+ * When several bin boundaries tie for maximal between-class variance (e.g. a
+ * clean bimodal split with an empty valley between the modes), we return the
+ * midpoint of that plateau so the threshold lands in the valley rather than at
+ * the edge of a mode — which matters for phenotype gating.
+ */
 export function otsu(values: number[], bins = 64): number {
+  if (values.length === 0) return 0.5;
   const hist = new Array(bins).fill(0);
   for (const v of values) {
     const b = Math.min(bins - 1, Math.max(0, Math.floor(v * bins)));
@@ -252,7 +260,11 @@ export function otsu(values: number[], bins = 64): number {
   const total = values.length;
   let sumAll = 0;
   for (let i = 0; i < bins; i++) sumAll += i * hist[i];
-  let sumB = 0, wB = 0, maxVar = -1, thr = 0;
+
+  const between = new Array(bins).fill(-1);
+  let sumB = 0,
+    wB = 0,
+    maxVar = -1;
   for (let i = 0; i < bins; i++) {
     wB += hist[i];
     if (wB === 0) continue;
@@ -261,13 +273,22 @@ export function otsu(values: number[], bins = 64): number {
     sumB += i * hist[i];
     const mB = sumB / wB;
     const mF = (sumAll - sumB) / wF;
-    const between = wB * wF * (mB - mF) * (mB - mF);
-    if (between > maxVar) {
-      maxVar = between;
-      thr = i;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    between[i] = v;
+    if (v > maxVar) maxVar = v;
+  }
+  if (maxVar <= 0) return 0.5;
+
+  let lo = -1;
+  let hi = -1;
+  for (let i = 0; i < bins; i++) {
+    if (between[i] >= maxVar * (1 - 1e-6)) {
+      if (lo < 0) lo = i;
+      hi = i;
     }
   }
-  return thr / bins;
+  const thr = (lo + hi) / 2;
+  return (thr + 0.5) / bins;
 }
 
 export interface ClusterSummary {
