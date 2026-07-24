@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { CellTypeDef, ChannelDef, ChannelState, Roi, Tissue, ViewKey } from "./types";
+import type { Cell, CellTypeDef, ChannelDef, ChannelState, Roi, Tissue, ViewKey } from "./types";
 import { buildChannelMaps, generateTissue, CELL_TYPES, MARKERS, M, type ChannelMaps } from "./synth";
 import { kmeans, markerMatrix, pca, standardize, summarizeClusters, umapEmbed, type ClusterSummary } from "./analysis";
 import { DEFAULT_DATASET, SYNTHETIC_DEMO, datasetById, type DatasetDef } from "./datasets";
@@ -65,6 +65,7 @@ interface AppState {
   removeComment: (roiId: number, commentId: number) => void;
   runClustering: (k: number) => void;
   setSegmented: (v: boolean, method?: string) => void;
+  setCells: (cells: Cell[], method: string) => void;
   setBackend: (v: boolean) => void;
   setHovered: (i: number | null) => void;
   setPixelSizeUm: (um: number | null) => void;
@@ -252,6 +253,13 @@ export const useStore = create<AppState>((set, get) => ({
   },
 
   setSegmented: (v, method) => set({ segmented: v, segMethod: method ?? get().segMethod }),
+  setCells: (cells, method) =>
+    set((s) => ({
+      tissue: s.tissue ? { ...s.tissue, cells } : s.tissue,
+      segmented: true,
+      segMethod: method,
+      analysis: null,
+    })),
   setBackend: (v) => set({ backendOnline: v }),
   setHovered: (i) => set({ hovered: i }),
   setPixelSizeUm: (um) => set({ pixelSizeUm: um }),

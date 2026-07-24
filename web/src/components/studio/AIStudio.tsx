@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, ScanSearch, Dna, Play, Loader2, CheckCircle2, ArrowRight, TriangleAlert } from "lucide-react";
+import { Sparkles, ScanSearch, Dna, Play, Loader2, CheckCircle2, ArrowRight, TriangleAlert, Upload } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import { MARKERS, generateTissue, CELL_TYPES } from "../../lib/synth";
+import { decodeLabelTiff, labelsToCells } from "../../lib/maskImport";
+import { toast } from "../../lib/toast";
 import { Panel, Badge } from "../ui";
 import { SpatialMap } from "./charts";
 
@@ -37,18 +39,39 @@ export default function AIStudio() {
 
 function SegmentationCard() {
   const tissue = useStore((s) => s.tissue);
+  const maps = useStore((s) => s.maps);
   const pixelSizeUm = useStore((s) => s.pixelSizeUm);
   const setSegmented = useStore((s) => s.setSegmented);
+  const setCells = useStore((s) => s.setCells);
   const setView = useStore((s) => s.setView);
   const [model, setModel] = useState(SEG_MODELS[0]);
   const [progress, setProgress] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [state, setState] = useState<"idle" | "running" | "done">("idle");
+  const [importing, setImporting] = useState(false);
   const timers = useRef<number[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
   if (!tissue) return null;
+
+  const importMask = async (file: File) => {
+    if (!maps) return;
+    setImporting(true);
+    try {
+      const mask = await decodeLabelTiff(file);
+      const cells = labelsToCells(mask, maps);
+      if (!cells.length) throw new Error("No non-zero labels found in the mask");
+      setCells(cells, `Imported mask: ${file.name}`);
+      toast.success("Mask imported", `${cells.length.toLocaleString()} cells from ${file.name}`);
+      setView("viewer");
+    } catch (e) {
+      toast.error("Mask import failed", e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const run = () => {
     timers.current.forEach(clearTimeout);
@@ -155,7 +178,33 @@ function SegmentationCard() {
         </motion.div>
       )}
 
-      <p className="mt-auto pt-4 text-[11px] leading-relaxed text-white/35">
+      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+        <div className="mb-1 text-xs font-semibold text-white/75">Import external mask</div>
+        <p className="mb-2 text-[11px] leading-snug text-white/45">
+          Load a label TIFF (QuPath / CellProfiler / ImageJ) as the segmentation. Cells are read from the mask and scored
+          against the current channels.
+        </p>
+        <button
+          onClick={() => fileRef.current?.click()}
+          disabled={importing}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/[0.03] px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:bg-white/[0.07] disabled:opacity-60"
+        >
+          {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />} Import label mask (.tif)
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".tif,.tiff,image/tiff"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void importMask(f);
+            e.currentTarget.value = "";
+          }}
+        />
+      </div>
+
+      <p className="mt-4 pt-2 text-[11px] leading-relaxed text-white/35">
         On-device demo delineates the loaded tissue's cells. Connect the FluoroView backend to run the
         selected model on your own slides.
       </p>
