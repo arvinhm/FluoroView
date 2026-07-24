@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Eye, Network, Sparkles, Circle, Database, Cpu } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { ViewKey } from "../../lib/types";
-import Viewer from "./Viewer";
-import Analysis from "./Analysis";
-import AIStudio from "./AIStudio";
+import ErrorBoundary from "../ErrorBoundary";
+
+const Viewer = lazy(() => import("./Viewer"));
+const Analysis = lazy(() => import("./Analysis"));
+const AIStudio = lazy(() => import("./AIStudio"));
 
 const TABS: { key: ViewKey; label: string; icon: typeof Eye }[] = [
   { key: "viewer", label: "Viewer", icon: Eye },
@@ -75,19 +77,23 @@ export default function Studio() {
       {!ready ? (
         <Loader />
       ) : (
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={view}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-          >
-            {view === "viewer" && <Viewer />}
-            {view === "analysis" && <Analysis />}
-            {view === "ai" && <AIStudio />}
-          </motion.div>
-        </AnimatePresence>
+        <ErrorBoundary scope="Studio" key={`eb-${view}`}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={view}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <Suspense fallback={<Loader />}>
+                {view === "viewer" && <Viewer />}
+                {view === "analysis" && <Analysis />}
+                {view === "ai" && <AIStudio />}
+              </Suspense>
+            </motion.div>
+          </AnimatePresence>
+        </ErrorBoundary>
       )}
     </div>
   );

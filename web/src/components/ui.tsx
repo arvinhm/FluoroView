@@ -140,6 +140,44 @@ export function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
+export function Skeleton({ className }: { className?: string }) {
+  return (
+    <div
+      className={clsx(
+        "relative overflow-hidden rounded-xl bg-white/[0.04]",
+        "after:absolute after:inset-0 after:-translate-x-full after:animate-shimmer after:bg-gradient-to-r after:from-transparent after:via-white/[0.06] after:to-transparent",
+        className
+      )}
+      aria-hidden="true"
+    />
+  );
+}
+
+export function EmptyState({
+  icon,
+  title,
+  hint,
+  action,
+  className,
+}: {
+  icon?: ReactNode;
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={clsx("grid h-full min-h-[140px] place-items-center px-4 text-center", className)}>
+      <div>
+        {icon && <div className="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-white/5 text-white/40">{icon}</div>}
+        <p className="text-sm font-semibold text-white/70">{title}</p>
+        {hint && <p className="mx-auto mt-1 max-w-[260px] text-xs leading-relaxed text-white/40">{hint}</p>}
+        {action && <div className="mt-4 flex justify-center">{action}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function Reveal({
   children,
   delay = 0,
