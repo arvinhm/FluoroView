@@ -34,6 +34,10 @@ export function ChannelPanel() {
   const setGain = useStore((s) => s.setGain);
   const setGamma = useStore((s) => s.setGamma);
   const soloChannel = useStore((s) => s.soloChannel);
+  // On the Viv pyramid path, per-channel appearance is a contrast window: Gain
+  // maps to contrast limits. True per-channel gamma (shader-hook extension) is a
+  // v3.3 item, so we hide the gamma control there rather than show a no-op.
+  const isPyramid = useStore((s) => !!s.imageSource);
   const [expanded, setExpanded] = useState<number | null>(0);
 
   return (
@@ -69,8 +73,8 @@ export function ChannelPanel() {
               </div>
               {open && (
                 <div className="mt-2 space-y-2 px-1 pb-1">
-                  <LabeledSlider label="Gain" value={c.gain} min={0.2} max={3} onChange={(v) => setGain(c.index, v)} accent={mk.color} />
-                  <LabeledSlider label="Gamma" value={c.gamma} min={0.3} max={2.4} onChange={(v) => setGamma(c.index, v)} accent={mk.color} />
+                  <LabeledSlider label={isPyramid ? "Contrast" : "Gain"} value={c.gain} min={0.2} max={3} onChange={(v) => setGain(c.index, v)} accent={mk.color} />
+                  {!isPyramid && <LabeledSlider label="Gamma" value={c.gamma} min={0.3} max={2.4} onChange={(v) => setGamma(c.index, v)} accent={mk.color} />}
                 </div>
               )}
             </div>
