@@ -4,8 +4,10 @@ import type { VivLoader } from "./vivSource";
 import { buildChannelMaps, generateTissue, CELL_TYPES, MARKERS, M, type ChannelMaps } from "./synth";
 import { kmeans, markerMatrix, pca, standardize, summarizeClusters, embedAllCells, type ClusterSummary } from "./analysis";
 import { DEFAULT_DATASET, SYNTHETIC_DEMO, datasetById, type DatasetDef } from "./datasets";
-import { loadRealDataset } from "./loadReal";
+import { loadRealDataset, type LoadedDataset } from "./loadReal";
 import { binHistogram } from "./histogram";
+import type { UploadedDataset } from "./upload/buildDataset";
+import { getUploadDef, getUploadedDataset, registerUpload, releaseUpload, updateUploadedDataset } from "./upload/registry";
 import { appearanceOf, applyAppearance, loadPresets, newPresetId, presetFromJson, savePresets } from "./presets";
 import { toast } from "./toast";
 
@@ -35,6 +37,10 @@ interface AppState {
   view: ViewKey;
   datasetId: string;
   datasetLabel: string;
+  /** In-memory datasets the user uploaded this session (newest last). */
+  uploads: DatasetDef[];
+  /** Honest per-dataset load notes (downsampling, missing µm, mask caveats…). */
+  datasetNotes: string[];
   activeChannels: ChannelDef[];
   cellTypes: CellTypeDef[] | null; // present for synthetic data only
   pixelSizeUm: number | null;
@@ -67,6 +73,11 @@ interface AppState {
 
   setView: (v: ViewKey) => void;
   loadDataset: (ds: DatasetDef) => Promise<void>;
+  /** Register an uploaded dataset, make it active and jump to the viewer. */
+  addUpload: (up: UploadedDataset) => Promise<void>;
+  removeUpload: (id: string) => Promise<void>;
+  /** Attach cells + vector outlines derived from an uploaded label mask. */
+  applyMask: (cells: Cell[], polys: BoundaryCell[], method: string, notes?: string[]) => void;
   ensureData: () => void;
   toggleChannel: (i: number) => void;
   setGain: (i: number, g: number) => void;
@@ -144,6 +155,8 @@ export const useStore = create<AppState>((set, get) => ({
   view: "home",
   datasetId: DEFAULT_DATASET.id,
   datasetLabel: DEFAULT_DATASET.label,
+  uploads: [],
+  datasetNotes: [],
   activeChannels: DEFAULT_DATASET.channels,
   cellTypes: null,
   pixelSizeUm: DEFAULT_DATASET.pixelSizeUm,
@@ -204,11 +217,20 @@ export const useStore = create<AppState>((set, get) => ({
           analysis: null,
           segmented: false,
           segMethod: "",
+          datasetNotes: [],
           loading: false,
         });
         return;
       }
-      const { tissue, maps, channels, boundaries, boundaryPolys, imageSource, scanMeta } = await loadRealDataset(ds);
+      let loaded: LoadedDataset;
+      if (ds.kind === "upload") {
+        const cached = getUploadedDataset(ds.id);
+        if (!cached) throw new Error("That upload is no longer in memory (uploads last for the session only) — drop the files again.");
+        loaded = cached;
+      } else {
+        loaded = await loadRealDataset(ds);
+      }
+      const { tissue, maps, channels, boundaries, boundaryPolys, imageSource, scanMeta } = loaded;
       set({
         datasetId: ds.id,
         datasetLabel: ds.label,
@@ -222,21 +244,27 @@ export const useStore = create<AppState>((set, get) => ({
         imageSource,
         scanMeta,
         channels: defaultChannels(channels, scanMeta),
-        channelStats: channels.map(() => null), // filled async from the pyramid raster
+        // Uploads measure their histograms while decoding; bundled scans fill
+        // them asynchronously from the pyramid raster.
+        channelStats: loaded.channelStats ?? channels.map(() => null),
         activePresetId: null,
         clusterAnnotations: {},
         rois: [],
         selectedRoiId: null,
         analysis: null,
-        // cells.json IS a real segmentation mask, so the overlay is valid immediately.
-        segmented: true,
-        segMethod: "Imported mask (real)",
+        segmented: loaded.segmented ?? true,
+        segMethod: loaded.segMethod ?? "Imported mask (real)",
+        datasetNotes: loaded.notes ?? [],
         loading: false,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       console.error("loadDataset failed:", e);
       set({ loading: false, loadError: msg });
+      if (ds.kind === "upload") {
+        toast.error("Couldn't open that upload", msg);
+        return;
+      }
       // Fall back to the fully offline synthetic demo so the app never dead-ends.
       if (ds.kind !== "synthetic") {
         toast.error("Couldn't load the real dataset", "Falling back to the synthetic demo.");
@@ -245,6 +273,40 @@ export const useStore = create<AppState>((set, get) => ({
         toast.error("Failed to prepare demo data", msg);
       }
     }
+  },
+
+  addUpload: async (up) => {
+    registerUpload(up.def, up.loaded);
+    set((s) => ({ uploads: [...s.uploads.filter((d) => d.id !== up.def.id), up.def] }));
+    await get().loadDataset(up.def);
+    set({ view: "viewer" });
+  },
+
+  removeUpload: async (id) => {
+    releaseUpload(id);
+    set((s) => ({ uploads: s.uploads.filter((d) => d.id !== id) }));
+    if (get().datasetId === id) await get().loadDataset(DEFAULT_DATASET);
+  },
+
+  applyMask: (cells, polys, method, notes = []) => {
+    const s = get();
+    if (s.datasetId.startsWith("upload-") && s.tissue) {
+      updateUploadedDataset(s.datasetId, {
+        tissue: { ...s.tissue, cells },
+        boundaryPolys: polys,
+        segmented: true,
+        segMethod: method,
+      });
+    }
+    set({
+      tissue: s.tissue ? { ...s.tissue, cells } : s.tissue,
+      boundaryPolys: polys.length ? polys : s.boundaryPolys,
+      boundaries: polys.length ? null : s.boundaries,
+      segmented: true,
+      segMethod: method,
+      analysis: null,
+      datasetNotes: [...s.datasetNotes, ...notes],
+    });
   },
 
   ensureData: () => {
@@ -407,6 +469,11 @@ export const useStore = create<AppState>((set, get) => ({
   runClustering: (k) => {
     const t = get().tissue;
     if (!t) return;
+    // Uploads without a label mask have no cells; clustering needs at least k.
+    if (t.cells.length < Math.max(2, k)) {
+      toast.error("Not enough cells to cluster", t.cells.length ? `${t.cells.length} cell(s) available for k=${k}.` : "Upload a label mask (or run segmentation) first.");
+      return;
+    }
     const names = get().activeChannels.map((c) => c.name);
     const X = standardize(markerMatrix(t.cells));
     const scores = pca(X, Math.min(6, Math.max(2, names.length - 1)));
@@ -452,7 +519,12 @@ export const useStore = create<AppState>((set, get) => ({
   },
   importSession: async (data) => {
     if (data.datasetId !== get().datasetId || !get().tissue) {
-      await get().loadDataset(datasetById(data.datasetId));
+      // An upload id only resolves while its pixels are still in memory.
+      const uploaded = getUploadDef(data.datasetId);
+      if (!uploaded && data.datasetId.startsWith("upload-")) {
+        toast.error("Session references an upload", "Drop the same files again, then load the session to restore its ROIs.");
+      }
+      await get().loadDataset(uploaded ?? datasetById(data.datasetId));
     }
     // Merge saved channel appearance onto fresh defaults so pre-v3.3 sessions
     // (which lack color/contrastLimits/domain/opacity) still restore cleanly.

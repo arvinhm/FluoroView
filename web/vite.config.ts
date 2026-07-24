@@ -56,6 +56,9 @@ export default defineConfig({
       },
     },
   },
+  // The upload worker pulls in geotiff, so its bundle is code-split — which
+  // rules out Vite's default `iife` worker format.
+  worker: { format: "es" },
   build: {
     target: "es2020",
     chunkSizeWarningLimit: 1400,

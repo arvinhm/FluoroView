@@ -5,7 +5,8 @@ export interface DatasetDef {
   id: string;
   label: string;
   short: string;
-  kind: "real" | "synthetic";
+  /** `upload` datasets live only in memory for the session (see upload/registry). */
+  kind: "real" | "synthetic" | "upload";
   /** For real datasets: path (relative to the site base) that holds the PNGs + json. */
   basePath?: string;
   channels: ChannelDef[];
