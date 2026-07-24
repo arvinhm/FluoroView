@@ -48,9 +48,9 @@ export default function RoiComments({ roi }: { roi: Roi }) {
   const total = roi.comments.reduce((a, c) => a + 1 + c.replies.length, 0);
 
   return (
-    <div className="mt-6 border-t border-white/10 pt-4">
+    <div className="border-t border-white/10 pt-4 lg:border-t-0 lg:pt-0">
       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-cyan-300/80">
-        <MessageSquare className="h-4 w-4" /> Annotations <span className="font-normal normal-case text-white/40">({total})</span>
+        <MessageSquare className="h-4 w-4" /> Comments &amp; annotations <span className="font-normal normal-case text-white/40">({total})</span>
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -77,7 +77,9 @@ export default function RoiComments({ roi }: { roi: Roi }) {
       </div>
 
       {roi.comments.length === 0 ? (
-        <p className="text-xs text-white/40">No annotations yet. Notes are tied to this ROI and saved with the session (Export session).</p>
+        <p className="rounded-lg bg-white/[0.03] px-3 py-2 text-xs leading-relaxed text-white/45 ring-1 ring-white/5">
+          No comments yet. Type a note above and press <span className="text-white/70">Post</span> (or Enter) to start a thread on <span className="text-white/70">{roi.label}</span>. Comments are tied to this ROI and saved with the session.
+        </p>
       ) : (
         <div className="space-y-2">
           {roi.comments.map((c) => (

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { BarChart3, Download, Loader2 } from "lucide-react";
+import { BarChart3, Download, Loader2, MessageSquare } from "lucide-react";
 import { useStore } from "../../lib/store";
 import { cellsInRoi, channelStats, shapeArea, shapeKindLabel } from "../../lib/roi";
 import { clusterColor } from "../../lib/palette";
@@ -59,16 +59,26 @@ export default function RoiAnalysis() {
     return { cells, stats, global, composition };
   }, [roi, tissue, activeChannels, cellTypes]);
 
+  // Always rendered (even with no ROI) so the analysis + comments area is
+  // discoverable and tells the user exactly how to populate it.
   if (!roi || !data) {
     return (
       <Panel className="p-6" strong>
-        <EmptyState icon={<BarChart3 className="h-6 w-6" />} title="No ROI selected" hint="Draw or select a region above to see its per-channel statistics and composition." />
+        <div className="mb-3 flex items-center gap-2 text-sm font-bold">
+          <BarChart3 className="h-4 w-4 text-cyan-300" /> Per-ROI analysis &amp; annotations
+        </div>
+        <EmptyState
+          icon={<BarChart3 className="h-6 w-6" />}
+          title="No region selected yet"
+          hint="Draw a region with the Rectangle (R), Circle (C) or Freehand polygon (P) tool in the viewer — or click an ROI in the list above. You'll get a live per-channel mean ± SEM bar graph, full statistics, cell composition, and a threaded comments panel right here."
+        />
       </Panel>
     );
   }
 
   const { cells, stats, global, composition } = data;
   const maxMean = Math.max(0.15, ...stats.map((s) => s.mean + s.sem));
+  const noteCount = roi.comments.reduce((a, c) => a + 1 + c.replies.length, 0);
 
   return (
     <Panel className="p-5" strong>
@@ -78,6 +88,9 @@ export default function RoiAnalysis() {
           <h3 className="text-base font-bold">{roi.label}</h3>
           <span className="text-xs text-white/45">
             {shapeKindLabel(roi.shape)} · {cells.length.toLocaleString()} cells · {Math.round(shapeArea(roi.shape)).toLocaleString()} px²
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-fuchsia-400/10 px-2 py-0.5 text-[11px] font-semibold text-fuchsia-300 ring-1 ring-fuchsia-400/25">
+            <MessageSquare className="h-3 w-3" /> {noteCount}
           </span>
         </div>
         <button
@@ -91,10 +104,13 @@ export default function RoiAnalysis() {
         </button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1.3fr_1fr]">
+      <div className="grid gap-6 lg:grid-cols-[1.55fr_1fr]">
+        {/* LEFT — live per-channel bar graph + stats + composition */}
         <div>
           <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-cyan-300/80">
-            <span>Mean intensity per channel</span>
+            <span className="inline-flex items-center gap-1.5">
+              <BarChart3 className="h-3.5 w-3.5" /> Mean intensity per channel
+            </span>
             <span className="font-normal normal-case text-white/40">± SEM · tick = whole-image mean</span>
           </div>
           <div className="space-y-2">
@@ -153,35 +169,38 @@ export default function RoiAnalysis() {
               </tbody>
             </table>
           </div>
+
+          <div className="mt-5">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-cyan-300/80">Cell composition</div>
+            {composition.length ? (
+              <div className="space-y-1.5">
+                {composition.map((c) => {
+                  const pct = (c.count / cells.length) * 100;
+                  return (
+                    <div key={c.key} className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: c.color }} />
+                      <span className="w-28 flex-shrink-0 truncate text-xs text-white/70" title={c.label}>{c.label}</span>
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
+                      </div>
+                      <span className="w-16 text-right font-mono text-[11px] text-white/55">{c.count.toLocaleString()} · {pct.toFixed(0)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs leading-relaxed text-white/45">
+                Composition needs cell classes. Run clustering in the <span className="text-white/70">Analysis</span> tab to break this ROI down by cluster.
+              </p>
+            )}
+          </div>
         </div>
 
-        <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-cyan-300/80">Cell composition</div>
-          {composition.length ? (
-            <div className="space-y-1.5">
-              {composition.map((c) => {
-                const pct = (c.count / cells.length) * 100;
-                return (
-                  <div key={c.key} className="flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 flex-shrink-0 rounded-sm" style={{ background: c.color }} />
-                    <span className="w-28 flex-shrink-0 truncate text-xs text-white/70" title={c.label}>{c.label}</span>
-                    <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/5">
-                      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: c.color }} />
-                    </div>
-                    <span className="w-16 text-right font-mono text-[11px] text-white/55">{c.count.toLocaleString()} · {pct.toFixed(0)}%</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-xs leading-relaxed text-white/45">
-              Composition needs cell classes. Run clustering in the <span className="text-white/70">Analysis</span> tab to break this ROI down by cluster.
-            </p>
-          )}
+        {/* RIGHT — discoverable threaded comments panel */}
+        <div className="lg:border-l lg:border-white/10 lg:pl-6">
+          <RoiComments roi={roi} />
         </div>
       </div>
-
-      <RoiComments roi={roi} />
     </Panel>
   );
 }
