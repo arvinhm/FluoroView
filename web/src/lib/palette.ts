@@ -24,6 +24,18 @@ export function hexToRgb(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
+/**
+ * LUT color (0–255 RGB) scaled by a per-channel opacity/blend weight. Because
+ * multi-channel fluorescence blending is additive/linear, scaling the color is
+ * equivalent to scaling that channel's contribution — the zero-risk way to get
+ * per-channel opacity through Viv's `colors` prop (no extra shader needed).
+ */
+export function scaleRgb(hex: string, opacity: number): [number, number, number] {
+  const [r, g, b] = hexToRgb(hex);
+  const o = Math.max(0, Math.min(1, opacity));
+  return [r * o, g * o, b * o];
+}
+
 // viridis-ish continuous ramp for expression heatmaps
 const VIRIDIS: [number, number, number][] = [
   [13, 8, 135],

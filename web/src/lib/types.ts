@@ -43,8 +43,49 @@ export interface Tissue {
 export interface ChannelState {
   index: number;
   visible: boolean;
-  gain: number; // 0..3
-  gamma: number; // 0.3..2.5
+  /** Legacy linear gain — retained for session back-compat; superseded by contrastLimits. */
+  gain: number;
+  /** Per-channel gamma (both engines). 1 = identity, >1 brightens, <1 darkens. */
+  gamma: number;
+  /** Hex LUT color (defaults to the marker color, user-overridable via the picker). */
+  color: string;
+  /** Dual min/max mapping window in data units → Viv `contrastLimits`. */
+  contrastLimits: [number, number];
+  /** Slider bounds in data units (image dtype range / measured domain). */
+  domain: [number, number];
+  /** Per-channel opacity / additive blend weight, 0..1 (folded into the LUT color). */
+  opacity: number;
+}
+
+/** Per-channel intensity histogram + auto-contrast suggestion for the panel. */
+export interface ChannelHistogram {
+  /** Bin counts (length = number of bins). */
+  bins: number[];
+  /** Measured [min, max] intensity range (slider bounds). */
+  domain: [number, number];
+  /** Percentile-stretch auto contrast window. */
+  auto: [number, number];
+  /** Largest bin count (for vertical scaling). */
+  peak: number;
+}
+
+/** A saved snapshot of one channel's appearance (for presets / session). */
+export interface ChannelAppearance {
+  visible: boolean;
+  color: string;
+  contrastLimits: [number, number];
+  gamma: number;
+  opacity: number;
+}
+
+/** A named, dataset-scoped preset of the full channel appearance. */
+export interface ChannelPreset {
+  id: string;
+  name: string;
+  datasetId: string;
+  channels: ChannelAppearance[];
+  createdAt: number;
+  builtin?: boolean;
 }
 
 export type ViewKey = "home" | "viewer" | "analysis" | "ai";

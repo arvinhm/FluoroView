@@ -1,10 +1,12 @@
 import { create } from "zustand";
-import type { BoundaryCell, Cell, CellTypeDef, ChannelDef, ChannelState, Roi, ScanMeta, Tissue, ViewKey } from "./types";
+import type { BoundaryCell, Cell, CellTypeDef, ChannelDef, ChannelHistogram, ChannelPreset, ChannelState, Roi, ScanMeta, Tissue, ViewKey } from "./types";
 import type { VivLoader } from "./vivSource";
 import { buildChannelMaps, generateTissue, CELL_TYPES, MARKERS, M, type ChannelMaps } from "./synth";
-import { kmeans, markerMatrix, pca, standardize, summarizeClusters, umapEmbed, type ClusterSummary } from "./analysis";
+import { kmeans, markerMatrix, pca, standardize, summarizeClusters, embedAllCells, type ClusterSummary } from "./analysis";
 import { DEFAULT_DATASET, SYNTHETIC_DEMO, datasetById, type DatasetDef } from "./datasets";
 import { loadRealDataset } from "./loadReal";
+import { binHistogram } from "./histogram";
+import { appearanceOf, applyAppearance, loadPresets, newPresetId, presetFromJson, savePresets } from "./presets";
 import { toast } from "./toast";
 
 interface Analysis {
@@ -25,6 +27,8 @@ export interface SessionData {
   pixelSizeUm: number | null;
   segmented: boolean;
   segMethod: string;
+  /** cluster index → user cell-type name (v3.3+) */
+  clusterAnnotations?: Record<number, string>;
 }
 
 interface AppState {
@@ -45,6 +49,13 @@ interface AppState {
   /** Sidecar metadata for the pyramid scan, else null. */
   scanMeta: ScanMeta | null;
   channels: ChannelState[];
+  /** Per-channel histogram + auto-contrast suggestion (null until computed). */
+  channelStats: (ChannelHistogram | null)[];
+  /** User-saved appearance presets (persisted in localStorage). */
+  presets: ChannelPreset[];
+  activePresetId: string | null;
+  /** cluster index → user cell-type name. */
+  clusterAnnotations: Record<number, string>;
   rois: Roi[];
   analysis: Analysis | null;
   segmented: boolean;
@@ -63,6 +74,19 @@ interface AppState {
   soloChannel: (i: number) => void;
   showAllChannels: () => void;
   presetChannels: (names: string[]) => void;
+  /** Per-channel color-control actions (drive live Viv props). */
+  setContrastLimits: (i: number, lo: number, hi: number) => void;
+  setChannelColor: (i: number, hex: string) => void;
+  setOpacity: (i: number, v: number) => void;
+  autoContrast: (i: number) => void;
+  autoContrastAll: () => void;
+  resetChannel: (i: number) => void;
+  setChannelStat: (i: number, hist: ChannelHistogram, applyAuto?: boolean) => void;
+  savePreset: (name: string) => void;
+  applyPreset: (id: string) => void;
+  deletePreset: (id: string) => void;
+  importPresetJson: (text: string) => boolean;
+  renameCluster: (cluster: number, name: string) => void;
   selectedRoiId: number | null;
   addRoi: (r: Roi) => void;
   updateRoi: (id: number, patch: Partial<Roi>) => void;
@@ -82,8 +106,32 @@ interface AppState {
   importSession: (data: SessionData) => Promise<void>;
 }
 
-function defaultChannels(chs: ChannelDef[]): ChannelState[] {
-  return chs.map((c, i) => ({ index: i, visible: c.defaultOn, gain: 1.15, gamma: 0.9 }));
+function defaultChannels(chs: ChannelDef[], scanMeta?: ScanMeta | null): ChannelState[] {
+  return chs.map((c, i) => {
+    const meta = scanMeta?.channels[i];
+    const domain: [number, number] = meta?.domain ? [meta.domain[0], meta.domain[1]] : [0, 255];
+    const cl: [number, number] = meta?.contrastLimits ? [meta.contrastLimits[0], meta.contrastLimits[1]] : [domain[0], domain[1]];
+    return {
+      index: i,
+      visible: c.defaultOn,
+      gain: 1,
+      gamma: 1,
+      color: meta?.color ?? c.color,
+      contrastLimits: cl,
+      domain,
+      opacity: 1,
+    };
+  });
+}
+
+/** Clamp/order a candidate [lo,hi] contrast window into the channel domain. */
+function clampWindow(lo: number, hi: number, domain: [number, number]): [number, number] {
+  const [dlo, dhi] = domain;
+  let a = Math.max(dlo, Math.min(dhi, lo));
+  let b = Math.max(dlo, Math.min(dhi, hi));
+  if (b < a) [a, b] = [b, a];
+  if (b - a < 1e-6) b = Math.min(dhi, a + Math.max(1, (dhi - dlo) * 0.01));
+  return [a, b];
 }
 
 let idSeq = 0;
@@ -106,6 +154,10 @@ export const useStore = create<AppState>((set, get) => ({
   imageSource: null,
   scanMeta: null,
   channels: defaultChannels(DEFAULT_DATASET.channels),
+  channelStats: DEFAULT_DATASET.channels.map(() => null),
+  presets: loadPresets(),
+  activePresetId: null,
+  clusterAnnotations: {},
   rois: [],
   analysis: null,
   segmented: false,
@@ -126,6 +178,11 @@ export const useStore = create<AppState>((set, get) => ({
       if (ds.kind === "synthetic") {
         const tissue = generateTissue(4200, 7);
         const maps = buildChannelMaps(tissue, 1200);
+        // Histograms + auto contrast straight from the in-memory intensity maps
+        // (cheap, so the panel and initial look are data-driven immediately).
+        const stats = maps.maps.map((m) => binHistogram(m, 128, [0, 255]));
+        let channels = defaultChannels(ds.channels);
+        channels = channels.map((c, i) => (stats[i] ? { ...c, contrastLimits: [stats[i].auto[0], stats[i].auto[1]] } : c));
         set({
           datasetId: ds.id,
           datasetLabel: ds.label,
@@ -138,7 +195,10 @@ export const useStore = create<AppState>((set, get) => ({
           boundaryPolys: null,
           imageSource: null,
           scanMeta: null,
-          channels: defaultChannels(ds.channels),
+          channels,
+          channelStats: stats,
+          activePresetId: null,
+          clusterAnnotations: {},
           rois: [],
           selectedRoiId: null,
           analysis: null,
@@ -161,7 +221,10 @@ export const useStore = create<AppState>((set, get) => ({
         boundaryPolys,
         imageSource,
         scanMeta,
-        channels: defaultChannels(channels),
+        channels: defaultChannels(channels, scanMeta),
+        channelStats: channels.map(() => null), // filled async from the pyramid raster
+        activePresetId: null,
+        clusterAnnotations: {},
         rois: [],
         selectedRoiId: null,
         analysis: null,
@@ -208,6 +271,94 @@ export const useStore = create<AppState>((set, get) => ({
       channels: s.channels.map((c) => ({ ...c, visible: on.has(s.activeChannels[c.index]?.name) })),
     }));
   },
+
+  setContrastLimits: (i, lo, hi) =>
+    set((s) => ({
+      channels: s.channels.map((c) => (c.index === i ? { ...c, contrastLimits: clampWindow(lo, hi, c.domain) } : c)),
+      activePresetId: null,
+    })),
+
+  setChannelColor: (i, hex) =>
+    set((s) => ({ channels: s.channels.map((c) => (c.index === i ? { ...c, color: hex } : c)), activePresetId: null })),
+
+  setOpacity: (i, v) =>
+    set((s) => ({
+      channels: s.channels.map((c) => (c.index === i ? { ...c, opacity: Math.max(0, Math.min(1, v)) } : c)),
+      activePresetId: null,
+    })),
+
+  autoContrast: (i) =>
+    set((s) => {
+      const stat = s.channelStats[i];
+      if (!stat) return {};
+      return {
+        channels: s.channels.map((c) => (c.index === i ? { ...c, contrastLimits: clampWindow(stat.auto[0], stat.auto[1], c.domain) } : c)),
+        activePresetId: null,
+      };
+    }),
+
+  autoContrastAll: () =>
+    set((s) => ({
+      channels: s.channels.map((c) => {
+        const stat = s.channelStats[c.index];
+        return stat ? { ...c, contrastLimits: clampWindow(stat.auto[0], stat.auto[1], c.domain) } : c;
+      }),
+      activePresetId: null,
+    })),
+
+  resetChannel: (i) =>
+    set((s) => ({
+      channels: s.channels.map((c) => (c.index === i ? { ...c, contrastLimits: [c.domain[0], c.domain[1]], gamma: 1, opacity: 1 } : c)),
+      activePresetId: null,
+    })),
+
+  setChannelStat: (i, hist, applyAuto = false) =>
+    set((s) => {
+      const stats = s.channelStats.slice();
+      stats[i] = hist;
+      const channels = applyAuto
+        ? s.channels.map((c) => (c.index === i ? { ...c, domain: [hist.domain[0], hist.domain[1]] as [number, number], contrastLimits: clampWindow(hist.auto[0], hist.auto[1], hist.domain) } : c))
+        : s.channels;
+      return { channelStats: stats, channels };
+    }),
+
+  savePreset: (name) => {
+    const s = get();
+    const preset: ChannelPreset = { id: newPresetId(), name, datasetId: s.datasetId, channels: appearanceOf(s.channels), createdAt: Date.now() };
+    const next = [...s.presets.filter((p) => !(p.datasetId === preset.datasetId && p.name === preset.name)), preset];
+    savePresets(next);
+    set({ presets: next, activePresetId: preset.id });
+  },
+
+  applyPreset: (id) => {
+    const p = get().presets.find((x) => x.id === id);
+    if (!p) return;
+    set((s) => ({ channels: applyAppearance(s.channels, p.channels), activePresetId: id }));
+  },
+
+  deletePreset: (id) => {
+    const next = get().presets.filter((x) => x.id !== id);
+    savePresets(next);
+    set((s) => ({ presets: next, activePresetId: s.activePresetId === id ? null : s.activePresetId }));
+  },
+
+  importPresetJson: (text) => {
+    const p = presetFromJson(text, get().datasetId);
+    if (!p) return false;
+    const next = [...get().presets, p];
+    savePresets(next);
+    set((s) => ({ presets: next, channels: applyAppearance(s.channels, p.channels), activePresetId: p.id }));
+    return true;
+  },
+
+  renameCluster: (cluster, name) =>
+    set((s) => {
+      const next = { ...s.clusterAnnotations };
+      const trimmed = name.trim();
+      if (trimmed) next[cluster] = trimmed;
+      else delete next[cluster];
+      return { clusterAnnotations: next };
+    }),
 
   selectedRoiId: null,
   addRoi: (r) => set((s) => ({ rois: [...s.rois, r], selectedRoiId: r.id })),
@@ -263,12 +414,11 @@ export const useStore = create<AppState>((set, get) => ({
     t.cells.forEach((c, i) => (c.cluster = labels[i]));
     const summaries = summarizeClusters(t.cells, labels, k, names);
 
-    const cap = 1200;
-    const step = Math.max(1, Math.floor(t.cells.length / cap));
-    const sampleIdx: number[] = [];
-    for (let i = 0; i < t.cells.length; i += step) sampleIdx.push(i);
-    const subScores = sampleIdx.map((i) => scores[i]);
-    const embedding = umapEmbed(subScores, { neighbors: 14, iters: 180 });
+    // Embed EVERY cell: a genuine neighbor embedding on a landmark subset, then
+    // out-of-sample projection of all remaining cells (see analysis.embedAllCells).
+    // sampleIdx is the identity map so the scatter renders all ~N cells crisply.
+    const embedding = embedAllCells(scores, { landmarks: 2600, neighbors: 14, iters: 200 });
+    const sampleIdx = embedding.map((_, i) => i);
 
     set({ analysis: { labels, k, summaries, embedding, sampleIdx } });
   },
@@ -288,7 +438,7 @@ export const useStore = create<AppState>((set, get) => ({
   exportSession: () => {
     const s = get();
     return {
-      version: "3.1",
+      version: "3.3",
       datasetId: s.datasetId,
       datasetLabel: s.datasetLabel,
       channels: s.channels,
@@ -297,20 +447,41 @@ export const useStore = create<AppState>((set, get) => ({
       pixelSizeUm: s.pixelSizeUm,
       segmented: s.segmented,
       segMethod: s.segMethod,
+      clusterAnnotations: s.clusterAnnotations,
     };
   },
   importSession: async (data) => {
     if (data.datasetId !== get().datasetId || !get().tissue) {
       await get().loadDataset(datasetById(data.datasetId));
     }
+    // Merge saved channel appearance onto fresh defaults so pre-v3.3 sessions
+    // (which lack color/contrastLimits/domain/opacity) still restore cleanly.
+    const base = get().channels;
+    const merged = Array.isArray(data.channels) && data.channels.length
+      ? base.map((c, i) => {
+          const saved = data.channels[i] as Partial<ChannelState> | undefined;
+          if (!saved) return c;
+          return {
+            ...c,
+            visible: saved.visible ?? c.visible,
+            gain: typeof saved.gain === "number" ? saved.gain : c.gain,
+            gamma: typeof saved.gamma === "number" ? saved.gamma : c.gamma,
+            color: saved.color ?? c.color,
+            opacity: typeof saved.opacity === "number" ? saved.opacity : c.opacity,
+            contrastLimits: Array.isArray(saved.contrastLimits) ? [saved.contrastLimits[0], saved.contrastLimits[1]] as [number, number] : c.contrastLimits,
+            domain: Array.isArray(saved.domain) ? [saved.domain[0], saved.domain[1]] as [number, number] : c.domain,
+          };
+        })
+      : base;
     set({
-      channels: Array.isArray(data.channels) && data.channels.length ? data.channels : get().channels,
+      channels: merged,
       rois: Array.isArray(data.rois) ? data.rois : [],
       selectedRoiId: null,
       pixelSizeUm: data.pixelSizeUm ?? get().pixelSizeUm,
       view: data.view ?? "viewer",
       segmented: data.segmented ?? get().segmented,
       segMethod: data.segMethod ?? get().segMethod,
+      clusterAnnotations: data.clusterAnnotations && typeof data.clusterAnnotations === "object" ? data.clusterAnnotations : {},
     });
   },
 }));

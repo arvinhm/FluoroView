@@ -61,8 +61,17 @@ function renderBlend(
   const ctx = cv.getContext("2d")!;
   const img = ctx.createImageData(cw, cimgH);
   const cols = include.map((i) => {
-    const [r, g, b] = hexToRgb(defs[i].color);
+    const [r, g, b] = hexToRgb(channels[i]?.color ?? defs[i].color);
     return [r / 255, g / 255, b / 255] as [number, number, number];
+  });
+  // Per-channel contrast window (normalized to 0..1) matching the live shader.
+  const win = include.map((i) => {
+    const ch = channels[i];
+    const [dlo, dhi] = ch?.domain ?? [0, 255];
+    const range = Math.max(1, dhi - dlo);
+    const lo = ((ch?.contrastLimits?.[0] ?? dlo) - dlo) / range;
+    const hi = ((ch?.contrastLimits?.[1] ?? dhi) - dlo) / range;
+    return { lo, hi: Math.max(lo + 1e-4, hi), gamma: ch?.gamma ?? 1, opacity: ch?.opacity ?? 1 };
   });
   for (let py = 0; py < cimgH; py++) {
     for (let px = 0; px < cw; px++) {
@@ -81,12 +90,13 @@ function renderBlend(
       let B = 0;
       for (let c = 0; c < include.length; c++) {
         const i = include[c];
-        const ch = channels[i];
         const inten = maps.maps[i][at] / 255;
-        const v = Math.pow(Math.min(4, Math.max(0, inten * ch.gain)), ch.gamma);
-        R += cols[c][0] * v;
-        G += cols[c][1] * v;
-        B += cols[c][2] * v;
+        const w = win[c];
+        let t = Math.min(1, Math.max(0, (inten - w.lo) / (w.hi - w.lo)));
+        t = Math.pow(t, 1 / Math.max(0.02, w.gamma)) * w.opacity;
+        R += cols[c][0] * t;
+        G += cols[c][1] * t;
+        B += cols[c][2] * t;
       }
       // Reinhard-ish tone map matching the shader.
       R = Math.pow(R / (R + 0.82), 0.86);

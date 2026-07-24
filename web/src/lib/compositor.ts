@@ -19,8 +19,11 @@ export interface ViewTransform {
 
 export interface ChannelUniform {
   color: string;
-  gain: number;
+  /** contrast window normalized to 0..1 (data units / domain). */
+  lo: number;
+  hi: number;
   gamma: number;
+  opacity: number;
   visible: boolean;
 }
 
@@ -32,12 +35,12 @@ void main(){
   gl_Position = vec4(aPos,0.0,1.0);
 }`;
 
-// Additive LUT blend + Reinhard-ish tone map. The loop is bounded by the real
-// channel count (`uCount`) and guards gamma so it NEVER evaluates pow(0.0, 0.0)
-// — that expression is undefined in GLSL and returns NaN on many GPUs, and
-// `uColor * NaN` (0.0 * NaN == NaN) would poison the whole pixel and render the
-// composite BLACK. This bit the 5-channel real dataset (channels 5..11 unused,
-// gamma left at 0) while the 12-plex synthetic panel happened to dodge it.
+// Additive LUT blend + Reinhard-ish tone map. Each channel maps its intensity
+// through a dual min/max contrast window (uLo/uHi) — the same linear ramp Viv
+// applies via `contrastLimits` — then a per-channel gamma and opacity, so the
+// synthetic compositor path exposes the SAME controls as the Viv pyramid path.
+// The gamma exponent is guarded (>0) so pow is always defined (0.0^0.0 is NaN on
+// many GPUs and would poison the pixel to black).
 const FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -47,8 +50,10 @@ uniform sampler2D uTex1;
 uniform sampler2D uTex2;
 uniform sampler2D uTex3;
 uniform vec3 uColor[${MAX_CHANNELS}];
-uniform float uGain[${MAX_CHANNELS}];
+uniform float uLo[${MAX_CHANNELS}];
+uniform float uHi[${MAX_CHANNELS}];
 uniform float uGamma[${MAX_CHANNELS}];
+uniform float uOpacity[${MAX_CHANNELS}];
 uniform float uActive[${MAX_CHANNELS}];
 uniform int uCount;
 void main(){
@@ -65,9 +70,9 @@ void main(){
   for(int i=0;i<${MAX_CHANNELS};i++){
     if(i >= uCount) break;          // never touch channels the dataset lacks
     if(uActive[i] < 0.5) continue;  // channel toggled off
-    float v = clamp(inten[i]*uGain[i], 0.0, 4.0);
-    v = pow(v, max(uGamma[i], 1e-3)); // guard: gamma>0 so pow is always defined
-    col += uColor[i]*v;
+    float t = clamp((inten[i] - uLo[i]) / max(0.0005, uHi[i] - uLo[i]), 0.0, 1.0);
+    t = pow(t, 1.0 / max(uGamma[i], 0.02)); // gamma>1 brightens, <1 darkens
+    col += uColor[i]*t*uOpacity[i];
   }
   col = col/(col+vec3(0.82));
   col = pow(col, vec3(0.86));
@@ -99,7 +104,7 @@ export class Compositor {
     const aPos = gl.getAttribLocation(prog, "aPos");
     gl.enableVertexAttribArray(aPos);
     gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-    for (const n of ["uTex0", "uTex1", "uTex2", "uTex3", "uColor", "uGain", "uGamma", "uActive", "uCount"]) {
+    for (const n of ["uTex0", "uTex1", "uTex2", "uTex3", "uColor", "uLo", "uHi", "uGamma", "uOpacity", "uActive", "uCount"]) {
       this.loc[n] = gl.getUniformLocation(prog, n);
     }
     gl.uniform1i(this.loc.uTex0, 0);
@@ -150,8 +155,10 @@ export class Compositor {
     if (!gl || !this.prog) return;
     gl.useProgram(this.prog);
     const colors = new Float32Array(MAX_CHANNELS * 3);
-    const gain = new Float32Array(MAX_CHANNELS);
+    const lo = new Float32Array(MAX_CHANNELS);
+    const hi = new Float32Array(MAX_CHANNELS);
     const gamma = new Float32Array(MAX_CHANNELS);
+    const opacity = new Float32Array(MAX_CHANNELS);
     const active = new Float32Array(MAX_CHANNELS);
     for (let i = 0; i < MAX_CHANNELS; i++) {
       const ch = chs[i];
@@ -160,16 +167,22 @@ export class Compositor {
         colors[i * 3] = r / 255;
         colors[i * 3 + 1] = g / 255;
         colors[i * 3 + 2] = b / 255;
-        gain[i] = ch.gain;
+        lo[i] = ch.lo;
+        hi[i] = ch.hi;
         gamma[i] = ch.gamma;
+        opacity[i] = ch.opacity;
         active[i] = ch.visible ? 1 : 0;
       } else {
-        gamma[i] = 1; // safe default; never left at 0
+        hi[i] = 1; // safe default window [0,1]
+        gamma[i] = 1; // never left at 0
+        opacity[i] = 1;
       }
     }
     gl.uniform3fv(this.loc.uColor, colors);
-    gl.uniform1fv(this.loc.uGain, gain);
+    gl.uniform1fv(this.loc.uLo, lo);
+    gl.uniform1fv(this.loc.uHi, hi);
     gl.uniform1fv(this.loc.uGamma, gamma);
+    gl.uniform1fv(this.loc.uOpacity, opacity);
     gl.uniform1fv(this.loc.uActive, active);
     gl.uniform1i(this.loc.uCount, this.count);
   }

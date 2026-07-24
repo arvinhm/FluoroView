@@ -298,6 +298,107 @@ export function otsu(values: number[], bins = 64): number {
   return (thr + 0.5) / bins;
 }
 
+/**
+ * Embed EVERY cell in 2D. A true neighbor embedding (kNN + SGD) is O(n²) for the
+ * kNN graph, which is too slow in-browser at tens of thousands of points, so we:
+ *   1. run the genuine `umapEmbed` on a strided LANDMARK subset (fast, faithful),
+ *   2. project every remaining cell onto that layout via an inverse-distance
+ *      weighted average of its nearest landmarks in PC space (out-of-sample
+ *      extension — the standard landmark trick).
+ * Result: a clean, sharp embedding of all n cells, computed in ~1–2 s with no
+ * backend. Positions are returned in [0,1]² (one per input row, in order).
+ */
+export function embedAllCells(
+  scores: number[][],
+  opts: { landmarks?: number; neighbors?: number; iters?: number } = {}
+): [number, number][] {
+  const n = scores.length;
+  if (n === 0) return [];
+  const L = Math.min(opts.landmarks ?? 2600, n);
+  const step = Math.max(1, Math.floor(n / L));
+  const landmarkIdx: number[] = [];
+  for (let i = 0; i < n && landmarkIdx.length < L; i += step) landmarkIdx.push(i);
+
+  const landmarkScores = landmarkIdx.map((i) => scores[i]);
+  const landmarkPos = umapEmbed(landmarkScores, { neighbors: opts.neighbors ?? 14, iters: opts.iters ?? 200 });
+  if (landmarkIdx.length === n) return landmarkPos;
+
+  const M = 4; // nearest landmarks blended per cell
+  const pos: [number, number][] = new Array(n);
+  const bestD = new Float64Array(M);
+  const bestJ = new Int32Array(M);
+  for (let i = 0; i < n; i++) {
+    for (let m = 0; m < M; m++) {
+      bestD[m] = Infinity;
+      bestJ[m] = 0;
+    }
+    const row = scores[i];
+    for (let l = 0; l < landmarkScores.length; l++) {
+      const d = sqdist(row, landmarkScores[l]);
+      // insert into the small sorted top-M list
+      if (d < bestD[M - 1]) {
+        let p = M - 1;
+        while (p > 0 && bestD[p - 1] > d) {
+          bestD[p] = bestD[p - 1];
+          bestJ[p] = bestJ[p - 1];
+          p--;
+        }
+        bestD[p] = d;
+        bestJ[p] = l;
+      }
+    }
+    let wx = 0;
+    let wy = 0;
+    let wsum = 0;
+    for (let m = 0; m < M; m++) {
+      const w = 1 / (bestD[m] + 1e-4);
+      wx += landmarkPos[bestJ[m]][0] * w;
+      wy += landmarkPos[bestJ[m]][1] * w;
+      wsum += w;
+    }
+    pos[i] = [wx / wsum, wy / wsum];
+  }
+  return pos;
+}
+
+export interface MarkerSign {
+  index: number;
+  name: string;
+  sign: "+" | "-" | "~";
+  value: number;
+  z: number;
+}
+
+/**
+ * Per-channel +/- signature of a cluster: z-score of the cluster's mean marker
+ * intensity vs. the whole-image mean. Used to name/annotate cell types
+ * ("CD8+ CD3+ …"). Excludes the nuclear channel (panel convention).
+ */
+export function clusterSignature(cells: Cell[], labels: number[], cluster: number, channelNames: string[]): MarkerSign[] {
+  const M = channelNames.length;
+  const panel = panelIndices(M);
+  const n = cells.length || 1;
+  const gMean = new Array(M).fill(0);
+  const gSd = new Array(M).fill(0);
+  for (const c of cells) for (let m = 0; m < M; m++) gMean[m] += c.markers[m];
+  for (let m = 0; m < M; m++) gMean[m] /= n;
+  for (const c of cells) for (let m = 0; m < M; m++) gSd[m] += (c.markers[m] - gMean[m]) ** 2;
+  for (let m = 0; m < M; m++) gSd[m] = Math.sqrt(gSd[m] / n) || 1;
+
+  const members = cells.filter((_, i) => labels[i] === cluster);
+  const cMean = new Array(M).fill(0);
+  for (const c of members) for (let m = 0; m < M; m++) cMean[m] += c.markers[m];
+  for (let m = 0; m < M; m++) cMean[m] /= members.length || 1;
+
+  const out: MarkerSign[] = panel.map((m) => {
+    const z = (cMean[m] - gMean[m]) / gSd[m];
+    const sign: "+" | "-" | "~" = z > 0.5 ? "+" : z < -0.5 ? "-" : "~";
+    return { index: m, name: channelNames[m], sign, value: cMean[m], z };
+  });
+  out.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
+  return out;
+}
+
 export interface ClusterSummary {
   cluster: number;
   count: number;
