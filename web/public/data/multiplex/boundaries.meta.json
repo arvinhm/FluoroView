@@ -1,0 +1,1 @@
+{"width": 8500, "height": 5625, "count": 33850, "format": "u32 count; per cell: u32 id, u16 npts, npts*(u16 x,u16 y)"}

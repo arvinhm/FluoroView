@@ -1,0 +1,76 @@
+{
+  "width": 8500,
+  "height": 5625,
+  "levels": 6,
+  "bits": 8,
+  "tile": 512,
+  "pixelSizeUm": null,
+  "channels": [
+    {
+      "name": "Nuclei",
+      "color": "#0050ff",
+      "domain": [
+        0,
+        255
+      ],
+      "contrastLimits": [
+        0,
+        255.0
+      ]
+    },
+    {
+      "name": "Membrane",
+      "color": "#ff00ff",
+      "domain": [
+        0,
+        255
+      ],
+      "contrastLimits": [
+        0,
+        255.0
+      ]
+    },
+    {
+      "name": "ECM",
+      "color": "#00dc5a",
+      "domain": [
+        0,
+        255
+      ],
+      "contrastLimits": [
+        0,
+        255.0
+      ]
+    },
+    {
+      "name": "Cytoplasm",
+      "color": "#00dcff",
+      "domain": [
+        0,
+        255
+      ],
+      "contrastLimits": [
+        0,
+        255.0
+      ]
+    },
+    {
+      "name": "Nuclear membrane",
+      "color": "#ffbf00",
+      "domain": [
+        0,
+        255
+      ],
+      "contrastLimits": [
+        0,
+        255.0
+      ]
+    }
+  ],
+  "previewWidth": 2125,
+  "previewHeight": 1406,
+  "previewScale": 0.25,
+  "image": "scan.ome.tif",
+  "boundaries": "boundaries.bin",
+  "source": "example"
+}
