@@ -46,6 +46,9 @@ export function looksLikeMask(filename: string): boolean {
 }
 
 const COLOR_HINTS: [RegExp, string][] = [
+  // "Nuclear membrane" / lamin must be matched before the nuclear-stain rule,
+  // otherwise it takes the DAPI blue that belongs to the nuclei channel.
+  [/nuclear.?(membrane|envelope)|lamin/i, "#ffbf00"],
   [/dapi|hoechst|nucle|dna|histone|h3/i, "#0050ff"],
   [/membrane|panck|cd45|e[- ]?cad|na.?k.?atpase|wga/i, "#ff00ff"],
   [/ecm|collagen|fibronectin|sma|vimentin/i, "#00dc5a"],

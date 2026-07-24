@@ -57,8 +57,10 @@ export function pixelSizeFromDescription(desc: string | undefined, xResolution?:
   if (xResolution && xResolution > 0 && (resolutionUnit === 2 || resolutionUnit === 3)) {
     const perUnit = resolutionUnit === 2 ? 25400 : 10000; // µm per inch / per cm
     const um = perUnit / xResolution;
-    // Reject implausible values (office scanners / defaulted tags).
-    if (um > 0.005 && um < 1000) return um;
+    // Only accept values a microscope could plausibly produce: a defaulted
+    // 72/96 dpi tag works out to hundreds of µm per pixel and would be a
+    // fabricated scale bar, so it is rejected rather than believed.
+    if (um > 0.005 && um < 50) return um;
   }
   return null;
 }

@@ -110,11 +110,10 @@ export function detectUpload(raws: RawFile[]): Detected {
 
   const masks = usable.filter((s) => s.role === "mask");
   const channels = usable.filter((s) => s.role === "channel");
-  // A lone mask-looking file is still an image the user may want to view.
-  if (!channels.length && masks.length) {
-    masks.forEach((m) => (m.role = "channel"));
-    return finish("images", masks, null, warnings);
-  }
+  // A mask on its own is almost always meant for the dataset already open, so it
+  // keeps the mask role; the review step lets the user switch it to a channel to
+  // just look at the label image instead.
+  if (!channels.length && masks.length) return finish("images", [], masks[0], warnings);
   if (masks.length > 1) warnings.push(`${masks.length} files look like masks; using ${masks[0].relPath}. Set the others to "channel" if that's wrong.`);
   const mask = masks[0] ?? null;
 

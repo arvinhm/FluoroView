@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Deck, OrthographicView } from "@deck.gl/core";
 import { PolygonLayer } from "@deck.gl/layers";
-import { MultiscaleImageLayer, ColorPaletteExtension } from "@hms-dbmi/viv";
+import { MultiscaleImageLayer, ImageLayer, ColorPaletteExtension, MAX_CHANNELS } from "@hms-dbmi/viv";
 import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { RoiShape } from "../../lib/types";
+import { pickCompositedChannels, safeContrastLimits, safeGamma } from "../../lib/channelGuards";
 import { fitRect, type ViewTransform } from "../../lib/compositor";
 import { clusterColor, scaleRgb } from "../../lib/palette";
 import { niceNumber } from "../../lib/format";
@@ -128,26 +129,29 @@ export default function VivDeckViewer() {
   const buildLayers = useCallback(() => {
     const layers: unknown[] = [];
     if (imageSource && imageSource.length) {
-      const n = activeChannels.length;
-      const selections = activeChannels.map((_, i) => ({ c: i, z: 0, t: 0 })).slice(0, n);
-      // Per-channel appearance → Viv props. Opacity is folded into the LUT color
-      // (additive blend), gamma is applied by GammaContrastExtension.
-      const colors = channels.map((c) => scaleRgb(c.color, c.opacity));
-      const channelsVisible = channels.map((c) => c.visible);
-      const contrastLimits = channels.map((c) => [c.contrastLimits[0], c.contrastLimits[1]] as [number, number]);
-      const gammas = channels.map((c) => c.gamma);
-      layers.push(
-        new MultiscaleImageLayer({
+      const usable = channels.filter((c) => c.index < activeChannels.length);
+      const picked = pickCompositedChannels(usable, MAX_CHANNELS);
+      if (picked.length) {
+        const multiscale = imageSource.length > 1;
+        const selections = picked.map((i) => ({ c: i, z: 0, t: 0 }));
+        // Per-channel appearance → Viv props. Opacity is folded into the LUT color
+        // (additive blend), gamma is applied by GammaContrastExtension.
+        const colors = picked.map((i) => scaleRgb(channels[i].color, channels[i].opacity));
+        const channelsVisible = picked.map((i) => channels[i].visible);
+        const contrastLimits = picked.map((i) => safeContrastLimits(channels[i]));
+        const gammas = picked.map((i) => safeGamma(channels[i].gamma));
+        const props = {
           id: "viv-image",
-          loader: imageSource,
+          loader: multiscale ? imageSource : imageSource[0],
           selections,
           contrastLimits,
           colors,
           channelsVisible,
           gammas,
           extensions: [new ColorPaletteExtension(), new GammaContrastExtension()],
-        } as never)
-      );
+        };
+        layers.push(multiscale ? new MultiscaleImageLayer(props as never) : new ImageLayer(props as never));
+      }
     }
     if (segmented && smoothedBoundaries && smoothedBoundaries.length) {
       layers.push(
@@ -358,7 +362,11 @@ export default function VivDeckViewer() {
     let cancelled = false;
     void (async () => {
       const chs = useStore.getState().channels;
+      const existing = useStore.getState().channelStats;
       for (let i = 0; i < chs.length; i++) {
+        // Uploads measure their histograms while decoding (on a much larger
+        // sample than the coarsest tile) — don't overwrite those.
+        if (existing[i]) continue;
         try {
           const hist = await histogramFromLoader(imageSource as never, { c: chs[i].index, z: 0, t: 0 }, 128, chs[i].domain);
           if (cancelled) return;

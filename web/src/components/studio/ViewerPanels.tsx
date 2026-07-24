@@ -6,6 +6,7 @@ import { cellsInRoi, shapeArea, shapeKindLabel } from "../../lib/roi";
 import { exportRoisZip } from "../../lib/roiExport";
 import { appearanceOf, presetToJson, newPresetId } from "../../lib/presets";
 import { formatArea } from "../../lib/format";
+import { MAX_COMPOSITED_CHANNELS } from "../../lib/channelGuards";
 import { toast } from "../../lib/toast";
 import { Panel, Slider, Chip } from "../ui";
 import { ChannelHistogram } from "./ChannelHistogram";
@@ -34,6 +35,7 @@ export function ChannelPanel() {
   const channels = useStore((s) => s.channels);
   const channelStats = useStore((s) => s.channelStats);
   const activeChannels = useStore((s) => s.activeChannels);
+  const imageSource = useStore((s) => s.imageSource);
   const toggle = useStore((s) => s.toggleChannel);
   const soloChannel = useStore((s) => s.soloChannel);
   const setContrastLimits = useStore((s) => s.setContrastLimits);
@@ -62,6 +64,12 @@ export function ChannelPanel() {
           <PresetsMenu />
         </div>
       </div>
+      {!!imageSource && channels.length > MAX_COMPOSITED_CHANNELS && (
+        <p className="border-b border-white/10 bg-amber-400/[0.07] px-4 py-2 text-[10px] leading-relaxed text-amber-100/85">
+          {channels.length} channels loaded — the GPU composites {MAX_COMPOSITED_CHANNELS} at a time, so the first {MAX_COMPOSITED_CHANNELS} you switch on are rendered.
+          Toggle channels to choose which.
+        </p>
+      )}
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {channels.map((c) => {
           const mk = activeChannels[c.index];

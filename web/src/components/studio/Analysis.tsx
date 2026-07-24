@@ -40,6 +40,19 @@ export default function Analysis() {
     );
   }
 
+  // An uploaded image without a segmentation has no per-cell table to analyse.
+  if (!tissue.cells.length) {
+    return (
+      <Panel className="p-8" strong>
+        <EmptyState
+          icon={<Network className="h-6 w-6" />}
+          title="No cells in this dataset yet"
+          hint="Clustering, UMAP and the marker heatmap work per cell. Upload a label mask (Upload data → set a file's role to “label mask”) and FluoroView will derive cells, outlines and per-channel means from your own segmentation."
+        />
+      </Panel>
+    );
+  }
+
   const run = () => {
     setBusy(true);
     requestAnimationFrame(() =>
