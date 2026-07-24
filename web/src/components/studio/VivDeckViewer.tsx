@@ -51,6 +51,7 @@ export default function VivDeckViewer() {
   const tissue = useStore((s) => s.tissue);
   const scanMeta = useStore((s) => s.scanMeta);
   const imageSource = useStore((s) => s.imageSource);
+  const datasetId = useStore((s) => s.datasetId);
   const boundaryPolys = useStore((s) => s.boundaryPolys);
   const channels = useStore((s) => s.channels);
   const activeChannels = useStore((s) => s.activeChannels);
@@ -141,7 +142,10 @@ export default function VivDeckViewer() {
         const contrastLimits = picked.map((i) => safeContrastLimits(channels[i]));
         const gammas = picked.map((i) => safeGamma(channels[i].gamma));
         const props = {
-          id: "viv-image",
+          // The id carries the dataset so switching datasets builds a NEW layer:
+          // deck's tile cache lives on the layer instance, so a shared id made it
+          // paint the previous dataset's tiles under the new one.
+          id: `viv-image-${datasetId}`,
           loader: multiscale ? imageSource : imageSource[0],
           selections,
           contrastLimits,
@@ -172,7 +176,7 @@ export default function VivDeckViewer() {
       );
     }
     return layers;
-  }, [imageSource, activeChannels, channels, segmented, smoothedBoundaries]);
+  }, [imageSource, activeChannels, channels, segmented, smoothedBoundaries, datasetId]);
 
   const drawOverlay = useCallback(() => {
     const overlay = overlayRef.current;

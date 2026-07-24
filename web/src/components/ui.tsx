@@ -104,6 +104,7 @@ export function Slider({
   step = 0.01,
   onChange,
   accent = "#22d3ee",
+  label,
 }: {
   value: number;
   min: number;
@@ -111,6 +112,7 @@ export function Slider({
   step?: number;
   onChange: (v: number) => void;
   accent?: string;
+  label?: string;
 }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
@@ -121,6 +123,7 @@ export function Slider({
       step={step}
       value={value}
       onChange={(e) => onChange(parseFloat(e.target.value))}
+      aria-label={label}
       className="fv-slider w-full"
       style={
         {

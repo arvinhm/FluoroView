@@ -184,6 +184,19 @@ export interface IntensitySource {
   domains: [number, number][];
 }
 
+/**
+ * Intensity source backed by the 8-bit preview planes (`ChannelMaps.maps`).
+ *
+ * Those planes are already stretched into each channel's own domain, so the
+ * sampler has to normalise them over 0–255. Handing it the raw sensor domain
+ * instead (e.g. [0, 6500] for 16-bit data) divides every mean by ~25x and
+ * collapses all per-cell markers to ~0, which silently guts phenotyping and
+ * clustering — so build this source through here rather than by hand.
+ */
+export function previewIntensity(planes: NumArray[], width: number, height: number): IntensitySource {
+  return { planes, width, height, domains: planes.map(() => [0, 255] as [number, number]) };
+}
+
 export interface AnalyzeMaskOptions {
   /** mask px → world px scale (image pixel space of the active dataset) */
   scaleX?: number;

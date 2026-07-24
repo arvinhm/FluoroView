@@ -109,8 +109,8 @@ export function ChannelPanel() {
                     onAuto={() => autoContrast(c.index)}
                     onReset={() => resetChannel(c.index)}
                   />
-                  <LabeledSlider label="γ" value={c.gamma} min={0.2} max={4} step={0.05} onChange={(v) => setGamma(c.index, v)} accent={c.color} fixed={2} />
-                  <LabeledSlider label="opacity" value={c.opacity} min={0} max={1} step={0.01} onChange={(v) => setOpacity(c.index, v)} accent={c.color} fixed={2} />
+                  <LabeledSlider label="γ" name={`${mk.name} gamma`} value={c.gamma} min={0.2} max={4} step={0.05} onChange={(v) => setGamma(c.index, v)} accent={c.color} fixed={2} />
+                  <LabeledSlider label="opacity" name={`${mk.name} opacity`} value={c.opacity} min={0} max={1} step={0.01} onChange={(v) => setOpacity(c.index, v)} accent={c.color} fixed={2} />
                   <div className="flex items-center gap-2">
                     <span className="w-12 text-[11px] text-white/45">color</span>
                     <label className="relative h-6 w-9 cursor-pointer overflow-hidden rounded-md ring-1 ring-white/15" title="Channel color" style={{ background: c.color }}>
@@ -365,11 +365,11 @@ export function RoiListPanel() {
   );
 }
 
-export function LabeledSlider({ label, value, min, max, step, onChange, accent, fixed = 1 }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; accent: string; fixed?: number }) {
+export function LabeledSlider({ label, value, min, max, step, onChange, accent, fixed = 1, name }: { label: string; value: number; min: number; max: number; step?: number; onChange: (v: number) => void; accent: string; fixed?: number; name?: string }) {
   return (
     <div className="flex items-center gap-2">
       <span className="w-12 flex-shrink-0 text-[11px] text-white/45">{label}</span>
-      <Slider value={value} min={min} max={max} step={step} onChange={onChange} accent={accent} />
+      <Slider value={value} min={min} max={max} step={step} onChange={onChange} accent={accent} label={name ?? label} />
       <span className="w-9 flex-shrink-0 text-right font-mono text-[11px] text-white/55">{value.toFixed(fixed)}</span>
     </div>
   );

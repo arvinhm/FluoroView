@@ -3,6 +3,7 @@ import type { ChannelMaps } from "../synth";
 import type { DatasetDef } from "../datasets";
 import type { LoadedDataset } from "../loadReal";
 import { binHistogram } from "../histogram";
+import { previewIntensity } from "./labelMask";
 import { loadVivImage, loadVivOmeZarrFiles, loadVivOmeZarrUrl, type LoadedVivImage, type VivLoader } from "../vivSource";
 import { createArrayLoader } from "./arraySource";
 import { assignChannelColors, guessChannelKind } from "./names";
@@ -238,12 +239,7 @@ async function fromVivLoader(
         relPath: detected.mask.relPath,
         worldWidth: viv.width,
         worldHeight: viv.height,
-        intensity: {
-          planes: maps.maps as unknown as NumArray[],
-          width: maps.width,
-          height: maps.height,
-          domains,
-        },
+        intensity: previewIntensity(maps.maps as unknown as NumArray[], maps.width, maps.height),
       },
       onProgress
     );
@@ -346,5 +342,6 @@ export async function buildUrlDataset(url: string, opts: BuildOptions = {}, onPr
   const viv = isZarr ? await loadVivOmeZarrUrl(trimmed.replace(/\/$/, "")) : await loadVivImage(trimmed);
   const name = trimmed.replace(/\/$/, "").split("/").pop() || trimmed;
   const detected: Detected = { kind: isZarr ? "ome-zarr-dir" : "ome-tiff", files: [], mask: null, warnings: [] };
-  return fromVivLoader({ ...detected }, { ...opts, label: opts.label ?? name }, viv, isZarr ? "remote OME-Zarr" : "remote OME-TIFF", onProgress);
+  // A blank name field must fall back to the URL's filename, so `||` not `??`.
+  return fromVivLoader({ ...detected }, { ...opts, label: opts.label?.trim() || name }, viv, isZarr ? "remote OME-Zarr" : "remote OME-TIFF", onProgress);
 }

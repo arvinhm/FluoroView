@@ -7,6 +7,7 @@ import { toast } from "../../lib/toast";
 import { detectUpload, readDataTransfer, readFileList, type RawFile } from "../../lib/upload/detect";
 import { buildUploadedDataset, buildUrlDataset } from "../../lib/upload/buildDataset";
 import { buildMaskInWorker } from "../../lib/upload/workerClient";
+import { previewIntensity } from "../../lib/upload/labelMask";
 import { DEFAULT_BUDGET_BYTES } from "../../lib/upload/jobs";
 import type { Detected, StagedFile, UploadProgress } from "../../lib/upload/types";
 import type { NumArray } from "../../lib/upload/pyramid";
@@ -116,12 +117,7 @@ export default function UploadDialog({ open, onClose, pending }: { open: boolean
             relPath: mask.relPath,
             worldWidth: tissue!.width,
             worldHeight: tissue!.height,
-            intensity: {
-              planes: maps!.maps as unknown as NumArray[],
-              width: maps!.width,
-              height: maps!.height,
-              domains: channels.map((c) => c.domain),
-            },
+            intensity: previewIntensity(maps!.maps as unknown as NumArray[], maps!.width, maps!.height),
           },
           setProgress
         );

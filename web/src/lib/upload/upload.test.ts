@@ -3,7 +3,7 @@ import { assignChannelColors, cleanChannelName, guessChannelKind, looksLikeMask 
 import { classifyFile, detectUpload } from "./detect";
 import { buildLevels, downsample2x, dtypeRange, makePreview, measureDomain, planDownsample } from "./pyramid";
 import { createArrayLoader } from "./arraySource";
-import { analyzeLabelMask, scanLabels, simplifyRing, traceContour } from "./labelMask";
+import { analyzeLabelMask, previewIntensity, scanLabels, simplifyRing, traceContour } from "./labelMask";
 import { promoteDtype } from "./jobs";
 import { pixelSizeFromDescription, physicalToUm } from "./decode";
 import { pickCompositedChannels, safeContrastLimits, safeGamma } from "../channelGuards";
@@ -287,6 +287,25 @@ describe("label mask → cells and outlines", () => {
 
   it("rejects an image with no labels", () => {
     expect(() => analyzeLabelMask(new Uint8Array(16), 4, 4, {})).toThrow(/segmentation mask/i);
+  });
+
+  // Regression: sampling the 8-bit preview planes while passing the raw 16-bit
+  // sensor domain divided every mean by ~25x, so all per-cell markers came out
+  // ~0 and clustering/phenotyping on an uploaded mask was meaningless.
+  it("normalises preview-plane means over 0–255, not the raw sensor domain", () => {
+    const plane = new Uint8ClampedArray(w * h);
+    plane.fill(0);
+    for (const i of [1 * w + 1, 1 * w + 2, 2 * w + 1, 2 * w + 2]) plane[i] = 128;
+    const src = previewIntensity([plane as unknown as Float32Array], w, h);
+    expect(src.domains[0]).toEqual([0, 255]);
+
+    const good = analyzeLabelMask(labels, w, h, { intensity: src });
+    expect(good.cells[0].markers[0]).toBeCloseTo(128 / 255, 2);
+
+    const wrong = analyzeLabelMask(labels, w, h, {
+      intensity: { planes: [plane as unknown as Float32Array], width: w, height: h, domains: [[0, 6500]] },
+    });
+    expect(wrong.cells[0].markers[0]).toBeLessThan(0.03);
   });
 });
 
