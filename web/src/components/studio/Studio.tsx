@@ -1,12 +1,16 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Eye, Network, Sparkles, Circle, Database, Cpu } from "lucide-react";
+import { Eye, Network, Sparkles, Circle, Database, Cpu, Download, Upload } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
+import { toast } from "../../lib/toast";
 import type { ViewKey } from "../../lib/types";
-import Viewer from "./Viewer";
-import Analysis from "./Analysis";
-import AIStudio from "./AIStudio";
+import { DATASETS, datasetById } from "../../lib/datasets";
+import ErrorBoundary from "../ErrorBoundary";
+
+const Viewer = lazy(() => import("./Viewer"));
+const Analysis = lazy(() => import("./Analysis"));
+const AIStudio = lazy(() => import("./AIStudio"));
 
 const TABS: { key: ViewKey; label: string; icon: typeof Eye }[] = [
   { key: "viewer", label: "Viewer", icon: Eye },
@@ -19,20 +23,40 @@ export default function Studio() {
   const setView = useStore((s) => s.setView);
   const ensureData = useStore((s) => s.ensureData);
   const tissue = useStore((s) => s.tissue);
+  const loading = useStore((s) => s.loading);
+  const datasetId = useStore((s) => s.datasetId);
+  const loadDataset = useStore((s) => s.loadDataset);
   const backend = useStore((s) => s.backendOnline);
-  const [ready, setReady] = useState(!!tissue);
+  const exportSession = useStore((s) => s.exportSession);
+  const importSession = useStore((s) => s.importSession);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (tissue) {
-      setReady(true);
-      return;
+    ensureData();
+  }, [ensureData]);
+
+  const ready = !!tissue;
+
+  const saveSession = () => {
+    const blob = new Blob([JSON.stringify(exportSession(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "session.fluoroview.json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    toast.success("Session saved", "session.fluoroview.json downloaded");
+  };
+
+  const loadSession = async (file: File) => {
+    try {
+      const data = JSON.parse(await file.text());
+      await importSession(data);
+      toast.success("Session loaded", `${data.rois?.length ?? 0} ROI(s) restored`);
+    } catch (e) {
+      toast.error("Couldn't load session", e instanceof Error ? e.message : String(e));
     }
-    const id = setTimeout(() => {
-      ensureData();
-      setReady(true);
-    }, 40);
-    return () => clearTimeout(id);
-  }, [tissue, ensureData]);
+  };
 
   return (
     <div className="mx-auto min-h-screen max-w-[1600px] px-3 pb-10 pt-24 sm:px-5">
@@ -56,44 +80,78 @@ export default function Studio() {
           ))}
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <label className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60" title="Active dataset">
             <Database className="h-3.5 w-3.5 text-cyan-300" />
-            Demo · tumor-immune margin
-          </span>
+            <select
+              value={datasetId}
+              onChange={(e) => void loadDataset(datasetById(e.target.value))}
+              className="max-w-[190px] cursor-pointer bg-transparent font-medium text-white/80 outline-none"
+              aria-label="Select dataset"
+            >
+              {DATASETS.map((d) => (
+                <option key={d.id} value={d.id} className="bg-ink-800">
+                  {d.short}
+                </option>
+              ))}
+            </select>
+          </label>
           <span className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60">
             <Circle className={clsx("h-2 w-2", tissue ? "fill-emerald-400 text-emerald-400" : "fill-amber-400 text-amber-400")} />
-            {tissue ? `${tissue.cells.length.toLocaleString()} cells` : "loading…"}
+            {tissue ? `${tissue.cells.length.toLocaleString()} cells` : loading ? "loading…" : "—"}
           </span>
           <span className="inline-flex items-center gap-1.5 rounded-full glass px-3 py-1.5 text-white/60">
             <Cpu className="h-3.5 w-3.5 text-violet-300" />
             {backend === null ? "checking backend" : backend ? "backend online" : "on-device"}
           </span>
+          <div className="inline-flex items-center gap-1 rounded-full glass p-1">
+            <button onClick={saveSession} title="Save session (.fluoroview.json)" aria-label="Save session" className="grid h-7 w-7 place-items-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white">
+              <Download className="h-3.5 w-3.5" />
+            </button>
+            <button onClick={() => fileRef.current?.click()} title="Load session" aria-label="Load session" className="grid h-7 w-7 place-items-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white">
+              <Upload className="h-3.5 w-3.5" />
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void loadSession(f);
+                e.currentTarget.value = "";
+              }}
+            />
+          </div>
         </div>
       </div>
 
       {!ready ? (
-        <Loader />
+        <Loader label={loading ? "Loading dataset…" : "Preparing…"} />
       ) : (
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={view}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-          >
-            {view === "viewer" && <Viewer />}
-            {view === "analysis" && <Analysis />}
-            {view === "ai" && <AIStudio />}
-          </motion.div>
-        </AnimatePresence>
+        <ErrorBoundary scope="Studio" key={`eb-${view}`}>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={view}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+            >
+              <Suspense fallback={<Loader label="Loading view…" />}>
+                {view === "viewer" && <Viewer />}
+                {view === "analysis" && <Analysis />}
+                {view === "ai" && <AIStudio />}
+              </Suspense>
+            </motion.div>
+          </AnimatePresence>
+        </ErrorBoundary>
       )}
     </div>
   );
 }
 
-function Loader() {
+function Loader({ label }: { label: string }) {
   return (
     <div className="grid h-[60vh] place-items-center">
       <div className="text-center">
@@ -101,7 +159,7 @@ function Loader() {
           <span className="absolute inset-0 animate-spinslow rounded-full border-2 border-transparent border-t-cyan-400 border-r-violet-500" />
           <span className="absolute inset-2 animate-pulseglow rounded-full bg-gradient-to-br from-cyan-400/40 to-pink-500/40 blur-sm" />
         </div>
-        <p className="mt-5 text-sm text-white/55">Preparing demo tissue &amp; channel maps…</p>
+        <p className="mt-5 text-sm text-white/55">{label}</p>
       </div>
     </div>
   );

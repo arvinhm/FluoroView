@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Maximize2, ZoomIn, ZoomOut, SquareDashedMousePointer, Trash2, ScanSearch, Layers } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Layers, Trash2, MapPin, Download, Loader2 } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
-import { MARKERS } from "../../lib/synth";
-import { CELL_TYPES } from "../../lib/synth";
+import type { RoiShape } from "../../lib/types";
 import { Compositor, fitRect, type ViewTransform } from "../../lib/compositor";
 import { clusterColor } from "../../lib/palette";
+import { niceNumber } from "../../lib/format";
+import { roiBounds, shapeArea, shapeKindLabel, translateShape, pointInShape, cellsInRoi } from "../../lib/roi";
+import { exportRoisZip } from "../../lib/roiExport";
+import { toast } from "../../lib/toast";
 import { Panel, Slider, Chip } from "../ui";
+import RoiAnalysis from "./RoiAnalysis";
 
-const UM_PER_UNIT = 0.5; // nominal micron scale for the demo tissue
 const ZOOM_MIN = 0.5;
 const ZOOM_MAX = 40;
+
+type RoiTool = "pan" | "rect" | "circle" | "polygon";
 
 interface V {
   zoom: number;
@@ -18,23 +23,40 @@ interface V {
   panY: number;
 }
 
-const PRESETS: { name: string; markers: string[] }[] = [
-  { name: "Immune", markers: ["DAPI", "CD3", "CD8", "CD68"] },
-  { name: "Tumor", markers: ["DAPI", "PanCK", "Ki67", "PD-L1"] },
-  { name: "Structure", markers: ["DAPI", "SMA", "CD31", "PanCK"] },
-  { name: "All", markers: MARKERS.map((m) => m.name) },
-];
+type DrawState =
+  | { kind: "rect" | "circle"; x0: number; y0: number; x: number; y: number }
+  | { kind: "polygon"; points: [number, number][]; cur: [number, number] };
 
 export default function Viewer() {
   const tissue = useStore((s) => s.tissue);
   const maps = useStore((s) => s.maps);
   const channels = useStore((s) => s.channels);
+  const activeChannels = useStore((s) => s.activeChannels);
+  const cellTypes = useStore((s) => s.cellTypes);
+  const pixelSizeUm = useStore((s) => s.pixelSizeUm);
   const rois = useStore((s) => s.rois);
   const addRoi = useStore((s) => s.addRoi);
-  const clearRois = useStore((s) => s.clearRois);
+  const updateRoi = useStore((s) => s.updateRoi);
+  const removeRoi = useStore((s) => s.removeRoi);
+  const selectedRoiId = useStore((s) => s.selectedRoiId);
+  const selectRoi = useStore((s) => s.selectRoi);
   const segmented = useStore((s) => s.segmented);
   const setSegmented = useStore((s) => s.setSegmented);
   const presetChannels = useStore((s) => s.presetChannels);
+  const showAllChannels = useStore((s) => s.showAllChannels);
+  const [roiTool, setRoiTool] = useState<RoiTool>("pan");
+
+  const presets = useMemo(() => {
+    const names = activeChannels.map((c) => c.name);
+    const defaults = activeChannels.filter((c) => c.defaultOn).map((c) => c.name);
+    const nuclear = activeChannels.filter((c) => c.kind === "nuclear").map((c) => c.name);
+    const out: { name: string; markers: string[] }[] = [
+      { name: "Default", markers: defaults.length ? defaults : names },
+    ];
+    if (nuclear.length) out.push({ name: "Nuclei", markers: nuclear });
+    out.push({ name: "All", markers: names });
+    return out;
+  }, [activeChannels]);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const glRef = useRef<HTMLCanvasElement>(null);
@@ -43,8 +65,8 @@ export default function Viewer() {
   const viewRef = useRef<V>({ zoom: 1, panX: 0, panY: 0 });
   const rafRef = useRef(0);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
-  const roiDrawRef = useRef<{ x0: number; y0: number; x: number; y: number } | null>(null);
-  const [roiMode, setRoiMode] = useState(false);
+  const drawRef = useRef<DrawState | null>(null);
+  const moveRef = useRef<{ id: number; lastTx: number; lastTy: number } | null>(null);
   const [glOk, setGlOk] = useState(true);
   const [zoomPct, setZoomPct] = useState(100);
   const [hoverInfo, setHoverInfo] = useState<{ x: number; y: number; name: string; color: string } | null>(null);
@@ -85,71 +107,125 @@ export default function Viewer() {
     const toX = (tx: number) => rect.x + tx * k;
     const toY = (ty: number) => rect.y + ty * k;
 
-    // segmentation outlines
+    // segmentation overlay (handles 10k+ cells): batch by color and draw filled
+    // dots when zoomed out, outlined circles when zoomed in.
     if (segmented) {
-      ctx.lineWidth = Math.max(0.6, k * 0.9);
+      const paths = new Map<string, Path2D>();
+      const strokeMode = k > 0.9; // roughly: individual cells are big enough to outline
+      ctx.lineWidth = Math.max(0.5, Math.min(2, k * 0.8));
       for (const c of tissue.cells) {
         const sx = toX(c.x);
         const sy = toY(c.y);
         if (sx < -20 || sy < -20 || sx > cw + 20 || sy > ch + 20) continue;
-        const col = c.cluster != null ? clusterColor(c.cluster) : CELL_TYPES[c.typeIndex].color;
-        ctx.strokeStyle = hexA(col, 0.85);
-        ctx.beginPath();
-        ctx.arc(sx, sy, Math.max(1.4, c.r * k), 0, Math.PI * 2);
-        ctx.stroke();
+        const col = c.cluster != null ? clusterColor(c.cluster) : cellTypes ? cellTypes[c.typeIndex]?.color ?? "#22d3ee" : "#22d3ee";
+        let path = paths.get(col);
+        if (!path) {
+          path = new Path2D();
+          paths.set(col, path);
+        }
+        const rr = Math.max(strokeMode ? 1.4 : 0.7, c.r * k);
+        path.moveTo(sx + rr, sy);
+        path.arc(sx, sy, rr, 0, Math.PI * 2);
+      }
+      for (const [col, path] of paths) {
+        if (strokeMode) {
+          ctx.strokeStyle = hexA(col, 0.85);
+          ctx.stroke(path);
+        } else {
+          ctx.fillStyle = hexA(col, 0.85);
+          ctx.fill(path);
+        }
       }
     }
 
-    // ROIs
-    ctx.lineWidth = 2;
+    // ROIs (rect / circle / polygon). Labels are drawn at a fixed screen size
+    // so they stay legible and zoom-independent.
     ctx.font = "600 12px Inter, sans-serif";
-    for (const r of rois) {
-      const x = toX(r.x);
-      const y = toY(r.y);
-      const w = r.w * k;
-      const h = r.h * k;
-      ctx.strokeStyle = "#22d3ee";
-      ctx.fillStyle = "rgba(34,211,238,0.08)";
+    const shapePath = (s: RoiShape) => {
       ctx.beginPath();
-      roundRect(ctx, x, y, w, h, 6);
+      if (s.kind === "rect") roundRect(ctx, toX(s.x), toY(s.y), s.w * k, s.h * k, 4);
+      else if (s.kind === "circle") ctx.arc(toX(s.cx), toY(s.cy), s.r * k, 0, Math.PI * 2);
+      else {
+        s.points.forEach((p, i) => (i === 0 ? ctx.moveTo(toX(p[0]), toY(p[1])) : ctx.lineTo(toX(p[0]), toY(p[1]))));
+        ctx.closePath();
+      }
+    };
+    for (const r of rois) {
+      const selected = r.id === selectedRoiId;
+      shapePath(r.shape);
+      ctx.fillStyle = hexA(r.color, selected ? 0.16 : 0.08);
       ctx.fill();
+      ctx.lineWidth = selected ? 2.75 : 1.75;
+      ctx.strokeStyle = r.color;
       ctx.stroke();
-      ctx.fillStyle = "#67e8f9";
-      ctx.fillText(r.label, x + 6, y - 6);
+      const b = roiBounds(r.shape);
+      const lx = toX(b.x);
+      const ly = toY(b.y);
+      const tw = ctx.measureText(r.label).width;
+      ctx.fillStyle = "rgba(5,7,13,0.72)";
+      roundRect(ctx, lx, ly - 18, tw + 10, 16, 4);
+      ctx.fill();
+      ctx.fillStyle = r.color;
+      ctx.fillText(r.label, lx + 5, ly - 6);
+      if (r.comments.length) {
+        ctx.fillStyle = "#f0abfc";
+        ctx.beginPath();
+        ctx.arc(lx + tw + 14, ly - 10, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
-    // active ROI being drawn
-    const rd = roiDrawRef.current;
-    if (rd) {
-      const x = toX(Math.min(rd.x0, rd.x));
-      const y = toY(Math.min(rd.y0, rd.y));
-      const w = Math.abs(rd.x - rd.x0) * k;
-      const h = Math.abs(rd.y - rd.y0) * k;
-      ctx.strokeStyle = "#a78bfa";
+    // active shape being drawn
+    const d = drawRef.current;
+    if (d) {
       ctx.setLineDash([6, 4]);
-      ctx.strokeRect(x, y, w, h);
+      ctx.lineWidth = 1.75;
+      ctx.strokeStyle = "#a78bfa";
+      ctx.fillStyle = "rgba(167,139,250,0.10)";
+      ctx.beginPath();
+      if (d.kind === "polygon") {
+        const pts = [...d.points, d.cur];
+        pts.forEach((p, i) => (i === 0 ? ctx.moveTo(toX(p[0]), toY(p[1])) : ctx.lineTo(toX(p[0]), toY(p[1]))));
+      } else if (d.kind === "rect") {
+        ctx.rect(toX(Math.min(d.x0, d.x)), toY(Math.min(d.y0, d.y)), Math.abs(d.x - d.x0) * k, Math.abs(d.y - d.y0) * k);
+      } else {
+        ctx.arc(toX(d.x0), toY(d.y0), Math.hypot(d.x - d.x0, d.y - d.y0) * k, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      ctx.stroke();
       ctx.setLineDash([]);
     }
 
-    // scale bar
-    const targetUm = 100;
-    const barPx = (targetUm / UM_PER_UNIT) * k;
-    if (barPx > 20 && barPx < cw * 0.8) {
+    // scale bar — physical microns when the pixel size is known, else pixels.
+    const targetScreen = Math.min(cw * 0.26, 170);
+    let barLabel: string;
+    let barPx: number;
+    if (pixelSizeUm && pixelSizeUm > 0) {
+      const screenPerUm = k / pixelSizeUm;
+      const um = niceNumber(targetScreen / screenPerUm);
+      barPx = um * screenPerUm;
+      barLabel = um >= 1000 ? `${um / 1000} mm` : `${um} µm`;
+    } else {
+      const px = niceNumber(targetScreen / k);
+      barPx = px * k;
+      barLabel = `${px.toLocaleString()} px`;
+    }
+    if (barPx > 24 && barPx < cw * 0.9) {
       const bx = cw - barPx - 24;
       const by = ch - 28;
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+      ctx.strokeStyle = "rgba(255,255,255,0.92)";
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(bx, by);
       ctx.lineTo(bx + barPx, by);
       ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
       ctx.font = "600 11px Inter, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText(`${targetUm} µm`, bx + barPx / 2, by - 7);
+      ctx.fillText(barLabel, bx + barPx / 2, by - 7);
       ctx.textAlign = "left";
     }
-  }, [maps, tissue, rois, segmented, getVT]);
+  }, [maps, tissue, rois, selectedRoiId, segmented, getVT, cellTypes, pixelSizeUm]);
 
   const render = useCallback(() => {
     const comp = compRef.current;
@@ -236,7 +312,7 @@ export default function Viewer() {
     setGlOk(comp.ok);
     if (comp.ok) {
       comp.upload(maps);
-      comp.setChannels(channels.map((c) => ({ ...MARKERS[c.index], color: MARKERS[c.index].color, gain: c.gain, gamma: c.gamma, visible: c.visible })));
+      comp.setChannels(channels.map((c) => ({ color: activeChannels[c.index]?.color ?? "#ffffff", gain: c.gain, gamma: c.gamma, visible: c.visible })));
     }
     schedule();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -246,10 +322,10 @@ export default function Viewer() {
   useEffect(() => {
     const comp = compRef.current;
     if (comp && comp.ok) {
-      comp.setChannels(channels.map((c) => ({ color: MARKERS[c.index].color, gain: c.gain, gamma: c.gamma, visible: c.visible })));
+      comp.setChannels(channels.map((c) => ({ color: activeChannels[c.index]?.color ?? "#ffffff", gain: c.gain, gamma: c.gamma, visible: c.visible })));
     }
     schedule();
-  }, [channels, schedule]);
+  }, [channels, activeChannels, schedule]);
 
   useEffect(() => {
     schedule();
@@ -312,6 +388,29 @@ export default function Viewer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [zoomByCenter, fit, oneToOne]);
 
+  // ROI keyboard: tool shortcuts, Delete removes selection, Esc cancels.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (e.key === "Escape") {
+        drawRef.current = null;
+        setRoiTool("pan");
+        scheduleRef.current();
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedRoiId != null) {
+        e.preventDefault();
+        removeRoi(selectedRoiId);
+      } else if (key === "v") setRoiTool("pan");
+      else if (key === "r") setRoiTool("rect");
+      else if (key === "c") setRoiTool("circle");
+      else if (key === "p") setRoiTool("polygon");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedRoiId, removeRoi]);
+
   const screenToTissue = (clientX: number, clientY: number) => {
     const el = wrapRef.current!;
     const r = el.getBoundingClientRect();
@@ -322,22 +421,58 @@ export default function Viewer() {
     return { tx: (sx - rect.x) / k, ty: (sy - rect.y) / k, sx, sy };
   };
 
+  const finishShape = (shape: RoiShape, minPx = 6) => {
+    const b = roiBounds(shape);
+    if (shape.kind !== "polygon" && Math.max(b.w, b.h) < minPx) return;
+    addRoi({ id: Date.now(), label: `ROI ${rois.length + 1}`, color: clusterColor(rois.length), shape, comments: [] });
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    if (roiMode) {
-      const p = screenToTissue(e.clientX, e.clientY);
-      roiDrawRef.current = { x0: p.tx, y0: p.ty, x: p.tx, y: p.ty };
-    } else {
-      dragRef.current = { x: e.clientX, y: e.clientY };
+    const p = screenToTissue(e.clientX, e.clientY);
+    if (roiTool === "rect" || roiTool === "circle") {
+      drawRef.current = { kind: roiTool, x0: p.tx, y0: p.ty, x: p.tx, y: p.ty };
+      return;
     }
+    if (roiTool === "polygon") {
+      drawRef.current = { kind: "polygon", points: [[p.tx, p.ty]], cur: [p.tx, p.ty] };
+      return;
+    }
+    // pan tool: clicking inside an ROI selects & moves it; empty space pans.
+    const hit = [...rois].reverse().find((r) => pointInShape(r.shape, p.tx, p.ty));
+    if (hit) {
+      selectRoi(hit.id);
+      moveRef.current = { id: hit.id, lastTx: p.tx, lastTy: p.ty };
+      return;
+    }
+    dragRef.current = { x: e.clientX, y: e.clientY };
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
-    if (roiMode && roiDrawRef.current) {
+    const d = drawRef.current;
+    if (d && maps) {
       const p = screenToTissue(e.clientX, e.clientY);
-      roiDrawRef.current.x = p.tx;
-      roiDrawRef.current.y = p.ty;
+      if (d.kind === "polygon") {
+        const rect = fitRect(maps.width, maps.height, getVT());
+        const k = maps.scale * rect.s;
+        const last = d.points[d.points.length - 1];
+        if (Math.hypot(p.tx - last[0], p.ty - last[1]) * k > 3) d.points.push([p.tx, p.ty]);
+        d.cur = [p.tx, p.ty];
+      } else {
+        d.x = p.tx;
+        d.y = p.ty;
+      }
       schedule();
+      return;
+    }
+    if (moveRef.current) {
+      const p = screenToTissue(e.clientX, e.clientY);
+      const dx = p.tx - moveRef.current.lastTx;
+      const dy = p.ty - moveRef.current.lastTy;
+      moveRef.current.lastTx = p.tx;
+      moveRef.current.lastTy = p.ty;
+      const r = rois.find((x) => x.id === moveRef.current!.id);
+      if (r) updateRoi(r.id, { shape: translateShape(r.shape, dx, dy) });
       return;
     }
     if (dragRef.current) {
@@ -349,60 +484,67 @@ export default function Viewer() {
       schedule();
       return;
     }
-    // hover to identify nearest cell
+    // hover to identify the nearest cell (cell ids are not array indices)
     if (tissue && maps) {
       const p = screenToTissue(e.clientX, e.clientY);
-      let best = -1;
+      let bestCell: (typeof tissue.cells)[number] | null = null;
       let bd = 18 * 18;
       for (const c of tissue.cells) {
         const dd = (c.x - p.tx) ** 2 + (c.y - p.ty) ** 2;
         if (dd < bd) {
           bd = dd;
-          best = c.id;
+          bestCell = c;
         }
       }
-      if (best >= 0) {
-        const c = tissue.cells[best];
-        setHoverInfo({ x: p.sx, y: p.sy, name: CELL_TYPES[c.typeIndex].name, color: CELL_TYPES[c.typeIndex].color });
+      if (bestCell) {
+        const c = bestCell;
+        const name = cellTypes ? cellTypes[c.typeIndex].name : c.cluster != null ? `Cluster ${c.cluster}` : `Cell #${c.id}`;
+        const color = cellTypes ? cellTypes[c.typeIndex].color : c.cluster != null ? clusterColor(c.cluster) : "#67e8f9";
+        setHoverInfo({ x: p.sx, y: p.sy, name, color });
       } else setHoverInfo(null);
     }
   };
 
   const onPointerUp = () => {
-    if (roiMode && roiDrawRef.current) {
-      const rd = roiDrawRef.current;
-      const x = Math.min(rd.x0, rd.x);
-      const y = Math.min(rd.y0, rd.y);
-      const w = Math.abs(rd.x - rd.x0);
-      const h = Math.abs(rd.y - rd.y0);
-      if (w > 8 && h > 8) {
-        addRoi({ id: Date.now(), x, y, w, h, label: `ROI-${rois.length + 1}` });
+    const d = drawRef.current;
+    if (d) {
+      if (d.kind === "polygon") {
+        if (d.points.length >= 3) finishShape({ kind: "polygon", points: d.points });
+      } else if (d.kind === "rect") {
+        finishShape({ kind: "rect", x: Math.min(d.x0, d.x), y: Math.min(d.y0, d.y), w: Math.abs(d.x - d.x0), h: Math.abs(d.y - d.y0) });
+      } else {
+        finishShape({ kind: "circle", cx: d.x0, cy: d.y0, r: Math.hypot(d.x - d.x0, d.y - d.y0) });
       }
-      roiDrawRef.current = null;
+      drawRef.current = null;
+      schedule();
     }
+    moveRef.current = null;
     dragRef.current = null;
   };
 
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
       <Panel className="relative overflow-hidden p-0" strong>
         {/* toolbar */}
         <div className="absolute left-3 top-3 z-20 flex flex-wrap items-center gap-1.5">
-          {PRESETS.map((p) => (
-            <Chip key={p.name} onClick={() => presetChannels(p.markers)}>
+          {presets.map((p) => (
+            <Chip key={p.name} onClick={() => (p.name === "All" ? showAllChannels() : presetChannels(p.markers))}>
               {p.name}
             </Chip>
           ))}
         </div>
-        <div className="absolute right-3 top-3 z-20 flex items-center gap-1.5">
+        <div className="absolute right-3 top-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center justify-end gap-1.5">
+          <ToolBtn active={roiTool === "pan"} onClick={() => setRoiTool("pan")} title="Pan / move ROI (V)"><Hand className="h-4 w-4" /></ToolBtn>
+          <ToolBtn active={roiTool === "rect"} onClick={() => setRoiTool("rect")} title="Rectangle ROI (R)"><Square className="h-4 w-4" /></ToolBtn>
+          <ToolBtn active={roiTool === "circle"} onClick={() => setRoiTool("circle")} title="Circle ROI (C)"><CircleIcon className="h-4 w-4" /></ToolBtn>
+          <ToolBtn active={roiTool === "polygon"} onClick={() => setRoiTool("polygon")} title="Freehand polygon ROI (P)"><PenTool className="h-4 w-4" /></ToolBtn>
+          <span className="mx-0.5 h-6 w-px bg-white/10" />
           <ToolBtn onClick={() => zoomByCenter(1.25)} title="Zoom in (+)"><ZoomIn className="h-4 w-4" /></ToolBtn>
           <ToolBtn onClick={() => zoomByCenter(1 / 1.25)} title="Zoom out (−)"><ZoomOut className="h-4 w-4" /></ToolBtn>
           <ToolBtn onClick={fit} title="Fit to view (0)"><Maximize2 className="h-4 w-4" /></ToolBtn>
           <ToolBtn onClick={oneToOne} title="Actual pixels (1)"><span className="text-[11px] font-bold leading-none">1:1</span></ToolBtn>
-          <ToolBtn active={roiMode} onClick={() => setRoiMode((v) => !v)} title="Draw ROI">
-            <SquareDashedMousePointer className="h-4 w-4" />
-          </ToolBtn>
           <ToolBtn active={segmented} onClick={() => setSegmented(!segmented, "manual")} title="Toggle segmentation">
             <ScanSearch className="h-4 w-4" />
           </ToolBtn>
@@ -410,7 +552,7 @@ export default function Viewer() {
 
         <div
           ref={wrapRef}
-          className={clsx("relative h-[420px] w-full select-none touch-none overscroll-contain sm:h-[560px] lg:h-[640px]", roiMode ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing")}
+          className={clsx("relative h-[420px] w-full select-none touch-none overscroll-contain sm:h-[560px] lg:h-[640px]", roiTool !== "pan" ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing")}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -434,12 +576,15 @@ export default function Viewer() {
             </div>
           )}
           <div className="pointer-events-none absolute bottom-3 left-3 z-10 rounded-lg glass px-2.5 py-1 font-mono text-[11px] text-white/60">
-            {zoomPct}% · scroll = zoom · drag = pan · dbl-click = zoom
+            {zoomPct}% · {roiTool === "pan" ? "scroll = zoom · drag = pan" : `${roiTool} ROI — drag to draw · Esc cancels`}
           </div>
         </div>
       </Panel>
 
       <ChannelPanel />
+      </div>
+      <RoiListPanel />
+      {rois.length > 0 && <RoiAnalysis />}
     </div>
   );
 }
@@ -461,11 +606,12 @@ function ToolBtn({ children, onClick, active, title }: { children: React.ReactNo
 
 function ChannelPanel() {
   const channels = useStore((s) => s.channels);
+  const activeChannels = useStore((s) => s.activeChannels);
   const toggle = useStore((s) => s.toggleChannel);
   const setGain = useStore((s) => s.setGain);
   const setGamma = useStore((s) => s.setGamma);
   const soloChannel = useStore((s) => s.soloChannel);
-  const [expanded, setExpanded] = useState<number | null>(1);
+  const [expanded, setExpanded] = useState<number | null>(0);
 
   return (
     <Panel className="flex max-h-[640px] flex-col overflow-hidden" strong>
@@ -477,7 +623,8 @@ function ChannelPanel() {
       </div>
       <div className="flex-1 overflow-y-auto px-2 py-2">
         {channels.map((c) => {
-          const mk = MARKERS[c.index];
+          const mk = activeChannels[c.index];
+          if (!mk) return null;
           const open = expanded === c.index;
           return (
             <div key={c.index} className={clsx("rounded-xl px-2 py-1.5 transition", c.visible ? "bg-white/[0.03]" : "opacity-55")}>
@@ -507,6 +654,108 @@ function ChannelPanel() {
           );
         })}
       </div>
+    </Panel>
+  );
+}
+
+function RoiListPanel() {
+  const rois = useStore((s) => s.rois);
+  const tissue = useStore((s) => s.tissue);
+  const maps = useStore((s) => s.maps);
+  const activeChannels = useStore((s) => s.activeChannels);
+  const channelStates = useStore((s) => s.channels);
+  const pixelSizeUm = useStore((s) => s.pixelSizeUm);
+  const datasetLabel = useStore((s) => s.datasetLabel);
+  const selectedRoiId = useStore((s) => s.selectedRoiId);
+  const selectRoi = useStore((s) => s.selectRoi);
+  const removeRoi = useStore((s) => s.removeRoi);
+  const updateRoi = useStore((s) => s.updateRoi);
+  const clearRois = useStore((s) => s.clearRois);
+  const [exporting, setExporting] = useState(false);
+
+  const exportAll = async () => {
+    if (!tissue || !maps) return;
+    setExporting(true);
+    try {
+      await exportRoisZip(rois, { maps, defs: activeChannels, channels: channelStates, cells: tissue.cells, pixelSizeUm, datasetLabel }, "fluoroview-rois.zip");
+      toast.success("ROIs exported", `${rois.length} ROI folder${rois.length > 1 ? "s" : ""} in fluoroview-rois.zip`);
+    } catch (e) {
+      toast.error("Export failed", e instanceof Error ? e.message : String(e));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <Panel className="p-4" strong>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm font-bold">
+          <MapPin className="h-4 w-4 text-cyan-300" /> Regions of interest
+          <span className="font-normal text-white/40">({rois.length})</span>
+        </div>
+        {rois.length > 0 && (
+          <div className="flex items-center gap-3">
+            <button onClick={exportAll} disabled={exporting} className="inline-flex items-center gap-1.5 text-xs text-white/60 transition hover:text-cyan-300 disabled:opacity-50">
+              {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Export all (.zip)
+            </button>
+            <button onClick={clearRois} className="text-xs text-white/45 transition hover:text-rose-300">
+              Clear all
+            </button>
+          </div>
+        )}
+      </div>
+      {rois.length === 0 ? (
+        <p className="max-w-2xl text-xs leading-relaxed text-white/45">
+          Pick the <span className="text-white/70">Rectangle</span>, <span className="text-white/70">Circle</span>, or{" "}
+          <span className="text-white/70">Freehand polygon</span> tool in the viewer toolbar (or press R / C / P), then draw on the
+          image. With the Pan tool (V) click an ROI to select it and drag to move; press Delete to remove the selected one.
+        </p>
+      ) : (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {rois.map((r) => {
+            const n = tissue ? cellsInRoi(tissue.cells, r.shape).length : 0;
+            const area = Math.round(shapeArea(r.shape));
+            const sel = r.id === selectedRoiId;
+            return (
+              <div
+                key={r.id}
+                onClick={() => selectRoi(r.id)}
+                className={clsx(
+                  "cursor-pointer rounded-xl border p-3 transition",
+                  sel ? "border-cyan-400/50 bg-cyan-400/[0.06]" : "border-white/10 bg-white/[0.02] hover:bg-white/[0.05]"
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: r.color }} />
+                  <input
+                    value={r.label}
+                    onChange={(e) => updateRoi(r.id, { label: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    className="min-w-0 flex-1 rounded bg-transparent text-sm font-semibold text-white outline-none focus:bg-white/5"
+                    aria-label="ROI label"
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      removeRoi(r.id);
+                    }}
+                    className="rounded-md p-1 text-white/40 transition hover:bg-white/10 hover:text-rose-300"
+                    aria-label="Delete ROI"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-white/50">
+                  <span>{shapeKindLabel(r.shape)}</span>
+                  <span className="text-white/70">{n.toLocaleString()} cells</span>
+                  <span>{area.toLocaleString()} px²</span>
+                  {r.comments.length > 0 && <span className="text-fuchsia-300">{r.comments.length} note{r.comments.length > 1 ? "s" : ""}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </Panel>
   );
 }

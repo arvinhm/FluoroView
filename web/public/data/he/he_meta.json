@@ -1,0 +1,18 @@
+{
+  "name": "H&E stained human skin - normal epidermis and dermis with benign intradermal nevus",
+  "file": "he_skin.png",
+  "modality": "Brightfield histopathology",
+  "stain": "Hematoxylin & Eosin (H&E)",
+  "magnification": "10x",
+  "loader": "skimage.data.skin()",
+  "canonical_source_url": "https://en.wikipedia.org/wiki/File:Normal_Epidermis_and_Dermis_with_Intradermal_Nevus_10x.JPG",
+  "actual_fetch_url": "https://gitlab.com/scikit-image/data/-/raw/2cdc5ce89b334d28f06a58c9f0ca21aa6992a5ba/Normal_Epidermis_and_Dermis_with_Intradermal_Nevus_10x.JPG",
+  "license": "Public Domain",
+  "attribution": "Author 'Kilbad' via Wikimedia Commons; released into the public domain. Redistributed as a sample dataset by scikit-image.",
+  "original_shape": [960, 1280, 3],
+  "original_dtype": "uint8",
+  "scale_factor_applied": 1.0,
+  "final_shape": [960, 1280, 3],
+  "final_file": "he_skin.png",
+  "nuclei_segmentation": "None bundled with this image; skipped. No trivially-available ground-truth nuclei mask exists for this public-domain sample, and none was fabricated (per task instructions)."
+}

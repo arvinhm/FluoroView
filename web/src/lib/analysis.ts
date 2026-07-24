@@ -1,11 +1,18 @@
 import type { Cell } from "./types";
-import { M, MARKERS } from "./synth";
 
-/** marker indices used for phenotyping / clustering (DAPI excluded) */
-export const PANEL_IDX = MARKERS.map((_, i) => i).filter((i) => i !== 0);
+/**
+ * Marker indices used for phenotyping / clustering. Channel 0 is the nuclear
+ * (DAPI-equivalent) channel and is excluded, matching the desktop workflow.
+ */
+export function panelIndices(nChannels: number): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < nChannels; i++) out.push(i);
+  return out;
+}
 
-export function markerMatrix(cells: Cell[], cols = PANEL_IDX): number[][] {
-  return cells.map((c) => cols.map((j) => c.markers[j]));
+export function markerMatrix(cells: Cell[], cols?: number[]): number[][] {
+  const c = cols ?? panelIndices(cells[0]?.markers.length ?? 0);
+  return cells.map((cell) => c.map((j) => cell.markers[j]));
 }
 
 function mean(a: number[]) {
@@ -242,8 +249,16 @@ function scaleToUnit(pos: [number, number][]) {
   }
 }
 
-/** Otsu threshold on a [0,1] intensity vector, returned in [0,1]. */
+/**
+ * Otsu threshold on a [0,1] intensity vector, returned in [0,1].
+ *
+ * When several bin boundaries tie for maximal between-class variance (e.g. a
+ * clean bimodal split with an empty valley between the modes), we return the
+ * midpoint of that plateau so the threshold lands in the valley rather than at
+ * the edge of a mode — which matters for phenotype gating.
+ */
 export function otsu(values: number[], bins = 64): number {
+  if (values.length === 0) return 0.5;
   const hist = new Array(bins).fill(0);
   for (const v of values) {
     const b = Math.min(bins - 1, Math.max(0, Math.floor(v * bins)));
@@ -252,7 +267,11 @@ export function otsu(values: number[], bins = 64): number {
   const total = values.length;
   let sumAll = 0;
   for (let i = 0; i < bins; i++) sumAll += i * hist[i];
-  let sumB = 0, wB = 0, maxVar = -1, thr = 0;
+
+  const between = new Array(bins).fill(-1);
+  let sumB = 0,
+    wB = 0,
+    maxVar = -1;
   for (let i = 0; i < bins; i++) {
     wB += hist[i];
     if (wB === 0) continue;
@@ -261,13 +280,22 @@ export function otsu(values: number[], bins = 64): number {
     sumB += i * hist[i];
     const mB = sumB / wB;
     const mF = (sumAll - sumB) / wF;
-    const between = wB * wF * (mB - mF) * (mB - mF);
-    if (between > maxVar) {
-      maxVar = between;
-      thr = i;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    between[i] = v;
+    if (v > maxVar) maxVar = v;
+  }
+  if (maxVar <= 0) return 0.5;
+
+  let lo = -1;
+  let hi = -1;
+  for (let i = 0; i < bins; i++) {
+    if (between[i] >= maxVar * (1 - 1e-6)) {
+      if (lo < 0) lo = i;
+      hi = i;
     }
   }
-  return thr / bins;
+  const thr = (lo + hi) / 2;
+  return (thr + 0.5) / bins;
 }
 
 export interface ClusterSummary {
@@ -277,14 +305,22 @@ export interface ClusterSummary {
   topMarkers: { name: string; value: number }[];
 }
 
-export function summarizeClusters(cells: Cell[], labels: number[], k: number): ClusterSummary[] {
+export function summarizeClusters(
+  cells: Cell[],
+  labels: number[],
+  k: number,
+  channelNames: string[]
+): ClusterSummary[] {
+  const M = channelNames.length;
+  const panel = panelIndices(M);
   const out: ClusterSummary[] = [];
   for (let c = 0; c < k; c++) {
     const members = cells.filter((_, i) => labels[i] === c);
     const means = new Array(M).fill(0);
     for (const cell of members) for (let m = 0; m < M; m++) means[m] += cell.markers[m];
     for (let m = 0; m < M; m++) means[m] /= members.length || 1;
-    const top = PANEL_IDX.map((m) => ({ name: MARKERS[m].name, value: means[m] }))
+    const top = panel
+      .map((m) => ({ name: channelNames[m], value: means[m] }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 3);
     out.push({

@@ -1,6 +1,8 @@
 import type { ChannelMaps } from "./synth";
-import { M } from "./synth";
 import { hexToRgb } from "./palette";
+
+// The shader packs up to 12 single-channel intensity maps into 3 RGBA textures.
+const MAX_CHANNELS = 12;
 
 export interface ViewTransform {
   zoom: number;
@@ -100,7 +102,7 @@ export class Compositor {
       const rgba = new Uint8Array(px * 4);
       for (let k = 0; k < 4; k++) {
         const marker = t * 4 + k;
-        if (marker >= M) break;
+        if (marker >= maps.maps.length || marker >= MAX_CHANNELS) break;
         const src = maps.maps[marker];
         for (let i = 0; i < px; i++) rgba[i * 4 + k] = src[i];
       }

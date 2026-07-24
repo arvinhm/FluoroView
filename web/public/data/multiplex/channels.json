@@ -1,0 +1,87 @@
+{
+  "dataset_id": "bems340264-scene002",
+  "dataset_name": "BEMS340264 Scene-002 — multiplex fluorescence (structural panel)",
+  "is_real_data": true,
+  "panel_type": "structural",
+  "image_width": 1063,
+  "image_height": 704,
+  "scale_factor_applied": 1.0,
+  "source_note": "Source TIFFs already 8x-downsampled from a 5625x8500 original by the repo author. Web PNGs keep native 1063x704 (max dim <= 2048), so cells.json coordinates align 1:1 with the PNGs.",
+  "n_cells": 32784,
+  "mask_source": "BEMS340264_Scene-002_cell_mask.tif",
+  "channels": [
+    {
+      "index": 0,
+      "name": "Nuclei",
+      "png": "nuclei.png",
+      "source_tiff": "Nuclei_channel_8.tif",
+      "color_hex": "#0050ff",
+      "color_rgb": [0, 80, 255],
+      "kind": "nuclear",
+      "window_low": 0.0,
+      "window_high": 6539.0,
+      "window_percentiles": [1, 99],
+      "default_on": true
+    },
+    {
+      "index": 1,
+      "name": "Membrane",
+      "png": "membrane.png",
+      "source_tiff": "Membrane_channel_25.tif",
+      "color_hex": "#ff00ff",
+      "color_rgb": [255, 0, 255],
+      "kind": "membrane",
+      "window_low": 0.0,
+      "window_high": 5024.0,
+      "window_percentiles": [1, 99],
+      "default_on": true
+    },
+    {
+      "index": 2,
+      "name": "ECM",
+      "png": "ecm.png",
+      "source_tiff": "ECM_16.tif",
+      "color_hex": "#00dc5a",
+      "color_rgb": [0, 220, 90],
+      "kind": "cyto",
+      "window_low": 0.0,
+      "window_high": 3591.0,
+      "window_percentiles": [1, 99],
+      "default_on": true
+    },
+    {
+      "index": 3,
+      "name": "Cytoplasm",
+      "png": "cytoplasm.png",
+      "source_tiff": "Cytoplasm_channel_18.tif",
+      "color_hex": "#00dcff",
+      "color_rgb": [0, 220, 255],
+      "kind": "cyto",
+      "window_low": 0.0,
+      "window_high": 4397.0,
+      "window_percentiles": [1, 99],
+      "default_on": false
+    },
+    {
+      "index": 4,
+      "name": "Nuclear membrane",
+      "png": "nuclear_membrane.png",
+      "source_tiff": "Nuclear_membrane_channel_20.tif",
+      "color_hex": "#ffbf00",
+      "color_rgb": [255, 191, 0],
+      "kind": "membrane",
+      "window_low": 0.0,
+      "window_high": 4281.0,
+      "window_percentiles": [1, 99],
+      "default_on": false
+    }
+  ],
+  "composite_reference": "composite.png",
+  "cells_file": "cells.json",
+  "cells_schema": {
+    "id": "integer label from mask",
+    "x": "centroid column in PNG px (0..1063)",
+    "y": "centroid row in PNG px (0..704)",
+    "area": "region area in PNG px^2"
+  }
+}
