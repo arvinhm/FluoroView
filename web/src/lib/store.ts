@@ -35,6 +35,8 @@ interface AppState {
   pixelSizeUm: number | null;
   tissue: Tissue | null;
   maps: ChannelMaps | null;
+  /** True cell-boundary overlay image for the active dataset (real data), else null. */
+  boundaries: HTMLImageElement | null;
   channels: ChannelState[];
   rois: Roi[];
   analysis: Analysis | null;
@@ -92,6 +94,7 @@ export const useStore = create<AppState>((set, get) => ({
   pixelSizeUm: DEFAULT_DATASET.pixelSizeUm,
   tissue: null,
   maps: null,
+  boundaries: null,
   channels: defaultChannels(DEFAULT_DATASET.channels),
   rois: [],
   analysis: null,
@@ -121,6 +124,7 @@ export const useStore = create<AppState>((set, get) => ({
           pixelSizeUm: ds.pixelSizeUm,
           tissue,
           maps,
+          boundaries: null, // synthetic tissue is procedural — no label mask
           channels: defaultChannels(ds.channels),
           rois: [],
           selectedRoiId: null,
@@ -131,7 +135,7 @@ export const useStore = create<AppState>((set, get) => ({
         });
         return;
       }
-      const { tissue, maps, channels } = await loadRealDataset(ds);
+      const { tissue, maps, channels, boundaries } = await loadRealDataset(ds);
       set({
         datasetId: ds.id,
         datasetLabel: ds.label,
@@ -140,6 +144,7 @@ export const useStore = create<AppState>((set, get) => ({
         pixelSizeUm: ds.pixelSizeUm,
         tissue,
         maps,
+        boundaries,
         channels: defaultChannels(channels),
         rois: [],
         selectedRoiId: null,

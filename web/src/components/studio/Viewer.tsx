@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Layers, Trash2, MapPin, Download, Loader2 } from "lucide-react";
+import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Layers, Trash2, MapPin, Download, Loader2, MessageSquare } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { RoiShape } from "../../lib/types";
@@ -30,6 +30,7 @@ type DrawState =
 export default function Viewer() {
   const tissue = useStore((s) => s.tissue);
   const maps = useStore((s) => s.maps);
+  const boundaries = useStore((s) => s.boundaries);
   const channels = useStore((s) => s.channels);
   const activeChannels = useStore((s) => s.activeChannels);
   const cellTypes = useStore((s) => s.cellTypes);
@@ -61,6 +62,8 @@ export default function Viewer() {
   const wrapRef = useRef<HTMLDivElement>(null);
   const glRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const inspectorRef = useRef<HTMLDivElement>(null);
+  const prevRoiCount = useRef(0);
   const compRef = useRef<Compositor | null>(null);
   const viewRef = useRef<V>({ zoom: 1, panX: 0, panY: 0 });
   const rafRef = useRef(0);
@@ -107,33 +110,51 @@ export default function Viewer() {
     const toX = (tx: number) => rect.x + tx * k;
     const toY = (ty: number) => rect.y + ty * k;
 
-    // segmentation overlay (handles 10k+ cells): batch by color and draw filled
-    // dots when zoomed out, outlined circles when zoomed in.
+    // Segmentation overlay. For real data we render the TRUE per-cell boundaries
+    // (a transparent outline image derived from the label mask) aligned 1:1 with
+    // the composite so it pans/zooms with it. This replaces the old per-cell
+    // circles, which ballooned into huge overlapping rings when zoomed in because
+    // each tiny (1–14 px) cell was drawn as `radius = c.r * zoom`.
     if (segmented) {
-      const paths = new Map<string, Path2D>();
-      const strokeMode = k > 0.9; // roughly: individual cells are big enough to outline
-      ctx.lineWidth = Math.max(0.5, Math.min(2, k * 0.8));
-      for (const c of tissue.cells) {
-        const sx = toX(c.x);
-        const sy = toY(c.y);
-        if (sx < -20 || sy < -20 || sx > cw + 20 || sy > ch + 20) continue;
-        const col = c.cluster != null ? clusterColor(c.cluster) : cellTypes ? cellTypes[c.typeIndex]?.color ?? "#22d3ee" : "#22d3ee";
-        let path = paths.get(col);
-        if (!path) {
-          path = new Path2D();
-          paths.set(col, path);
-        }
-        const rr = Math.max(strokeMode ? 1.4 : 0.7, c.r * k);
-        path.moveTo(sx + rr, sy);
-        path.arc(sx, sy, rr, 0, Math.PI * 2);
+      const clustered = tissue.cells.some((c) => c.cluster != null);
+      if (boundaries) {
+        // Keep outlines crisp when magnified past the mask's native pixels;
+        // smooth them when the whole strip is shrunk into view.
+        ctx.imageSmoothingEnabled = rect.s <= 3;
+        ctx.globalAlpha = clustered ? 0.42 : 0.9;
+        ctx.drawImage(boundaries, rect.x, rect.y, rect.w, rect.h);
+        ctx.globalAlpha = 1;
+        ctx.imageSmoothingEnabled = true;
       }
-      for (const [col, path] of paths) {
-        if (strokeMode) {
-          ctx.strokeStyle = hexA(col, 0.85);
-          ctx.stroke(path);
-        } else {
-          ctx.fillStyle = hexA(col, 0.85);
-          ctx.fill(path);
+      // Per-cell marker dots: the synthetic demo (no mask) always uses them, and
+      // real data uses them ON TOP of the boundaries once cells carry a cluster/
+      // type color. Radii are capped so they never balloon at high zoom.
+      if (!boundaries || clustered || cellTypes) {
+        const paths = new Map<string, Path2D>();
+        const strokeMode = !boundaries && k > 0.9;
+        ctx.lineWidth = Math.max(0.5, Math.min(2, k * 0.8));
+        for (const c of tissue.cells) {
+          const sx = toX(c.x);
+          const sy = toY(c.y);
+          if (sx < -20 || sy < -20 || sx > cw + 20 || sy > ch + 20) continue;
+          const col = c.cluster != null ? clusterColor(c.cluster) : cellTypes ? cellTypes[c.typeIndex]?.color ?? "#22d3ee" : "#22d3ee";
+          let path = paths.get(col);
+          if (!path) {
+            path = new Path2D();
+            paths.set(col, path);
+          }
+          const rr = Math.min(6, Math.max(strokeMode ? 1.4 : 0.7, c.r * k));
+          path.moveTo(sx + rr, sy);
+          path.arc(sx, sy, rr, 0, Math.PI * 2);
+        }
+        for (const [col, path] of paths) {
+          if (strokeMode) {
+            ctx.strokeStyle = hexA(col, 0.85);
+            ctx.stroke(path);
+          } else {
+            ctx.fillStyle = hexA(col, 0.85);
+            ctx.fill(path);
+          }
         }
       }
     }
@@ -225,7 +246,7 @@ export default function Viewer() {
       ctx.fillText(barLabel, bx + barPx / 2, by - 7);
       ctx.textAlign = "left";
     }
-  }, [maps, tissue, rois, selectedRoiId, segmented, getVT, cellTypes, pixelSizeUm]);
+  }, [maps, tissue, boundaries, rois, selectedRoiId, segmented, getVT, cellTypes, pixelSizeUm]);
 
   const render = useCallback(() => {
     const comp = compRef.current;
@@ -330,6 +351,15 @@ export default function Viewer() {
   useEffect(() => {
     schedule();
   }, [rois, segmented, schedule]);
+
+  // When a new ROI is drawn, bring the analysis + comments panel into view so
+  // the user actually sees the live bar graph and the comments affordance.
+  useEffect(() => {
+    if (rois.length > prevRoiCount.current) {
+      requestAnimationFrame(() => inspectorRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
+    }
+    prevRoiCount.current = rois.length;
+  }, [rois.length]);
 
   // resize
   useEffect(() => {
@@ -584,7 +614,12 @@ export default function Viewer() {
       <ChannelPanel />
       </div>
       <RoiListPanel />
-      {rois.length > 0 && <RoiAnalysis />}
+      {/* Per-ROI analysis + comments — always mounted so the bar graph and
+          comments panel are discoverable; it renders an empty-state prompt
+          until a region is drawn/selected. */}
+      <div ref={inspectorRef}>
+        <RoiAnalysis />
+      </div>
     </div>
   );
 }
@@ -734,6 +769,18 @@ function RoiListPanel() {
                     className="min-w-0 flex-1 rounded bg-transparent text-sm font-semibold text-white outline-none focus:bg-white/5"
                     aria-label="ROI label"
                   />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectRoi(r.id);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-semibold text-white/45 transition hover:bg-white/10 hover:text-fuchsia-300"
+                    title="View analysis & comments for this ROI"
+                    aria-label="View comments"
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    {r.comments.length > 0 && <span>{r.comments.length}</span>}
+                  </button>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
