@@ -140,6 +140,8 @@ export function Minimap({
         ref={canvasRef}
         style={{ width, height }}
         className="block cursor-pointer touch-none"
+        title="Whole slide — click or drag to jump the view there"
+        aria-label="Whole-slide minimap: click or drag to navigate"
         onPointerDown={(e) => {
           e.stopPropagation();
           (e.target as HTMLElement).setPointerCapture(e.pointerId);

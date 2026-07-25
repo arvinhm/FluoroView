@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch } from "lucide-react";
+import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Crosshair } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { ChannelState, RoiShape } from "../../lib/types";
 import { Compositor, fitRect, type ChannelUniform, type ViewTransform } from "../../lib/compositor";
+import { clampPan, contentInViewport, fitView, nearestContent, viewportNorm } from "../../lib/viewport";
 import { clusterColor } from "../../lib/palette";
 import { niceNumber } from "../../lib/format";
 import { roiBounds, translateShape, pointInShape } from "../../lib/roi";
@@ -83,7 +84,10 @@ function CompositorViewer() {
   const setSegmented = useStore((s) => s.setSegmented);
   const presetChannels = useStore((s) => s.presetChannels);
   const showAllChannels = useStore((s) => s.showAllChannels);
+  const datasetId = useStore((s) => s.datasetId);
+  const contentExtent = useStore((s) => s.contentExtent);
   const [roiTool, setRoiTool] = useState<RoiTool>("pan");
+  const [lostInVoid, setLostInVoid] = useState(false);
 
   const presets = useMemo(() => {
     const names = activeChannels.map((c) => c.name);
@@ -104,6 +108,8 @@ function CompositorViewer() {
   const prevRoiCount = useRef(0);
   const compRef = useRef<Compositor | null>(null);
   const viewRef = useRef<V>({ zoom: 1, panX: 0, panY: 0 });
+  const extentRef = useRef(contentExtent);
+  const hadContentRef = useRef(true);
   const minimapRectRef = useRef<ViewportRect>({ x0: 0, y0: 0, x1: 1, y1: 1 });
   const rafRef = useRef(0);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -287,23 +293,34 @@ function CompositorViewer() {
     }
   }, [maps, tissue, boundaries, rois, selectedRoiId, segmented, getVT, cellTypes, pixelSizeUm]);
 
+  /** Pan can never carry the data off screen (clamped in the render funnel, so
+   *  drag / wheel / keys / minimap are all covered). */
+  const clampView = useCallback(() => {
+    const el = wrapRef.current;
+    const m = mapsRef.current;
+    if (!el || !m || !el.clientWidth || !el.clientHeight) return;
+    const next = clampPan(viewRef.current, extentRef.current, m.width, m.height, el.clientWidth, el.clientHeight);
+    viewRef.current.panX = next.panX;
+    viewRef.current.panY = next.panY;
+  }, []);
+
   const render = useCallback(() => {
+    clampView();
     const comp = compRef.current;
     if (comp && comp.ok) comp.render(getVT());
     drawOverlay();
     const el = wrapRef.current;
     const m = mapsRef.current;
     if (el && m) {
-      const rect = fitRect(m.width, m.height, getVT());
-      const s = rect.s || 1;
-      minimapRectRef.current = {
-        x0: -rect.x / s / m.width,
-        y0: -rect.y / s / m.height,
-        x1: (el.clientWidth - rect.x) / s / m.width,
-        y1: (el.clientHeight - rect.y) / s / m.height,
-      };
+      const nr = viewportNorm(m.width, m.height, getVT());
+      minimapRectRef.current = nr;
+      const has = contentInViewport(extentRef.current, nr);
+      if (has !== hadContentRef.current) {
+        hadContentRef.current = has;
+        setLostInVoid(!has);
+      }
     }
-  }, [getVT, drawOverlay]);
+  }, [clampView, getVT, drawOverlay]);
 
   /** Recenter so array point (ax,ay) sits at the viewport center. */
   const centerOnWorld = useCallback(
@@ -333,6 +350,9 @@ function CompositorViewer() {
   useEffect(() => {
     mapsRef.current = maps;
   }, [maps]);
+  useEffect(() => {
+    extentRef.current = contentExtent;
+  }, [contentExtent]);
 
   /** Zoom keeping the image point under (clientX, clientY) fixed on screen. */
   const zoomAtPoint = useCallback(
@@ -371,11 +391,26 @@ function CompositorViewer() {
     [zoomAtPoint]
   );
 
+  /** Frame the TISSUE, not the blank canvas around it. */
   const fit = useCallback(() => {
-    viewRef.current = { zoom: 1, panX: 0, panY: 0 };
-    setZoomPct(100);
+    const el = wrapRef.current;
+    const m = mapsRef.current;
+    if (!el || !m || !el.clientWidth) return;
+    const v = fitView(extentRef.current, m.width, m.height, el.clientWidth, el.clientHeight, { zoomMin: ZOOM_MIN, zoomMax: ZOOM_MAX });
+    viewRef.current = v;
+    setZoomPct(Math.round(v.zoom * 100));
     scheduleRef.current();
   }, []);
+
+  /** Keep the current magnification, jump to the nearest tissue. */
+  const recenterOnContent = useCallback(() => {
+    const el = wrapRef.current;
+    const m = mapsRef.current;
+    if (!el || !m) return;
+    const nr = viewportNorm(m.width, m.height, getVT());
+    const t = nearestContent(extentRef.current, (nr.x0 + nr.x1) / 2, (nr.y0 + nr.y1) / 2);
+    centerOnWorld(t.x * m.width, t.y * m.height);
+  }, [centerOnWorld, getVT]);
 
   const oneToOne = useCallback(() => {
     const el = wrapRef.current;
@@ -383,10 +418,11 @@ function CompositorViewer() {
     if (!el || !m) return;
     const base = Math.min(el.clientWidth / m.width, el.clientHeight / m.height) || 1;
     const zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, 1 / base));
-    viewRef.current = { zoom, panX: 0, panY: 0 };
+    const e = extentRef.current;
+    viewRef.current.zoom = zoom;
     setZoomPct(Math.round(zoom * 100));
-    scheduleRef.current();
-  }, []);
+    centerOnWorld(((e.x0 + e.x1) / 2) * m.width, ((e.y0 + e.y1) / 2) * m.height);
+  }, [centerOnWorld]);
 
   const onDoubleClick = (e: React.MouseEvent) => {
     zoomAtPoint(e.clientX, e.clientY, e.altKey ? 1 / 1.6 : 1.6);
@@ -415,6 +451,11 @@ function CompositorViewer() {
     }
     schedule();
   }, [channels, schedule]);
+
+  // Open every dataset framed on its own tissue (and re-frame when it changes).
+  useEffect(() => {
+    if (maps) fit();
+  }, [datasetId, contentExtent, maps, fit]);
 
   useEffect(() => {
     schedule();
@@ -641,7 +682,7 @@ function CompositorViewer() {
           <span className="mx-0.5 h-6 w-px bg-white/10" />
           <ToolBtn onClick={() => zoomByCenter(1.25)} title="Zoom in (+)"><ZoomIn className="h-4 w-4" /></ToolBtn>
           <ToolBtn onClick={() => zoomByCenter(1 / 1.25)} title="Zoom out (−)"><ZoomOut className="h-4 w-4" /></ToolBtn>
-          <ToolBtn onClick={fit} title="Fit to view (0)"><Maximize2 className="h-4 w-4" /></ToolBtn>
+          <ToolBtn onClick={fit} title="Fit tissue to view (0)"><Maximize2 className="h-4 w-4" /></ToolBtn>
           <ToolBtn onClick={oneToOne} title="Actual pixels (1)"><span className="text-[11px] font-bold leading-none">1:1</span></ToolBtn>
           <ToolBtn active={segmented} onClick={() => setSegmented(!segmented, "manual")} title="Toggle segmentation">
             <ScanSearch className="h-4 w-4" />
@@ -671,6 +712,18 @@ function CompositorViewer() {
             >
               <span className="h-2 w-2 rounded-full" style={{ background: hoverInfo.color }} />
               {hoverInfo.name}
+            </div>
+          )}
+          {lostInVoid && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-3">
+              <button
+                onClick={recenterOnContent}
+                className="pointer-events-auto flex items-center gap-2 rounded-xl glass-strong px-3.5 py-2 text-sm font-semibold text-white shadow-panel ring-1 ring-cyan-400/40 transition hover:ring-cyan-300"
+              >
+                <Crosshair className="h-4 w-4 shrink-0 text-cyan-300" />
+                Recenter on tissue
+                <span className="hidden text-xs font-normal text-white/50 sm:inline">this area is empty background</span>
+              </button>
             </div>
           )}
           <div className="absolute bottom-3 left-3 z-20 flex flex-col items-start gap-1.5">
