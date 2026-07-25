@@ -2,12 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Deck, OrthographicView } from "@deck.gl/core";
 import { PolygonLayer } from "@deck.gl/layers";
 import { MultiscaleImageLayer, ImageLayer, ColorPaletteExtension, MAX_CHANNELS } from "@hms-dbmi/viv";
-import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch } from "lucide-react";
+import { Maximize2, ZoomIn, ZoomOut, Hand, Square, Circle as CircleIcon, PenTool, ScanSearch, Crosshair } from "lucide-react";
 import { clsx } from "clsx";
 import { useStore } from "../../lib/store";
 import type { RoiShape } from "../../lib/types";
 import { pickCompositedChannels, safeContrastLimits, safeGamma } from "../../lib/channelGuards";
 import { fitRect, type ViewTransform } from "../../lib/compositor";
+import { clampPan, contentInViewport, fitView, nearestContent, viewportNorm } from "../../lib/viewport";
 import { clusterColor, scaleRgb } from "../../lib/palette";
 import { niceNumber } from "../../lib/format";
 import { roiBounds, translateShape, pointInShape } from "../../lib/roi";
@@ -68,7 +69,9 @@ export default function VivDeckViewer() {
   const showAllChannels = useStore((s) => s.showAllChannels);
   const setChannelStat = useStore((s) => s.setChannelStat);
   const maps = useStore((s) => s.maps);
+  const contentExtent = useStore((s) => s.contentExtent);
   const [roiTool, setRoiTool] = useState<RoiTool>("pan");
+  const [lostInVoid, setLostInVoid] = useState(false);
 
   // Display-only smoothed outlines (Chaikin). The TRUE mask/centroids still
   // drive analysis & ROI membership — smoothing never touches accuracy.
@@ -98,6 +101,10 @@ export default function VivDeckViewer() {
   const prevRoiCount = useRef(0);
   const deckRef = useRef<Deck | null>(null);
   const viewRef = useRef<V>({ zoom: 1, panX: 0, panY: 0 });
+  // Read inside the RAF loop and native listeners, which must always see the
+  // extent of the dataset that is on screen right now.
+  const extentRef = useRef(contentExtent);
+  const hadContentRef = useRef(true);
   const minimapRectRef = useRef<ViewportRect>({ x0: 0, y0: 0, x1: 1, y1: 1 });
   const rafRef = useRef(0);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -290,22 +297,35 @@ export default function VivDeckViewer() {
     }
   }, [imgW, imgH, rois, selectedRoiId, pixelSizeUm, getVT]);
 
+  /** Keep the tissue reachable: pan can never carry the data off screen. Applied
+   *  in the render funnel so every path (drag, wheel, keys, minimap) is covered. */
+  const clampView = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el || !el.clientWidth || !el.clientHeight) return;
+    const next = clampPan(viewRef.current, extentRef.current, imgW, imgH, el.clientWidth, el.clientHeight);
+    viewRef.current.panX = next.panX;
+    viewRef.current.panY = next.panY;
+  }, [imgW, imgH]);
+
   const render = useCallback(() => {
+    clampView();
     const deck = deckRef.current;
     if (deck) deck.setProps({ viewState: deckViewState() } as never);
     drawOverlay();
     const el = wrapRef.current;
     if (el) {
-      const rect = fitRect(imgW, imgH, getVT());
-      const s = rect.s || 1;
-      minimapRectRef.current = {
-        x0: -rect.x / s / imgW,
-        y0: -rect.y / s / imgH,
-        x1: (el.clientWidth - rect.x) / s / imgW,
-        y1: (el.clientHeight - rect.y) / s / imgH,
-      };
+      const nr = viewportNorm(imgW, imgH, getVT());
+      minimapRectRef.current = nr;
+      // The clamp only guarantees the data's bounding box stays in reach; a thin
+      // diagonal strip still leaves that box mostly empty, so tell the user when
+      // they are looking at pure background instead of letting the view look broken.
+      const has = contentInViewport(extentRef.current, nr);
+      if (has !== hadContentRef.current) {
+        hadContentRef.current = has;
+        setLostInVoid(!has);
+      }
     }
-  }, [deckViewState, drawOverlay, getVT, imgW, imgH]);
+  }, [clampView, deckViewState, drawOverlay, getVT, imgW, imgH]);
 
   /** Recenter the view so world point (wx,wy) sits at the viewport center. */
   const centerOnWorld = useCallback(
@@ -331,6 +351,10 @@ export default function VivDeckViewer() {
   useEffect(() => {
     scheduleRef.current = schedule;
   }, [schedule]);
+
+  useEffect(() => {
+    extentRef.current = contentExtent;
+  }, [contentExtent]);
 
   // init deck
   useEffect(() => {
@@ -444,21 +468,42 @@ export default function VivDeckViewer() {
     [zoomAtPoint]
   );
 
+  /** Frame the TISSUE, not the blank canvas around it. */
   const fit = useCallback(() => {
-    viewRef.current = { zoom: 1, panX: 0, panY: 0 };
-    setZoomPct(100);
+    const el = wrapRef.current;
+    if (!el || !el.clientWidth) return;
+    const v = fitView(extentRef.current, imgW, imgH, el.clientWidth, el.clientHeight, { zoomMin: ZOOM_MIN, zoomMax: ZOOM_MAX });
+    viewRef.current = v;
+    setZoomPct(Math.round(v.zoom * 100));
     scheduleRef.current();
-  }, []);
+  }, [imgW, imgH]);
+
+  /** Keep the current magnification, jump to the nearest tissue. */
+  const recenterOnContent = useCallback(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const nr = viewportNorm(imgW, imgH, getVT());
+    const t = nearestContent(extentRef.current, (nr.x0 + nr.x1) / 2, (nr.y0 + nr.y1) / 2);
+    centerOnWorld(t.x * imgW, t.y * imgH);
+  }, [centerOnWorld, getVT, imgW, imgH]);
 
   const oneToOne = useCallback(() => {
     const el = wrapRef.current;
     if (!el) return;
     const base = Math.min(el.clientWidth / imgW, el.clientHeight / imgH) || 1;
     const zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, 1 / base));
-    viewRef.current = { zoom, panX: 0, panY: 0 };
+    const e = extentRef.current;
+    viewRef.current.zoom = zoom;
     setZoomPct(Math.round(zoom * 100));
-    scheduleRef.current();
-  }, [imgW, imgH]);
+    // Stay on the tissue when switching to actual pixels.
+    centerOnWorld(((e.x0 + e.x1) / 2) * imgW, ((e.y0 + e.y1) / 2) * imgH);
+  }, [centerOnWorld, imgW, imgH]);
+
+  // Open every dataset framed on its own tissue (and re-frame when it changes),
+  // so a scan whose signal fills a fraction of the canvas is never off screen.
+  useEffect(() => {
+    fit();
+  }, [datasetId, contentExtent, fit]);
 
   const onDoubleClick = (e: React.MouseEvent) => zoomAtPoint(e.clientX, e.clientY, e.altKey ? 1 / 1.6 : 1.6);
 
@@ -645,7 +690,7 @@ export default function VivDeckViewer() {
             <span className="mx-0.5 h-6 w-px bg-white/10" />
             <ToolBtn onClick={() => zoomByCenter(1.25)} title="Zoom in (+)"><ZoomIn className="h-4 w-4" /></ToolBtn>
             <ToolBtn onClick={() => zoomByCenter(1 / 1.25)} title="Zoom out (−)"><ZoomOut className="h-4 w-4" /></ToolBtn>
-            <ToolBtn onClick={fit} title="Fit to view (0)"><Maximize2 className="h-4 w-4" /></ToolBtn>
+            <ToolBtn onClick={fit} title="Fit tissue to view (0)"><Maximize2 className="h-4 w-4" /></ToolBtn>
             <ToolBtn onClick={oneToOne} title="Actual pixels (1)"><span className="text-[11px] font-bold leading-none">1:1</span></ToolBtn>
             <ToolBtn active={segmented} onClick={() => setSegmented(!segmented, "manual")} title="Toggle segmentation"><ScanSearch className="h-4 w-4" /></ToolBtn>
           </div>
@@ -668,6 +713,18 @@ export default function VivDeckViewer() {
               <div className="pointer-events-none absolute z-20 flex items-center gap-1.5 rounded-lg glass-strong px-2 py-1 text-xs" style={{ left: hoverInfo.x + 14, top: hoverInfo.y + 14 }}>
                 <span className="h-2 w-2 rounded-full" style={{ background: hoverInfo.color }} />
                 {hoverInfo.name}
+              </div>
+            )}
+            {lostInVoid && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-3">
+                <button
+                  onClick={recenterOnContent}
+                  className="pointer-events-auto flex items-center gap-2 rounded-xl glass-strong px-3.5 py-2 text-sm font-semibold text-white shadow-panel ring-1 ring-cyan-400/40 transition hover:ring-cyan-300"
+                >
+                  <Crosshair className="h-4 w-4 shrink-0 text-cyan-300" />
+                  Recenter on tissue
+                  <span className="hidden text-xs font-normal text-white/50 sm:inline">this area is empty background</span>
+                </button>
               </div>
             )}
             <div className="absolute bottom-3 left-3 z-20 flex flex-col items-start gap-1.5">

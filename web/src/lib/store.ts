@@ -9,6 +9,7 @@ import { binHistogram } from "./histogram";
 import type { UploadedDataset } from "./upload/buildDataset";
 import { getUploadDef, getUploadedDataset, registerUpload, releaseUpload, updateUploadedDataset } from "./upload/registry";
 import { appearanceOf, applyAppearance, loadPresets, newPresetId, presetFromJson, savePresets } from "./presets";
+import { computeContentExtent, fullExtent, type ContentExtent } from "./viewport";
 import { toast } from "./toast";
 
 interface Analysis {
@@ -46,6 +47,12 @@ interface AppState {
   pixelSizeUm: number | null;
   tissue: Tissue | null;
   maps: ChannelMaps | null;
+  /**
+   * Where this dataset actually has signal (normalized to the image). Drives the
+   * initial framing, the pan clamp and the "recenter on tissue" affordance, so a
+   * thin strip of tissue in a big empty canvas can't be lost off screen.
+   */
+  contentExtent: ContentExtent;
   /** True cell-boundary overlay image for the active dataset (real data), else null. */
   boundaries: HTMLImageElement | null;
   /** Vector cell outlines (full-res mask) for the pyramid viewer, else null. */
@@ -162,6 +169,7 @@ export const useStore = create<AppState>((set, get) => ({
   pixelSizeUm: DEFAULT_DATASET.pixelSizeUm,
   tissue: null,
   maps: null,
+  contentExtent: fullExtent(),
   boundaries: null,
   boundaryPolys: null,
   imageSource: null,
@@ -204,6 +212,7 @@ export const useStore = create<AppState>((set, get) => ({
           pixelSizeUm: ds.pixelSizeUm,
           tissue,
           maps,
+          contentExtent: computeContentExtent(maps),
           boundaries: null, // synthetic tissue is procedural — no label mask
           boundaryPolys: null,
           imageSource: null,
@@ -239,6 +248,7 @@ export const useStore = create<AppState>((set, get) => ({
         pixelSizeUm: scanMeta?.pixelSizeUm ?? ds.pixelSizeUm,
         tissue,
         maps,
+        contentExtent: computeContentExtent(maps),
         boundaries,
         boundaryPolys,
         imageSource,
