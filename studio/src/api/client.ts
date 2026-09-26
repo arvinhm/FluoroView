@@ -46,6 +46,12 @@ export const api = {
       body: JSON.stringify({ path }),
       headers: { "Content-Type": "application/json" },
     }),
+  openChannels: (paths: string[]) =>
+    request<DatasetInfo>("/datasets", {
+      method: "POST",
+      body: JSON.stringify({ paths }),
+      headers: { "Content-Type": "application/json" },
+    }),
   histogram: (id: string, c: number, bins = 256) => request<Histogram>(`/datasets/${id}/histogram/${c}?bins=${bins}`),
   pixel: (id: string, x: number, y: number, signal?: AbortSignal) =>
     request<{ values: number[] }>(`/datasets/${id}/pixel?x=${x}&y=${y}`, { signal }),

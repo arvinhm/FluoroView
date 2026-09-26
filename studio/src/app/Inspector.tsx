@@ -94,9 +94,15 @@ function ChannelsTab({ ds }: { ds: DatasetInfo }) {
 
 function InfoTab({ ds }: { ds: DatasetInfo }) {
   const acq = ds.acquisition;
+  const formats: Record<string, string> = {
+    "biotek-gen5": "BioTek Gen5 TIFF", "ome-tiff": "OME-TIFF", imagej: "ImageJ TIFF", tiff: "TIFF",
+    "multi-file": "Single-channel files combined",
+  };
   const rows: [string, string | number | undefined | null][] = [
-    ["File", ds.path],
-    ["Format", { "biotek-gen5": "BioTek Gen5 TIFF", "ome-tiff": "OME-TIFF", imagej: "ImageJ TIFF", tiff: "TIFF" }[ds.vendor] ?? ds.vendor],
+    ...(ds.files.length
+      ? ds.files.map((f, i): [string, string] => [i === 0 ? "Files" : "", f.split("/").pop() ?? f])
+      : [["File", ds.path] as [string, string]]),
+    ["Format", formats[ds.vendor] ?? ds.vendor],
     ["Size", `${fmtInt(ds.width)} × ${fmtInt(ds.height)} px`],
     ["Channels", `${ds.channels.length} × ${ds.dtype.endsWith("u1") ? "8" : "16"}-bit`],
     ["Pixel size", ds.pixel_size_um ? `${ds.pixel_size_um.toFixed(4)} µm` : "unknown"],

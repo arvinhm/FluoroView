@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 import pytest
+import tifffile
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -88,6 +89,22 @@ def test_open_build_and_serve_tiles(client, biotek_image):
 
     level0 = client.app.state.cache.pyramid_dir(ds["id"]) / "0"
     assert not any(p.is_file() for p in level0.rglob("*") if p.name != ".zarray"), "level 0 is read in place"
+
+
+def test_open_files_as_channels(client, tmp_path):
+    data = np.stack([np.full((600, 700), 100 * (c + 1), np.uint16) + np.arange(700, dtype=np.uint16) for c in range(2)])
+    paths = []
+    for c, name in enumerate(("DAPI.tif", "CD8.tif")):
+        tifffile.imwrite(tmp_path / name, data[c])
+        paths.append(str((tmp_path / name).resolve()))
+    r = client.post("/api/v1/datasets", json={"paths": paths})
+    assert r.status_code == 200, r.text
+    ds = wait_ready(client, r.json()["id"])
+    assert ds["files"] == paths and [c["name"] for c in ds["channels"]] == ["DAPI", "CD8"]
+    t = client.get(f"/api/v1/datasets/{ds['id']}/tiles/0/1/1/1")
+    tile = np.frombuffer(t.content, "<u2").reshape(int(t.headers["X-Tile-Height"]), int(t.headers["X-Tile-Width"]))
+    np.testing.assert_array_equal(tile, data[1, 512:600, 512:700])
+    assert client.post("/api/v1/datasets", json={"paths": paths}).json()["id"] == ds["id"]
 
 
 def test_open_rejects_missing_and_non_tiff(client, tmp_path):

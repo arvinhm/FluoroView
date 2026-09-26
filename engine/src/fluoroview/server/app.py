@@ -27,7 +27,9 @@ _NOT_BUILT = """<!doctype html><meta charset="utf-8"><title>FluoroView</title>
 
 
 class OpenRequest(BaseModel):
-    path: str
+    path: str | None = None
+    paths: list[str] | None = None
+    """Two or more single-channel files to open as the channels of one image."""
 
 
 def create_app(settings: Settings) -> FastAPI:
@@ -69,9 +71,14 @@ def create_app(settings: Settings) -> FastAPI:
     @api.post("/datasets")
     def open_dataset(req: OpenRequest) -> dict:
         try:
-            return registry.open(req.path).to_json()
-        except FileNotFoundError:
-            raise HTTPException(404, f"file not found: {req.path}") from None
+            if req.paths and len(req.paths) > 1:
+                return registry.open_channels(req.paths).to_json()
+            path = req.path or (req.paths[0] if req.paths else None)
+            if not path:
+                raise HTTPException(422, "give a path, or two or more paths to combine as channels")
+            return registry.open(path).to_json()
+        except FileNotFoundError as exc:
+            raise HTTPException(404, f"file not found: {exc}") from None
         except (UnsupportedImage, ValueError) as exc:
             raise HTTPException(422, str(exc)) from None
 

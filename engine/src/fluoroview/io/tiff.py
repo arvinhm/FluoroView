@@ -22,7 +22,7 @@ import zarr
 
 from .biotek import is_biotek, parse_page
 from .colors import default_color, is_transmitted_name
-from .model import Channel, ImageInfo, Layout
+from .model import Channel, ImageInfo, Layout, file_fingerprint
 
 SUPPORTED_DTYPES = (np.dtype(np.uint8), np.dtype(np.uint16))
 _F_NOCACHE = getattr(fcntl, "F_NOCACHE", 48 if sys.platform == "darwin" else None)
@@ -238,6 +238,9 @@ class TiffSource:
             yield fd
         finally:
             os.close(fd)
+
+    def fingerprint(self) -> str:
+        return file_fingerprint(self.path)
 
     def close(self) -> None:
         os.close(self._fd)

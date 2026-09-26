@@ -11,7 +11,7 @@ from collections import OrderedDict
 import numpy as np
 
 from .events import EventBus
-from .io import Layout, TiffSource, is_openable
+from .io import Layout, MultiFileSource, Source, TiffSource, file_fingerprint, is_openable
 from .pyramid.builder import BuildCancelled, BuildProgress, PyramidBuilder
 from .pyramid.cache import PyramidCache
 from .pyramid.kernels import accumulate_histogram, downsample2
@@ -58,7 +58,7 @@ def histogram_summary(counts: np.ndarray, saturation: int | None, bins: int, com
 
 
 class Dataset:
-    def __init__(self, key: str, source: TiffSource, cache: PyramidCache, events: EventBus, *,
+    def __init__(self, key: str, source: Source, cache: PyramidCache, events: EventBus, *,
                  cache_full_resolution: bool = False, band_cache_bytes: int = 1 << 30):
         self.id = key
         self.source = source
@@ -248,17 +248,32 @@ class Registry:
             accumulate_histogram(a, np.zeros(bins, np.int64))
             downsample2(a)
 
-    def open(self, path: str) -> Dataset:
+    @staticmethod
+    def _checked(path: str) -> str:
         real = os.path.realpath(os.path.expanduser(path))
         if not os.path.isfile(real):
             raise FileNotFoundError(real)
         if not is_openable(os.path.basename(real)):
             raise ValueError("FluoroView opens TIFF files (.tif, .tiff, .ome.tif, .qptiff, .btf).")
-        key = self.cache.key_for(real)
+        return real
+
+    def open(self, path: str) -> Dataset:
+        real = self._checked(path)
+        return self._register(self.cache.key_for_fingerprint(file_fingerprint(real)), lambda: TiffSource(real))
+
+    def open_channels(self, paths: list[str]) -> Dataset:
+        """Open single-channel files of equal size as the channels of one image, in the given order."""
+        reals = [self._checked(p) for p in paths]
+        if len(set(reals)) != len(reals):
+            raise ValueError("The same file was chosen twice.")
+        key = self.cache.key_for_fingerprint("\n".join(file_fingerprint(r) for r in reals))
+        return self._register(key, lambda: MultiFileSource(reals))
+
+    def _register(self, key: str, make_source) -> Dataset:
         with self._lock:
             if key in self._datasets:
                 return self._datasets[key]
-            ds = Dataset(key, TiffSource(real), self.cache, self.events,
+            ds = Dataset(key, make_source(), self.cache, self.events,
                          cache_full_resolution=self.cache_full_resolution, band_cache_bytes=self.band_cache_bytes)
             self._datasets[key] = ds
         if self.cache.is_complete(key):

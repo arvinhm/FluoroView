@@ -28,6 +28,10 @@ export interface DatasetInfo {
   id: string;
   name: string;
   path: string;
+  /** folder shown in the project list */
+  folder: string;
+  /** member files when channels come from separate files; empty for one file */
+  files: string[];
   width: number;
   height: number;
   dtype: string;

@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..io.model import file_fingerprint
 from .store import FORMAT
 
 META = "fluoroview.json"
@@ -27,11 +28,12 @@ class PyramidCache:
         self._lock = threading.Lock()
 
     @staticmethod
-    def key_for(path: str | os.PathLike) -> str:
-        real = os.path.realpath(path)
-        st = os.stat(real)
-        ident = f"{real}\0{st.st_size}\0{st.st_mtime_ns}\0{FORMAT}".encode()
-        return hashlib.sha256(ident).hexdigest()[:24]
+    def key_for_fingerprint(fingerprint: str) -> str:
+        return hashlib.sha256(f"{fingerprint}\0{FORMAT}".encode()).hexdigest()[:24]
+
+    @classmethod
+    def key_for(cls, path: str | os.PathLike) -> str:
+        return cls.key_for_fingerprint(file_fingerprint(str(path)))
 
     def dir(self, key: str) -> Path:
         return self.root / key

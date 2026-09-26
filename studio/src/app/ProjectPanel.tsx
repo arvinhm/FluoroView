@@ -1,12 +1,12 @@
-import { Eye, EyeOff, FolderOpen, Image } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, Image, Layers } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { DatasetInfo, FsEntry, FsListing } from "../api/types";
 import { fmtBytes } from "../lib/format";
 import { useActive, useStudio } from "../state/store";
-import { dirname, openImage } from "./actions";
+import { openImage } from "./actions";
 
-function dotClass(entry: FsEntry, open: DatasetInfo | undefined): string {
+function dotClass(entry: FsEntry | null, open: DatasetInfo | undefined): string {
   if (open) {
     switch (open.build.state) {
       case "ready":
@@ -23,7 +23,7 @@ function dotClass(entry: FsEntry, open: DatasetInfo | undefined): string {
       }
     }
   }
-  return entry.cached ? "ready" : "idle";
+  return entry?.cached ? "ready" : "idle";
 }
 
 export function ProjectPanel() {
@@ -32,8 +32,9 @@ export function ProjectPanel() {
   const display = useStudio((s) => (ds ? s.display[ds.id] : undefined));
   const setChannel = useStudio((s) => s.setChannel);
   const setDialog = useStudio((s) => s.setDialog);
+  const setActive = useStudio((s) => s.setActive);
   const [listing, setListing] = useState<FsListing | null>(null);
-  const folder = ds ? dirname(ds.path) : null;
+  const folder = ds?.folder ?? null;
   const buildState = ds?.build.state;
 
   useEffect(() => {
@@ -45,7 +46,8 @@ export function ProjectPanel() {
     };
   }, [folder, buildState]);
 
-  const byPath = new Map(Object.values(datasets).map((d) => [d.path, d]));
+  const byPath = new Map(Object.values(datasets).filter((d) => d.files.length === 0).map((d) => [d.path, d]));
+  const combined = Object.values(datasets).filter((d) => d.files.length > 1 && d.folder === listing?.path);
   const files = listing?.entries.filter((e) => !e.dir) ?? [];
   const allVisible = display?.every((d) => d.visible) ?? false;
 
@@ -62,6 +64,14 @@ export function ProjectPanel() {
         {listing && <div className="hint" title={listing.path}>{listing.path}</div>}
         <div className="scroll">
           {!ds && <div className="empty-note">Open an image to list the scans in its folder.</div>}
+          {combined.map((d) => (
+            <button key={d.id} className={`row${d.id === ds?.id ? " sel" : ""}`} title={d.files.join("\n")}
+              onClick={() => setActive(d.id)}>
+              <Layers />
+              <span className="name">{d.channels.map((c) => c.name).join(" · ")}</span>
+              <span className="aux">{d.files.length} files</span>
+            </button>
+          ))}
           {files.map((f) => {
             const open = byPath.get(f.path);
             return (
