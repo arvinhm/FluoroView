@@ -128,7 +128,8 @@ def rows_for_scan(scan_name: str, pixel_size: float | None, measurements: list[d
                 "min": ch["min"], "max": ch["max"], "sum": ch["sum"], "n_clipped": ch["n_clipped"],
                 "background_mean": bg,
                 "mean_minus_background": ch["mean"] - bg if bg is not None and ch["mean"] is not None else None,
-                "pixel_size_um": pixel_size, "fluoroview_version": __version__, "measured_at": stamp,
+                "pixel_size_um": f"{pixel_size:.6f}" if pixel_size else None,
+                "fluoroview_version": __version__, "measured_at": stamp,
             })
     return rows
 

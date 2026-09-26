@@ -49,6 +49,7 @@ def test_region_lifecycle_and_measurement(opened):
     for c, row in enumerate(core):
         assert float(row["mean_minus_background"]) == pytest.approx(block[c].mean() - bg_means[c], abs=1e-3)
         assert row["is_background"] == "false" and row["file"] == ds["scan_key"]
+        assert row["pixel_size_um"] == f"{ds['pixel_size_um']:.6f}"
     assert all(row["is_background"] == "true" for row in rows if row["region_id"] == bg["id"])
 
     assert client.delete(f"{base}/regions/{bg['id']}").json()["background_region"] is None
