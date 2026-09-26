@@ -96,12 +96,12 @@ class Dataset:
         self.cache.touch(self.id)
 
     def build(self) -> None:
-        self.state = "building"
-        self._publish()
         root = self.cache.begin(self.id, self.info.path)
         self.store = PyramidStore.create(root, self.info, TILE)
         self.builder = PyramidBuilder(self.source, self.store, write_level0=self.level0_cached,
                                       on_progress=self._on_progress, cancel=self._cancel)
+        self.state = "building"
+        self._publish()
         t0 = time.perf_counter()
         try:
             self.builder.run()
@@ -135,7 +135,7 @@ class Dataset:
         self._publish(elapsed_s=round(p.elapsed_s, 3))
 
     def _publish(self, **extra) -> None:
-        self.events.publish({"type": "dataset", "dataset": self.build_json() | extra, "id": self.id})
+        self.events.publish({"type": "build", "id": self.id, "build": self.build_json() | extra})
 
     # -- reads ---------------------------------------------------------------------------------
 

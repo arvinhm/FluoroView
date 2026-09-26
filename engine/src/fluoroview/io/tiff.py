@@ -21,7 +21,7 @@ import tifffile
 import zarr
 
 from .biotek import is_biotek, parse_page
-from .colors import default_color
+from .colors import default_color, is_transmitted_name
 from .model import Channel, ImageInfo, Layout
 
 SUPPORTED_DTYPES = (np.dtype(np.uint8), np.dtype(np.uint16))
@@ -109,6 +109,7 @@ class TiffSource:
         names: list[str | None] = [None] * n_channels
         ex: list[float | None] = [None] * n_channels
         em: list[float | None] = [None] * n_channels
+        transmitted: list[bool | None] = [None] * n_channels
         pixel_size = saturation = None
         acquisition: dict = {}
         vendor = "tiff"
@@ -119,6 +120,7 @@ class TiffSource:
             for c, page in enumerate(pages):
                 meta = parse_page(tf.pages[page.index].description)
                 names[c], ex[c], em[c] = meta.channel_name, meta.excitation_nm, meta.emission_nm
+                transmitted[c] = meta.transmitted
                 if c == 0:
                     pixel_size, saturation, acquisition = meta.pixel_size_um, meta.saturation, meta.acquisition
         elif tf.is_ome and tf.ome_metadata:
@@ -139,14 +141,19 @@ class TiffSource:
 
         if chan_axis == "S" and n_channels == 3 and not any(names):
             names = ["Red", "Green", "Blue"]
+        for c in range(n_channels):
+            if transmitted[c] is None:
+                transmitted[c] = em[c] is None and is_transmitted_name(names[c] or "")
+        rgb = chan_axis == "S" and n_channels == 3
         channels = tuple(
             Channel(
                 index=c,
                 name=names[c] or f"Channel {c + 1}",
-                color=("#ff4b3e", "#2bff6b", "#3d7aff")[c] if chan_axis == "S" and n_channels == 3
-                else default_color(c, names[c] or "", em[c]),
+                color=("#ff4b3e", "#2bff6b", "#3d7aff")[c] if rgb
+                else default_color(c, names[c] or "", em[c], bool(transmitted[c])),
                 excitation_nm=ex[c],
                 emission_nm=em[c],
+                kind="transmitted" if transmitted[c] and not rgb else "fluorescence",
             )
             for c in range(n_channels)
         )

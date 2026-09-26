@@ -13,7 +13,6 @@ import itertools
 import queue
 import threading
 import time
-from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
@@ -81,8 +80,10 @@ class PyramidBuilder:
         buf_ty = dict.fromkeys(buffers, 0)
         last_flush = dict.fromkeys(buffers, 0.0)
         committed = list(self.rows_ready)
-        pending: deque[tuple[int, list[Future], list[int]]] = deque()
         self._t0 = time.perf_counter()
+        self._publish_error: BaseException | None = None
+        slots = threading.Semaphore(self.max_pending_bands)
+        done_q: queue.Queue = queue.Queue()
 
         bands: queue.Queue = queue.Queue(maxsize=2)
         stop = threading.Event()
@@ -92,7 +93,9 @@ class PyramidBuilder:
             ThreadPoolExecutor(n_ch, thread_name_prefix="band-compute") as compute,
         ):
             reader = threading.Thread(target=self._read_bands, args=(fd, band_rows, bands, stop), daemon=True)
+            publisher = threading.Thread(target=self._publish_bands, args=(done_q, slots, height), daemon=True)
             reader.start()
+            publisher.start()
             try:
                 while True:
                     t = time.perf_counter()
@@ -102,6 +105,8 @@ class PyramidBuilder:
                         break
                     if isinstance(item, BaseException):
                         raise item
+                    if self._publish_error is not None:
+                        raise self._publish_error
                     if self.cancel.is_set():
                         raise BuildCancelled
                     y0, y1, planes = item
@@ -143,16 +148,21 @@ class PyramidBuilder:
                             last_flush[k] = now
 
                     committed = ready
-                    pending.append((y1, futures, ready))
-                    self._publish_done(pending, height, force=max(0, len(pending) - self.max_pending_bands))
-                self._publish_done(pending, height, force=len(pending))
+                    t = time.perf_counter()
+                    slots.acquire()
+                    self.timings["wait_write"] += time.perf_counter() - t
+                    done_q.put((y1, futures, ready))
             finally:
+                done_q.put(None)
+                publisher.join()
                 stop.set()
                 while reader.is_alive():
                     try:
                         bands.get_nowait()
                     except queue.Empty:
                         reader.join(timeout=0.05)
+        if self._publish_error is not None:
+            raise self._publish_error
 
     def _process_channel(self, c: int, plane: np.ndarray) -> list[np.ndarray]:
         accumulate_histogram(plane, self.histograms[c])
@@ -172,24 +182,23 @@ class PyramidBuilder:
             for tx in range(self.store.levels[level].tiles_x(tile))
         ]
 
-    def _publish_done(self, pending: deque, height: int, force: int) -> None:
-        """Publish finished bands in order; block on the oldest ``force`` bands first."""
-        while pending:
-            y1, futures, ready = pending[0]
-            if force > 0:
-                t = time.perf_counter()
-                wait(futures)
-                self.timings["wait_write"] += time.perf_counter() - t
-                force -= 1
-            elif not all(f.done() for f in futures):
-                return
-            for f in futures:
-                f.result()
-            pending.popleft()
-            self.rows_ready = ready
-            if self.on_progress:
-                self.on_progress(BuildProgress(rows_done=y1, rows_ready=tuple(ready), fraction=y1 / height,
-                                               elapsed_s=time.perf_counter() - self._t0))
+    def _publish_bands(self, done_q: queue.Queue, slots: threading.Semaphore, height: int) -> None:
+        """Announce each band, in order, as soon as all of its chunks are on disk."""
+        while (item := done_q.get()) is not None:
+            y1, futures, ready = item
+            wait(futures)
+            try:
+                for f in futures:
+                    f.result()
+            except BaseException as exc:  # re-raised by run()
+                self._publish_error = exc
+            else:
+                self.rows_ready = ready
+                if self.on_progress and self._publish_error is None:
+                    self.on_progress(BuildProgress(rows_done=y1, rows_ready=tuple(ready), fraction=y1 / height,
+                                                   elapsed_s=time.perf_counter() - self._t0))
+            finally:
+                slots.release()
 
     def _read_bands(self, fd, band_rows: int, out: queue.Queue, stop: threading.Event) -> None:
         height = self.source.info.height

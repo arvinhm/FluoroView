@@ -1,9 +1,12 @@
 import numpy as np
 import pytest
+import tifffile
 
 from fluoroview.io import Layout, TiffSource
 from fluoroview.io.biotek import parse_channel
-from fluoroview.io.colors import PALETTE
+from fluoroview.io.colors import PALETTE, TRANSMITTED
+
+from .conftest import BIOTEK_XML, make_planes
 
 
 @pytest.mark.parametrize(
@@ -46,6 +49,23 @@ def test_read_rows_match_source(fixture, request):
             rows = src.read_rows(c, y0, y1)
             assert rows.flags.c_contiguous
             np.testing.assert_array_equal(rows, data[c, y0:y1])
+    src.close()
+
+
+def test_biotek_bright_field_is_transmitted(tmp_path):
+    h, w = 64, 96
+    data = make_planes(2, h, w)
+    fluor = BIOTEK_XML.format(w=w, h=h, wum=63, hum=42, name="DAPI", ex=377, em=447)
+    bright = (BIOTEK_XML.format(w=w, h=h, wum=63, hum=42, name="X", ex=0, em=0)
+              .replace('Color="Stitched[X 0,0]"', 'Color="Stitched[Bright Field]"')
+              .replace("<BrightField>FALSE</BrightField>", "<BrightField>TRUE</BrightField>"))
+    path = tmp_path / "bf.tif"
+    with tifffile.TiffWriter(path) as tif:
+        for plane, xml in zip(data, (fluor, bright), strict=True):
+            tif.write(plane, description=xml, rowsperstrip=h, metadata=None, contiguous=False)
+    src = TiffSource(path)
+    assert [(c.name, c.kind) for c in src.info.channels] == [("DAPI", "fluorescence"), ("Bright Field", "transmitted")]
+    assert src.info.channels[1].color == TRANSMITTED
     src.close()
 
 

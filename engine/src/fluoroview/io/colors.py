@@ -20,7 +20,17 @@ _BY_NAME = (
 )
 
 
-def default_color(index: int, name: str, emission_nm: float | None = None) -> str:
+TRANSMITTED = "#c8cbd1"
+_TRANSMITTED_NAMES = re.compile(r"bright\s*field|brightfield|phase|\bdic\b|\bbf\b|transmitted", re.I)
+
+
+def is_transmitted_name(name: str) -> bool:
+    return bool(_TRANSMITTED_NAMES.search(name or ""))
+
+
+def default_color(index: int, name: str, emission_nm: float | None = None, transmitted: bool = False) -> str:
+    if transmitted:
+        return TRANSMITTED
     if emission_nm:
         for limit, slot in ((490, 0), (560, 1), (630, 2), (720, 3)):
             if emission_nm < limit:

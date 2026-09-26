@@ -26,6 +26,7 @@ class BioTekPage:
     width_um: float | None
     height_um: float | None
     saturation: int | None
+    transmitted: bool = False
     acquisition: dict = field(default_factory=dict)
 
     @property
@@ -63,6 +64,8 @@ def parse_page(description: str) -> BioTekPage:
 
     channel = root.find("ImageAcquisition/Channel")
     name, ex, em = parse_channel(channel.get("Color", "") if channel is not None else "")
+    transmitted = channel is not None and any(
+        (channel.findtext(tag) or "").strip().upper() == "TRUE" for tag in ("BrightField", "PhaseContrast"))
     width_px, height_px = number("ImageAcquisition/PixelWidth"), number("ImageAcquisition/PixelHeight")
     saturation = number("System/Camera/SaturationLevel")
 
@@ -91,5 +94,6 @@ def parse_page(description: str) -> BioTekPage:
         width_um=number("ImageAcquisition/ImageWidthMicrons"),
         height_um=number("ImageAcquisition/ImageHeightMicrons"),
         saturation=int(saturation) if saturation else None,
+        transmitted=transmitted,
         acquisition={k: v for k, v in acquisition.items() if v is not None},
     )

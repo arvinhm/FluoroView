@@ -20,6 +20,8 @@ class Channel:
     color: str
     excitation_nm: float | None = None
     emission_nm: float | None = None
+    kind: str = "fluorescence"
+    """"fluorescence" or "transmitted" (bright field, phase contrast, DIC)."""
 
 
 @dataclass(frozen=True)
