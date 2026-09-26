@@ -10,6 +10,7 @@ import { handleShortcut } from "./commands";
 import { Inspector } from "./Inspector";
 import { OpenDialog } from "./OpenDialog";
 import { ProjectPanel } from "./ProjectPanel";
+import { ScanGallery } from "./ScanGallery";
 import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
 
@@ -34,8 +35,14 @@ export function App() {
   const ds = useActive();
   const dialog = useStudio((s) => s.dialog);
   const notice = useStudio((s) => s.notice);
+  const page = useStudio((s) => s.page);
+  const accent = useStudio((s) => s.accent);
   const setNotice = useStudio((s) => s.setNotice);
   const histogramAt = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    document.documentElement.dataset.accent = accent;
+  }, [accent]);
 
   useEffect(() => {
     const s = useStudio.getState();
@@ -87,7 +94,10 @@ export function App() {
     <div className="app">
       <TopBar />
       <ProjectPanel />
-      <main className="canvas-area">{ds ? <Viewer key={ds.id} dataset={ds} /> : <Welcome />}</main>
+      <main className="canvas-area">
+        {ds ? <Viewer key={ds.id} dataset={ds} /> : <Welcome />}
+        {ds && page === "scans" && <ScanGallery />}
+      </main>
       <Inspector />
       <StatusBar />
       {dialog === "open" && <OpenDialog />}

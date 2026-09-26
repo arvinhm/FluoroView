@@ -30,7 +30,7 @@ export function TopBar() {
 
   return (
     <header className="bar">
-      <span className="mark">FluoroView<span className="ver">4.0</span></span>
+      <span className="mark">FluoroView<sup>4</sup></span>
       <div ref={wrap} style={{ display: "flex" }}>
         {MENU_GROUPS.map((group) => (
           <div key={group} className="menu-wrap">

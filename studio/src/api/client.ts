@@ -56,6 +56,12 @@ export const api = {
   pixel: (id: string, x: number, y: number, signal?: AbortSignal) =>
     request<{ values: number[] }>(`/datasets/${id}/pixel?x=${x}&y=${y}`, { signal }),
   list: (path?: string) => request<FsListing>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  /** PNG preview of a scan whose pyramid is cached; rejects with 404 for scans not read yet. */
+  thumbnail: async (path: string, size = 480, signal?: AbortSignal): Promise<Blob> => {
+    const res = await fetch(`/api/v1/thumbnail?path=${encodeURIComponent(path)}&size=${size}`, { headers: auth, signal });
+    if (!res.ok) throw new ApiError(res.status, res.statusText);
+    return res.blob();
+  },
 };
 
 export type TileResult =

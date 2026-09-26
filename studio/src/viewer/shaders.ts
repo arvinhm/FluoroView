@@ -37,6 +37,7 @@ uniform bool uSmooth;
 uniform bool uClip;
 uniform float uGrid;
 uniform float uScale;
+uniform float uAlpha;
 in vec2 vUV;
 in vec2 vWorld;
 out vec4 outColor;
@@ -75,5 +76,5 @@ void main() {
     float onePx = 1.0 / uScale;
     col = mix(col, vec3(0.32), uGrid * float(g.x < onePx || g.y < onePx));
   }
-  outColor = vec4(col, 1.0);
+  outColor = vec4(col, uAlpha);
 }`;

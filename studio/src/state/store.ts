@@ -29,9 +29,21 @@ export interface Options {
   grid: boolean;
   clip: boolean;
   minimap: boolean;
+  /** composite plus one panel per visible channel, all showing the same view */
+  gallery: boolean;
+  histLog: boolean;
 }
 
 export type Dialog = "open" | "palette" | "shortcuts" | null;
+export type Accent = "champagne" | "ice" | "white";
+export type Page = "viewer" | "scans";
+
+const ACCENT_KEY = "fluoroview.accent";
+
+function storedAccent(): Accent {
+  const v = typeof localStorage !== "undefined" ? localStorage.getItem(ACCENT_KEY) : null;
+  return v === "ice" || v === "white" || v === "champagne" ? v : "champagne";
+}
 
 interface StudioState {
   datasets: Record<string, DatasetInfo>;
@@ -43,6 +55,8 @@ interface StudioState {
   cursor: CursorReadout | null;
   options: Options;
   dialog: Dialog;
+  accent: Accent;
+  page: Page;
   connected: boolean;
   notice: string | null;
 
@@ -57,6 +71,8 @@ interface StudioState {
   setCursor: (c: CursorReadout | null) => void;
   setOption: <K extends keyof Options>(key: K, value: Options[K]) => void;
   setDialog: (d: Dialog) => void;
+  setAccent: (a: Accent) => void;
+  setPage: (p: Page) => void;
   setConnected: (v: boolean) => void;
   setNotice: (n: string | null) => void;
 }
@@ -79,8 +95,10 @@ export const useStudio = create<StudioState>((set, get) => ({
   histograms: {},
   view: null,
   cursor: null,
-  options: { smooth: false, grid: true, clip: false, minimap: true },
+  options: { smooth: false, grid: true, clip: false, minimap: true, gallery: false, histLog: true },
   dialog: null,
+  accent: storedAccent(),
+  page: "viewer",
   connected: false,
   notice: null,
 
@@ -92,7 +110,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       histograms: s.histograms[ds.id] ? s.histograms : { ...s.histograms, [ds.id]: [] },
     })),
 
-  setActive: (id) => set({ activeId: id, cursor: null }),
+  setActive: (id) => set({ activeId: id, cursor: null, page: "viewer" }),
 
   updateBuild: (id, build) =>
     set((s) => {
@@ -157,6 +175,11 @@ export const useStudio = create<StudioState>((set, get) => ({
   setCursor: (cursor) => set({ cursor }),
   setOption: (key, value) => set((s) => ({ options: { ...s.options, [key]: value } })),
   setDialog: (dialog) => set({ dialog }),
+  setAccent: (accent) => {
+    localStorage.setItem(ACCENT_KEY, accent);
+    set({ accent });
+  },
+  setPage: (page) => set({ page }),
   setConnected: (connected) => set({ connected }),
   setNotice: (notice) => set({ notice }),
 }));

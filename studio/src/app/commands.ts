@@ -1,4 +1,4 @@
-import { useStudio } from "../state/store";
+import { type Accent, useStudio } from "../state/store";
 import { runViewerCommand } from "../viewer/commands";
 
 export type CommandGroup = "File" | "View" | "Image" | "Help";
@@ -22,18 +22,28 @@ export function buildCommands(): Command[] {
   const ds = id ? s.datasets[id] : undefined;
   const display = id ? s.display[id] ?? [] : [];
   const none = !ds;
-  const toggle = (key: "grid" | "smooth" | "minimap" | "clip") => () => s.setOption(key, !s.options[key]);
+  const toggle = (key: "grid" | "smooth" | "minimap" | "clip" | "gallery" | "histLog") => () =>
+    s.setOption(key, !s.options[key]);
+  const accents: [Accent, string][] = [["champagne", "Champagne"], ["ice", "Ice"], ["white", "White"]];
 
   const commands: Command[] = [
     { id: "open", group: "File", title: "Open image…", keys: "⌘O", run: () => s.setDialog("open") },
+    { id: "scans", group: "File", title: "Scan gallery", checked: s.page === "scans", disabled: none,
+      run: () => s.setPage(s.page === "scans" ? "viewer" : "scans") },
     { id: "zoom-in", group: "View", title: "Zoom in", keys: "⌘=", disabled: none, run: () => runViewerCommand("zoom-in") },
     { id: "zoom-out", group: "View", title: "Zoom out", keys: "⌘−", disabled: none, run: () => runViewerCommand("zoom-out") },
     { id: "fit", group: "View", title: "Fit to window", keys: "⌘0", disabled: none, run: () => runViewerCommand("fit") },
     { id: "actual", group: "View", title: "Actual pixels (100%)", keys: "⌘1", disabled: none, run: () => runViewerCommand("actual") },
-    { id: "grid", group: "View", title: "Pixel grid from 800%", keys: "G", checked: s.options.grid, run: toggle("grid") },
+    { id: "gallery", group: "View", title: "Channel gallery", keys: "G", checked: s.options.gallery, run: toggle("gallery") },
+    { id: "grid", group: "View", title: "Pixel grid from 800%", keys: "⇧G", checked: s.options.grid, run: toggle("grid") },
     { id: "smooth", group: "View", title: "Smooth magnification", keys: "S", checked: s.options.smooth, run: toggle("smooth") },
     { id: "minimap", group: "View", title: "Minimap", keys: "M", checked: s.options.minimap, run: toggle("minimap") },
     { id: "clip", group: "View", title: "Highlight clipped pixels", keys: "C", checked: s.options.clip, run: toggle("clip") },
+    { id: "hist-log", group: "View", title: "Log-scaled histograms", keys: "L", checked: s.options.histLog, run: toggle("histLog") },
+    ...accents.map(([accent, label]): Command => ({
+      id: `accent-${accent}`, group: "View", title: `Accent: ${label}`, checked: s.accent === accent,
+      run: () => s.setAccent(accent),
+    })),
     { id: "auto", group: "Image", title: "Auto contrast, all channels", keys: "A", disabled: none,
       run: () => id && s.autoContrast(id) },
   ];
@@ -100,14 +110,16 @@ export function handleShortcut(e: KeyboardEvent): void {
     "+": () => runViewerCommand("zoom-in"),
     "-": () => runViewerCommand("zoom-out"),
     "0": () => runViewerCommand("fit"),
-    g: () => s.setOption("grid", !s.options.grid),
+    g: () => s.setOption("gallery", !s.options.gallery),
+    G: () => s.setOption("grid", !s.options.grid),
     s: () => s.setOption("smooth", !s.options.smooth),
     m: () => s.setOption("minimap", !s.options.minimap),
     c: () => s.setOption("clip", !s.options.clip),
+    l: () => s.setOption("histLog", !s.options.histLog),
     a: () => id && s.autoContrast(id),
     "?": () => s.setDialog("shortcuts"),
   };
-  const action = single[e.key] ?? single[key];
+  const action = single[e.key] ?? (e.shiftKey ? undefined : single[key]);
   if (action && (id || e.key === "?")) {
     e.preventDefault();
     action();

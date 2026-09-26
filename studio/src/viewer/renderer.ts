@@ -18,6 +18,8 @@ export interface DrawCall {
   /** texel rect: u, v, du, dv */
   uv: [number, number, number, number];
   smooth: boolean;
+  /** 1 = opaque; below 1 while a tile fades in over its coarser fallback */
+  alpha?: number;
 }
 
 /** A device-pixel rectangle with a top-left origin. */
@@ -30,7 +32,7 @@ export interface Region {
 
 const UNIFORMS = [
   "uRect", "uUV", "uCenter", "uScale", "uViewport", "uTex", "uTexSize", "uCount", "uLayer", "uWindow",
-  "uInvGamma", "uColor", "uSaturation", "uSmooth", "uClip", "uGrid",
+  "uInvGamma", "uColor", "uSaturation", "uSmooth", "uClip", "uGrid", "uAlpha",
 ] as const;
 
 type UniformName = (typeof UNIFORMS)[number];
@@ -149,6 +151,8 @@ export class Renderer {
     gl.uniform2f(this.loc.uViewport, region.width, region.height);
     gl.uniform1i(this.loc.uClip, opts.clip ? 1 : 0);
     gl.uniform1f(this.loc.uGrid, opts.grid);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   }
 
   draw(call: DrawCall): void {
@@ -159,10 +163,12 @@ export class Renderer {
     gl.uniform4f(this.loc.uRect, ...call.rect);
     gl.uniform4f(this.loc.uUV, ...call.uv);
     gl.uniform1i(this.loc.uSmooth, call.smooth ? 1 : 0);
+    gl.uniform1f(this.loc.uAlpha, call.alpha ?? 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 
   end(): void {
     this.gl.disable(this.gl.SCISSOR_TEST);
+    this.gl.disable(this.gl.BLEND);
   }
 }

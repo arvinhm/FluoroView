@@ -1,11 +1,13 @@
 import { fetchTile, type TileResult } from "../api/client";
 import type { DatasetInfo } from "../api/types";
+import { reducedMotion } from "../motion/motion";
 import { type Camera, chooseLevel, type TileRange, type Viewport, visibleTiles } from "./camera";
 import type { DrawCall } from "./renderer";
 
 const MAX_INFLIGHT = 8;
 const GPU_BUDGET_BYTES = 384 * 1024 * 1024;
 const CPU_TILES = 48;
+const FADE_MS = 180;
 
 /** 0 = missing, 1 = partial (pyramid still building), 2 = final */
 type LayerState = 0 | 1 | 2;
@@ -23,6 +25,8 @@ interface Tile {
   stale: boolean[];
   used: number;
   bytes: number;
+  /** when the tile first became drawable; drives its fade-in */
+  shownAt: number;
 }
 
 interface Want {
@@ -31,10 +35,16 @@ interface Want {
   priority: number;
 }
 
+export interface View {
+  cam: Camera;
+  vp: Viewport;
+}
+
 export interface Plan {
   draws: DrawCall[];
   level: number;
-  loading: number;
+  /** a tile is still fading in; keep drawing frames */
+  fading: boolean;
 }
 
 export function tileKey(level: number, ty: number, tx: number): string {
@@ -66,54 +76,84 @@ export class TileManager {
     return this.ds.levels.length - 1;
   }
 
-  /** Draw list for this frame; also requests missing tiles, nearest to the centre first. */
-  plan(cam: Camera, vp: Viewport, channels: number[], smoothMagnify: boolean): Plan {
+  /** Draw lists for several views sharing one set of tile requests (nearest to each centre first). */
+  planViews(views: View[], channels: number[], smoothMagnify: boolean): { plans: Plan[]; loading: number } {
     this.frame++;
+    const now = performance.now();
+    const fadeMs = reducedMotion() ? 0 : FADE_MS;
+    const wants = new Map<string, Want>();
+    const plans = views.map((v) => this.planOne(v, channels, smoothMagnify, now, fadeMs, wants));
+    const list = [...wants.values()];
+    this.schedule(list);
+    this.evict();
+    return { plans, loading: this.inflight.size + list.length };
+  }
+
+  private planOne({ cam, vp }: View, channels: number[], smoothMagnify: boolean, now: number, fadeMs: number,
+    wants: Map<string, Want>): Plan {
     const top = this.topLevel;
     const level = chooseLevel(cam.scale, this.ds.levels.length);
-    const wants: Want[] = [];
-    const draws: DrawCall[] = [];
     const [cxT, cyT] = [cam.cx / 2 ** level / this.T, cam.cy / 2 ** level / this.T];
 
     for (const lvl of level === top ? [top] : [top, level]) {
       const info = this.ds.levels[lvl]!;
-      const range = visibleTiles(cam, vp, lvl, info.width, info.height, this.T, lvl === level ? 1 : 0);
-      for (const [ty, tx] of each(range)) {
+      for (const [ty, tx] of each(visibleTiles(cam, vp, lvl, info.width, info.height, this.T, lvl === level ? 1 : 0))) {
         const t = this.tile(lvl, ty, tx);
         t.used = this.frame;
         const priority = lvl === top ? -1 : Math.hypot(tx + 0.5 - cxT, ty + 0.5 - cyT);
         for (const c of channels) {
-          if ((t.layers[c] === 0 && !t.pending[c]) || t.stale[c]) wants.push({ tile: t, c, priority });
+          if ((t.layers[c] === 0 && !t.pending[c]) || t.stale[c]) {
+            const key = `${t.key}:${c}`;
+            const prev = wants.get(key);
+            if (!prev || prev.priority > priority) wants.set(key, { tile: t, c, priority });
+          }
         }
       }
     }
 
     const info = this.ds.levels[level]!;
+    const under: DrawCall[] = [];
+    const over: DrawCall[] = [];
+    let fading = false;
+    const texelPx = cam.scale * 2 ** level;
     for (const [ty, tx] of each(visibleTiles(cam, vp, level, info.width, info.height, this.T))) {
       const t = this.tiles.get(tileKey(level, ty, tx));
       const rect = this.worldRect(level, ty, tx);
+      const own = (alpha: number): DrawCall => ({ texture: t!.texture!, texSize: [t!.width, t!.height], rect,
+        uv: [0, 0, t!.width, t!.height], smooth: texelPx < 1 || smoothMagnify, alpha });
       if (t && this.complete(t, channels)) {
-        const texelPx = cam.scale * 2 ** level;
-        draws.push({ texture: t.texture!, texSize: [t.width, t.height], rect, uv: [0, 0, t.width, t.height],
-          smooth: texelPx < 1 || smoothMagnify });
+        if (!t.shownAt) t.shownAt = now;
+        const alpha = fadeMs ? Math.min(1, (now - t.shownAt) / fadeMs) : 1;
+        if (alpha < 1) {
+          fading = true;
+          const fb = this.fallback(level, ty, tx, channels, rect);
+          if (fb) under.push(fb);
+        }
+        over.push(own(alpha));
         continue;
       }
-      for (let k = 1; level + k <= top; k++) {
-        const f = 2 ** k;
-        const [aty, atx] = [Math.floor(ty / f), Math.floor(tx / f)];
-        const a = this.tiles.get(tileKey(level + k, aty, atx));
-        if (!a || !this.complete(a, channels)) continue;
-        const w = Math.min(this.T, info.width - tx * this.T);
-        const h = Math.min(this.T, info.height - ty * this.T);
-        draws.push({ texture: a.texture!, texSize: [a.width, a.height], rect,
-          uv: [(tx * this.T) / f - atx * this.T, (ty * this.T) / f - aty * this.T, w / f, h / f], smooth: true });
-        break;
-      }
+      const fb = this.fallback(level, ty, tx, channels, rect);
+      if (fb) under.push(fb);
+      else if (t?.texture && channels.some((c) => t.layers[c]! > 0)) over.push(own(1));
     }
+    return { draws: [...under, ...over], level, fading };
+  }
 
-    this.schedule(wants);
-    this.evict();
-    return { draws, level, loading: this.inflight.size + wants.length };
+  /** The nearest coarser tile that has every visible channel, cropped to this tile's area. */
+  private fallback(level: number, ty: number, tx: number, channels: number[],
+    rect: [number, number, number, number]): DrawCall | null {
+    const info = this.ds.levels[level]!;
+    for (let k = 1; level + k <= this.topLevel; k++) {
+      const f = 2 ** k;
+      const [aty, atx] = [Math.floor(ty / f), Math.floor(tx / f)];
+      const a = this.tiles.get(tileKey(level + k, aty, atx));
+      if (!a || !this.complete(a, channels)) continue;
+      const w = Math.min(this.T, info.width - tx * this.T);
+      const h = Math.min(this.T, info.height - ty * this.T);
+      return { texture: a.texture!, texSize: [a.width, a.height], rect, smooth: true, alpha: 1,
+        uv: [(tx * this.T) / f - atx * this.T, (ty * this.T) / f - aty * this.T, w / f, h / f] };
+    }
+    return null;
   }
 
   /** Coarsest-level draws covering the whole image (for the minimap). */
@@ -180,6 +220,7 @@ export class TileManager {
         stale: new Array<boolean>(n).fill(false),
         used: this.frame,
         bytes: 0,
+        shownAt: 0,
       };
       this.tiles.set(key, t);
     }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
 import type { DatasetInfo } from "../api/types";
 import { AUTO_HIGH, AUTO_LOW, dtypeMax } from "../lib/contrast";
 import { fmtInt, fmtPercent } from "../lib/format";
@@ -11,6 +11,7 @@ type Tab = "channels" | "info";
 function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
   const d = useStudio((s) => s.display[ds.id]?.[c]);
   const h = useStudio((s) => s.histograms[ds.id]?.[c]);
+  const log = useStudio((s) => s.options.histLog);
   const setChannel = useStudio((s) => s.setChannel);
   const ch = ds.channels[c];
   if (!d || !ch) return null;
@@ -20,14 +21,9 @@ function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
   return (
     <div className={`ch${d.visible ? "" : " off"}`}>
       <div className="ch-h">
-        <button className={`checkbox${d.visible ? " on" : ""}`} role="checkbox" aria-checked={d.visible}
-          title={`${d.visible ? "Hide" : "Show"} ${ch.name} (${c + 1})`}
-          onClick={() => setChannel(ds.id, c, { visible: !d.visible })}>
-          {d.visible && (
-            <svg viewBox="0 0 10 10"><path d="M2 5.2 4.1 7.3 8 3" fill="none" stroke="#0b0c0e" strokeWidth="1.6" /></svg>
-          )}
-        </button>
-        <span className="sw" style={{ background: d.color }} />
+        <button className={`chip${d.visible ? " on" : ""}`} style={{ "--c": d.color } as CSSProperties} role="switch"
+          aria-checked={d.visible} title={`${d.visible ? "Hide" : "Show"} ${ch.name} (${c + 1})`}
+          onClick={() => setChannel(ds.id, c, { visible: !d.visible })} />
         <span className="ch-name">{ch.name}</span>
         {ch.excitation_nm && ch.emission_nm ? <span className="ch-wl">{ch.excitation_nm}/{ch.emission_nm} nm</span> : null}
         {clipped !== null && (
@@ -37,7 +33,7 @@ function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
           </span>
         )}
       </div>
-      <HistogramView histogram={h} lo={d.lo} hi={d.hi} color={d.color}
+      <HistogramView histogram={h} lo={d.lo} hi={d.hi} gamma={d.gamma} color={d.color} log={log}
         onWindow={(lo, hi) => setChannel(ds.id, c, { lo, hi })} />
       <div className="fields">
         <NumberField label="Min" value={d.lo} min={0} max={d.hi - 1} step={Math.max(1, Math.round(top / 1000))}
@@ -52,12 +48,32 @@ function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
 }
 
 function Segmented<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  const index = Math.max(0, options.findIndex(([v]) => v === value));
   return (
-    <span className="seg">
+    <span className="seg" style={{ "--n": options.length, "--i": index } as CSSProperties}>
+      <span className="seg-thumb" />
       {options.map(([v, label]) => (
         <button key={v} className={v === value ? "on" : ""} onClick={() => onChange(v)}>{label}</button>
       ))}
     </span>
+  );
+}
+
+function Tabs<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [bar, setBar] = useState<{ x: number; w: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current?.querySelector<HTMLElement>(`[data-tab="${value}"]`);
+    if (el) setBar({ x: el.offsetLeft + 8, w: el.offsetWidth - 16 });
+  }, [value]);
+  return (
+    <div className="tabs" ref={ref} role="tablist">
+      {options.map(([v, label]) => (
+        <button key={v} data-tab={v} role="tab" aria-selected={v === value} className={`tab${v === value ? " on" : ""}`}
+          onClick={() => onChange(v)}>{label}</button>
+      ))}
+      {bar && <span className="tab-indicator" style={{ width: bar.w, transform: `translateX(${bar.x}px)` }} />}
+    </div>
   );
 }
 
@@ -87,6 +103,9 @@ function ChannelsTab({ ds }: { ds: DatasetInfo }) {
         <span>Minimap</span>
         <Segmented value={options.minimap ? "on" : "off"} options={[["off", "Off"], ["on", "On"]]}
           onChange={(v) => setOption("minimap", v === "on")} />
+        <span>Histogram scale</span>
+        <Segmented value={options.histLog ? "log" : "linear"} options={[["linear", "Linear"], ["log", "Log"]]}
+          onChange={(v) => setOption("histLog", v === "log")} />
       </div>
     </div>
   );
@@ -155,10 +174,7 @@ export function Inspector() {
   const [tab, setTab] = useState<Tab>("channels");
   return (
     <aside className="panel right">
-      <div className="tabs">
-        <button className={`tab${tab === "channels" ? " on" : ""}`} onClick={() => setTab("channels")}>Channels</button>
-        <button className={`tab${tab === "info" ? " on" : ""}`} onClick={() => setTab("info")}>Info</button>
-      </div>
+      <Tabs value={tab} options={[["channels", "Channels"], ["info", "Info"]]} onChange={setTab} />
       {!ds ? <div className="empty-note">No image open.</div> : tab === "channels" ? <ChannelsTab ds={ds} /> : <InfoTab ds={ds} />}
     </aside>
   );

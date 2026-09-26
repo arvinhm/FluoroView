@@ -1,4 +1,4 @@
-import { Eye, EyeOff, FolderOpen, Image, Layers } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, Image, LayoutGrid, Layers } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { DatasetInfo, FsEntry, FsListing } from "../api/types";
@@ -6,7 +6,7 @@ import { fmtBytes } from "../lib/format";
 import { useActive, useStudio } from "../state/store";
 import { openImage } from "./actions";
 
-function dotClass(entry: FsEntry | null, open: DatasetInfo | undefined): string {
+export function dotClass(entry: FsEntry | null, open: DatasetInfo | undefined): string {
   if (open) {
     switch (open.build.state) {
       case "ready":
@@ -33,6 +33,8 @@ export function ProjectPanel() {
   const setChannel = useStudio((s) => s.setChannel);
   const setDialog = useStudio((s) => s.setDialog);
   const setActive = useStudio((s) => s.setActive);
+  const page = useStudio((s) => s.page);
+  const setPage = useStudio((s) => s.setPage);
   const [listing, setListing] = useState<FsListing | null>(null);
   const folder = ds?.folder ?? null;
   const buildState = ds?.build.state;
@@ -55,9 +57,11 @@ export function ProjectPanel() {
     <aside className="panel left">
       <div className="sec grow">
         <div className="sec-h">
-          Project
-          {listing && <span className="meta">{listing.path.split("/").pop()} · {files.length} scans</span>}
+          <span className="caps">Project</span>
+          {listing && <span className="meta">{listing.path.split("/").pop()} · {files.length}</span>}
           <span className="act">
+            <button className={`ib${page === "scans" ? " on" : ""}`} title="Scan gallery" disabled={!ds}
+              onClick={() => setPage(page === "scans" ? "viewer" : "scans")}><LayoutGrid /></button>
             <button className="ib" title="Open image… (⌘O)" onClick={() => setDialog("open")}><FolderOpen /></button>
           </span>
         </div>
@@ -86,7 +90,7 @@ export function ProjectPanel() {
         </div>
       </div>
       <div className="sec">
-        <div className="sec-h">Layers</div>
+        <div className="sec-h"><span className="caps">Layers</span></div>
         {ds && display ? (
           <div className="row">
             <Image />

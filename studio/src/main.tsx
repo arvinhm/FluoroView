@@ -7,6 +7,9 @@ import "./design/styles.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./app/App";
+import { useStudio } from "./state/store";
+
+document.documentElement.dataset.accent = useStudio.getState().accent;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
