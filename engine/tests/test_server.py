@@ -1,6 +1,9 @@
+import io
+
 import numpy as np
 import pytest
 import tifffile
+from PIL import Image
 from starlette.websockets import WebSocketDisconnect
 
 from fluoroview.datasets import Dataset, NotReady
@@ -63,6 +66,17 @@ def test_open_build_and_serve_tiles(client, biotek_image):
 
     level0 = client.app.state.cache.pyramid_dir(ds["id"]) / "0"
     assert not any(p.is_file() for p in level0.rglob("*") if p.name != ".zarray"), "level 0 is read in place"
+
+
+def test_thumbnails_only_for_cached_scans(client, biotek_image):
+    path, _ = biotek_image
+    assert client.get("/api/v1/thumbnail", params={"path": str(path)}).status_code in (200, 404)
+    ds = wait_ready(client, client.post("/api/v1/datasets", json={"path": str(path)}).json()["id"])
+    r = client.get("/api/v1/thumbnail", params={"path": str(path), "size": 256})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    image = Image.open(io.BytesIO(r.content))
+    assert max(image.size) == 256 and image.mode == "RGB"
+    assert client.get(f"/api/v1/datasets/{ds['id']}/thumbnail", params={"size": 256}).content == r.content
 
 
 def test_open_files_as_channels(client, tmp_path):

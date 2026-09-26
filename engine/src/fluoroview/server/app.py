@@ -16,9 +16,11 @@ from .. import __version__
 from ..config import Settings
 from ..datasets import Dataset, NotReady, Registry
 from ..events import EventBus
-from ..io import UnsupportedImage, is_openable
+from ..io import TiffSource, UnsupportedImage, is_openable
 from ..projects import ProjectStore
 from ..pyramid.cache import PyramidCache
+from ..pyramid.store import PyramidStore
+from ..thumbnail import render_thumbnail
 from .routes_project import project_router
 from .security import LocalAccessMiddleware
 
@@ -126,6 +128,41 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(404, str(exc)) from None
         except NotReady:
             raise HTTPException(409, "pixel not available yet") from None
+
+    def cached_thumbnail(key: str, size: int, info_of) -> Response:
+        thumb = cache.dir(key) / f"thumbnail-{size}.png"
+        if not thumb.exists():
+            png = render_thumbnail(PyramidStore.open(cache.pyramid_dir(key)), cache.histograms(key), info_of(), size)
+            tmp = thumb.with_suffix(".tmp")
+            tmp.write_bytes(png)
+            os.replace(tmp, thumb)
+        return Response(thumb.read_bytes(), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+
+    @api.get("/thumbnail")
+    def file_thumbnail(path: str, size: int = Query(320, ge=64, le=1024)) -> Response:
+        """Preview of a scan whose pyramid is already cached; never reads an uncached scan."""
+        real = os.path.realpath(os.path.expanduser(path))
+        if not os.path.isfile(real) or not is_openable(os.path.basename(real)):
+            raise HTTPException(404, "no such image")
+        key = PyramidCache.key_for(real)
+        if not cache.is_complete(key):
+            raise HTTPException(404, "not cached yet")
+
+        def info():
+            src = TiffSource(real)
+            try:
+                return src.info
+            finally:
+                src.close()
+
+        return cached_thumbnail(key, size, info)
+
+    @api.get("/datasets/{ds_id}/thumbnail")
+    def dataset_thumbnail(ds_id: str, size: int = Query(320, ge=64, le=1024)) -> Response:
+        ds = dataset(ds_id)
+        if ds.state != "ready":
+            raise HTTPException(409, "pyramid not built yet")
+        return cached_thumbnail(ds.id, size, lambda: ds.info)
 
     @api.get("/fs/list")
     def fs_list(path: str | None = None) -> dict:
