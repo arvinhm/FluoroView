@@ -191,6 +191,18 @@ class Dataset:
             with self._band_lock:
                 self._band_inflight.pop(key).set()
 
+    def read_region(self, level: int, c: int, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
+        """Raw values of ``[x0, x1) x [y0, y1)`` at ``level``, assembled from tiles."""
+        out = np.empty((y1 - y0, x1 - x0), self.source.dtype)
+        for ty in range(y0 // TILE, (y1 - 1) // TILE + 1):
+            for tx in range(x0 // TILE, (x1 - 1) // TILE + 1):
+                data, _ = self.tile(level, c, ty, tx)
+                ty0, tx0 = ty * TILE, tx * TILE
+                ya, yb = max(y0, ty0), min(y1, ty0 + data.shape[0])
+                xa, xb = max(x0, tx0), min(x1, tx0 + data.shape[1])
+                out[ya - y0:yb - y0, xa - x0:xb - x0] = data[ya - ty0:yb - ty0, xa - tx0:xb - tx0]
+        return out
+
     def pixel(self, x: int, y: int) -> list[int]:
         if not (0 <= x < self.info.width and 0 <= y < self.info.height):
             raise IndexError("pixel out of range")

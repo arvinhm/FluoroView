@@ -53,11 +53,19 @@ class ImageInfo:
     def folder(self) -> str:
         return self.path if self.files else os.path.dirname(self.path)
 
+    @property
+    def scan_key(self) -> str:
+        """Identity of the scan inside its folder: the file name, or the joined names of combined files."""
+        if self.files:
+            return "+".join(os.path.basename(f) for f in self.files)
+        return os.path.basename(self.path)
+
     def to_json(self) -> dict:
         out = asdict(self)
         out["layout"] = self.layout.value
         out["name"] = self.name
         out["folder"] = self.folder
+        out["scan_key"] = self.scan_key
         return out
 
 

@@ -2,9 +2,37 @@
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pytest
 import tifffile
+from fastapi.testclient import TestClient
+
+from fluoroview.config import Settings
+from fluoroview.server.app import create_app
+
+TOKEN = "test-token"
+
+
+@pytest.fixture
+def client(tmp_path):
+    settings = Settings(token=TOKEN, cache_dir=tmp_path / "cache", projects_dir=tmp_path / "projects",
+                        studio_dir=None, extra_hosts=("testserver",))
+    with TestClient(create_app(settings)) as c:
+        c.headers["Authorization"] = f"Bearer {TOKEN}"
+        yield c
+
+
+def wait_ready(client, ds_id: str, timeout: float = 60.0) -> dict:
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        d = client.get(f"/api/v1/datasets/{ds_id}").json()
+        if d["build"]["state"] == "ready":
+            return d
+        assert d["build"]["state"] != "failed", d["build"]["error"]
+        time.sleep(0.05)
+    raise TimeoutError(ds_id)
 
 BIOTEK_CHANNELS = [("DAPI", 377, 447), ("GFP", 469, 525), ("RFP", 531, 593), ("CY5", 628, 685)]
 

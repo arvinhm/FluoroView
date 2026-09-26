@@ -13,12 +13,17 @@ def default_cache_dir() -> Path:
     return platformdirs.user_cache_path("FluoroView", appauthor=False) / "pyramids"
 
 
+def default_projects_dir() -> Path:
+    return platformdirs.user_data_path("FluoroView", appauthor=False) / "projects"
+
+
 @dataclass
 class Settings:
     host: str = "127.0.0.1"
     port: int = 0
     token: str = field(default_factory=lambda: secrets.token_urlsafe(32))
     cache_dir: Path = field(default_factory=default_cache_dir)
+    projects_dir: Path = field(default_factory=default_projects_dir)
     cache_limit_bytes: int = 20_000_000_000
     cache_full_resolution: bool = False
     """Also copy full-resolution tiles into the cache. Uncompressed sources are otherwise read in place."""

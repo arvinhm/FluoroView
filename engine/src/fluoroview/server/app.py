@@ -17,7 +17,9 @@ from ..config import Settings
 from ..datasets import Dataset, NotReady, Registry
 from ..events import EventBus
 from ..io import UnsupportedImage, is_openable
+from ..projects import ProjectStore
 from ..pyramid.cache import PyramidCache
+from .routes_project import project_router
 from .security import LocalAccessMiddleware
 
 _NOT_BUILT = """<!doctype html><meta charset="utf-8"><title>FluoroView</title>
@@ -159,6 +161,7 @@ def create_app(settings: Settings) -> FastAPI:
         return {"path": str(real), "parent": parent, "entries": entries}
 
     app.include_router(api)
+    app.include_router(project_router(registry, ProjectStore(settings.projects_dir)))
 
     @app.websocket("/api/v1/events")
     async def event_stream(ws: WebSocket) -> None:

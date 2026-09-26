@@ -1,40 +1,14 @@
-import time
-
 import numpy as np
 import pytest
 import tifffile
-from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from fluoroview.config import Settings
 from fluoroview.datasets import Dataset, NotReady
 from fluoroview.events import EventBus
 from fluoroview.io import TiffSource
 from fluoroview.pyramid.cache import PyramidCache
-from fluoroview.server.app import create_app
 
-from .conftest import ref_levels
-
-TOKEN = "test-token"
-
-
-@pytest.fixture
-def client(tmp_path):
-    settings = Settings(token=TOKEN, cache_dir=tmp_path / "cache", studio_dir=None, extra_hosts=("testserver",))
-    with TestClient(create_app(settings)) as c:
-        c.headers["Authorization"] = f"Bearer {TOKEN}"
-        yield c
-
-
-def wait_ready(client, ds_id: str, timeout: float = 60.0) -> dict:
-    t0 = time.time()
-    while time.time() - t0 < timeout:
-        d = client.get(f"/api/v1/datasets/{ds_id}").json()
-        if d["build"]["state"] == "ready":
-            return d
-        assert d["build"]["state"] != "failed", d["build"]["error"]
-        time.sleep(0.05)
-    raise TimeoutError(ds_id)
+from .conftest import TOKEN, ref_levels, wait_ready
 
 
 def test_api_requires_token(client):
