@@ -22,7 +22,7 @@ from ..config import Settings
 from ..datasets import Dataset, NotReady, Registry
 from ..events import EventBus
 from ..io import MultiFileSource, TiffSource, UnsupportedImage, file_fingerprint, is_openable
-from ..projects import ProjectStore
+from ..projects import ProjectStore, calibrated_pixel_size
 from ..pyramid.cache import PyramidCache
 from ..pyramid.store import PyramidStore
 from ..session import SUFFIX as SESSION_SUFFIX
@@ -64,6 +64,14 @@ def create_app(settings: Settings) -> FastAPI:
     cache.remove_incomplete(keep=set())
     registry = Registry(cache, events, cache_full_resolution=settings.cache_full_resolution,
                         band_cache_bytes=settings.band_cache_bytes)
+    projects = ProjectStore(settings.projects_dir)
+
+    def dataset_json(ds: Dataset) -> dict:
+        """A dataset as the studio sees it: the pixel size is the user's calibration when one is set."""
+        state = projects.scan(ds.info.folder, ds.info.scan_key)
+        file_px = ds.info.pixel_size_um
+        return {**ds.to_json(), "pixel_size_um": calibrated_pixel_size(state, file_px), "file_pixel_size_um": file_px,
+                "pixel_size_source": "user" if state.get("calibration") else "file" if file_px else None}
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -97,17 +105,17 @@ def create_app(settings: Settings) -> FastAPI:
 
     @api.get("/datasets")
     def list_datasets() -> list[dict]:
-        return [ds.to_json() for ds in registry.list()]
+        return [dataset_json(ds) for ds in registry.list()]
 
     @api.post("/datasets")
     def open_dataset(req: OpenRequest) -> dict:
         try:
             if req.paths and len(req.paths) > 1:
-                return registry.open_channels(req.paths).to_json()
+                return dataset_json(registry.open_channels(req.paths))
             path = req.path or (req.paths[0] if req.paths else None)
             if not path:
                 raise HTTPException(422, "give a path, or two or more paths to combine as channels")
-            return registry.open(path).to_json()
+            return dataset_json(registry.open(path))
         except FileNotFoundError as exc:
             raise HTTPException(404, f"file not found: {exc}") from None
         except (UnsupportedImage, ValueError) as exc:
@@ -115,7 +123,7 @@ def create_app(settings: Settings) -> FastAPI:
 
     @api.get("/datasets/{ds_id}")
     def get_dataset(ds_id: str) -> dict:
-        return dataset(ds_id).to_json()
+        return dataset_json(dataset(ds_id))
 
     @api.get("/datasets/{ds_id}/tiles/{level}/{c}/{ty}/{tx}")
     def get_tile(ds_id: str, level: int, c: int, ty: int, tx: int) -> Response:
@@ -279,7 +287,6 @@ def create_app(settings: Settings) -> FastAPI:
     app.include_router(api)
     exports = settings.cache_dir.parent / "exports"
     backups = settings.projects_dir.parent / "backups"
-    projects = ProjectStore(settings.projects_dir)
     app.include_router(project_router(registry, projects, exports, backups, session_thumbnail))
 
     @app.websocket("/api/v1/events")

@@ -188,7 +188,7 @@ class _Overlay:
 
 
 def render_figure(ds, p: Plan, displays: list[Display], *, regions: list[dict], notes: list[dict],
-                  scale_bar: bool, labels: bool) -> Image.Image:
+                  scale_bar: bool, labels: bool, pixel_size: float | None) -> Image.Image:
     shape = (p.panel_height, p.panel_width, 3)
     composite = np.zeros(shape, np.float32)
     channel_px: dict[int, np.ndarray] = {}
@@ -200,7 +200,7 @@ def render_figure(ds, p: Plan, displays: list[Display], *, regions: list[dict], 
         if c in p.panels:
             channel_px[c] = to_u8(rgb)
     canvas = Image.new("RGB", (p.width, p.height), GAP_COLOR)
-    px = ds.info.pixel_size_um
+    px = pixel_size
     for i, panel in enumerate(p.panels):
         img = Image.fromarray(to_u8(composite) if panel is None else channel_px[panel], "RGB")
         ov = _Overlay(img, p)
@@ -218,9 +218,9 @@ def render_figure(ds, p: Plan, displays: list[Display], *, regions: list[dict], 
     return canvas
 
 
-def provenance(ds, p: Plan, displays: list[Display]) -> dict:
+def provenance(ds, p: Plan, displays: list[Display], pixel_size: float | None) -> dict:
     """What the figure shows, for reproducibility. The file name only: figures are shared, paths are private."""
-    px = ds.info.pixel_size_um
+    px = pixel_size
     return {
         "software": f"FluoroView {__version__}",
         "created": now_iso(),
@@ -249,12 +249,12 @@ def encode_tiff(img: Image.Image, dpi: int, meta: dict) -> bytes:
     return buf.getvalue()
 
 
-def write_ome(ds, p: Plan, path: Path) -> None:
+def write_ome(ds, p: Plan, path: Path, pixel_size: float | None) -> None:
     """Raw values of every channel in the planned area, one plane at a time, with the physical pixel size."""
     lx0, ly0, lx1, ly1 = p.level_box
     n = len(ds.info.channels)
     meta: dict = {"axes": "CYX", "Channel": {"Name": [ch.name for ch in ds.info.channels]}}
-    px = ds.info.pixel_size_um
+    px = pixel_size
     if px:
         size = px * 2**p.level
         meta.update(PhysicalSizeX=size, PhysicalSizeXUnit="µm", PhysicalSizeY=size, PhysicalSizeYUnit="µm")

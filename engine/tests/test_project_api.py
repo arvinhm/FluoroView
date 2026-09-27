@@ -99,7 +99,7 @@ def test_rename_reuses_the_measurement(opened, monkeypatch):
     region = client.post(f"{base}/regions", json={"shape": "rectangle", "points": [[0, 0], [64, 64]]}).json()
     calls = []
     real = routes_project.measure_region
-    monkeypatch.setattr(routes_project, "measure_region", lambda d, r: calls.append(r["id"]) or real(d, r))
+    monkeypatch.setattr(routes_project, "measure_region", lambda d, r, px: calls.append(r["id"]) or real(d, r, px))
     first = client.get(f"{base}/regions/{region['id']}/measurement").json()
     client.patch(f"{base}/regions/{region['id']}", json={"name": "Stroma"})
     second = client.get(f"{base}/regions/{region['id']}/measurement").json()
@@ -152,6 +152,30 @@ def test_undo_restores_regions_and_notes_exactly(opened):
     assert state["annotations"][0]["replies"][0]["author"] == "PH"
     assert client.post(f"{base}/regions/restore", json=region).status_code == 409
     assert client.post(f"{base}/annotations/restore", json={**note, "id": "not-an-id"}).status_code == 422
+
+
+def test_set_scale_is_used_everywhere(opened):
+    client, ds, _, _ = opened
+    base = f"/api/v1/datasets/{ds['id']}"
+    file_px = ds["pixel_size_um"]
+    region = client.post(f"{base}/regions", json={"shape": "rectangle", "points": [[0, 0], [100, 50]]}).json()
+    res = client.put(f"{base}/calibration", json={"pixel_size_um": 0.5}).json()
+    assert (res["pixel_size_um"], res["file_pixel_size_um"], res["calibration"]["source"]) == (0.5, file_px, "user")
+    info = client.get(base).json()
+    assert (info["pixel_size_um"], info["pixel_size_source"], info["file_pixel_size_um"]) == (0.5, "user", file_px)
+    assert client.get(f"{base}/regions/{region['id']}/measurement").json()["area_um2"] == pytest.approx(5000 * 0.25)
+    rows = list(csv.DictReader(io.StringIO(client.get(f"{base}/measurements.csv").text)))
+    assert rows[0]["pixel_size_um"] == "0.500000"
+    line = client.get(f"{base}/profile", params={"x0": 0.5, "y0": 0.5, "x1": 100.5, "y1": 0.5}).json()
+    assert line["distance_um"][-1] == pytest.approx(50)
+    assert client.get(f"{base}/project").json()["calibration"]["pixel_size_um"] == 0.5
+
+    cleared = client.put(f"{base}/calibration", json={"pixel_size_um": None}).json()
+    assert cleared["pixel_size_um"] == file_px and cleared["calibration"] is None
+    area = client.get(f"{base}/regions/{region['id']}/measurement").json()["area_um2"]
+    assert area == pytest.approx(5000 * file_px**2)
+    assert client.get(base).json()["pixel_size_source"] == "file"
+    assert client.put(f"{base}/calibration", json={"pixel_size_um": -1}).status_code == 422
 
 
 def test_invalid_regions_are_rejected(opened):

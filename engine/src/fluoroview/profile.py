@@ -18,7 +18,8 @@ from . import __version__
 from .pyramid.store import TILE
 
 
-def line_profile(ds, x0: float, y0: float, x1: float, y1: float, max_samples: int = 2048) -> dict:
+def line_profile(ds, x0: float, y0: float, x1: float, y1: float, max_samples: int = 2048, *,
+                 pixel_size: float | None) -> dict:
     if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
         raise ValueError("the line must be given by finite numbers")
     length = math.hypot(x1 - x0, y1 - y0)
@@ -41,7 +42,7 @@ def line_profile(ds, x0: float, y0: float, x1: float, y1: float, max_samples: in
             data, _ = ds.tile(level, c, ty, tx)
             values[c, sel] = data[iy[sel] - ty * TILE, ix[sel] - tx * TILE]
     distance = t * length
-    px = ds.info.pixel_size_um
+    px = pixel_size
     return {
         "level": level,
         "samples": n,

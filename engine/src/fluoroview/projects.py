@@ -23,7 +23,14 @@ def now_iso() -> str:
 
 
 def empty_scan() -> dict:
-    return {"regions": [], "annotations": [], "background_region": None, "display": None, "updated": None}
+    return {"regions": [], "annotations": [], "background_region": None, "display": None, "calibration": None,
+            "updated": None}
+
+
+def calibrated_pixel_size(state: dict, file_value: float | None) -> float | None:
+    """The pixel size set by the user (Set Scale), else the one recorded in the file."""
+    calibration = state.get("calibration")
+    return calibration["pixel_size_um"] if calibration else file_value
 
 
 class ProjectStore:

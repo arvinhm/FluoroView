@@ -65,6 +65,7 @@ def test_save_inspect_and_restore_a_session(client, biotek_image, tmp_path):
     note = client.post(f"{base}/annotations", json={"x": 200, "y": 170, "text": "tumour edge", "author": "AH",
                                                     "region_id": r1["id"]}).json()
     client.post(f"{base}/annotations/{note['id']}/replies", json={"text": "agree", "author": "PH"})
+    client.put(f"{base}/calibration", json={"pixel_size_um": 0.25})
 
     body = {"path": str(folder / "work"), "display": display(4), **CLIENT_STATE}
     saved = client.post(f"{base}/session", json=body).json()
@@ -84,6 +85,8 @@ def test_save_inspect_and_restore_a_session(client, biotek_image, tmp_path):
     assert [r["id"] for r in session["regions"]] == [r1["id"], r2["id"]] and session["background_region"] == r2["id"]
     assert session["notes"][0]["replies"][0]["author"] == "PH" and session["view"]["zoom"] == 2.5
     assert session["display"][1]["visible"] is False and header == COLUMNS
+    assert session["calibration"] == {"pixel_size_um": 0.25, "source": "user"}
+    assert manifest["image"]["pixel_size_um"] == 0.25
 
     preview = client.get("/api/v1/sessions/thumbnail", params={"path": saved["path"]})
     assert preview.status_code == 200 and preview.content.startswith(b"\x89PNG")
@@ -105,6 +108,7 @@ def test_save_inspect_and_restore_a_session(client, biotek_image, tmp_path):
     project = applied["project"]
     assert [r["id"] for r in project["regions"]] == [r1["id"], r2["id"]] and project["background_region"] == r2["id"]
     assert project["annotations"][0]["replies"][0]["text"] == "agree" and project["display"][0]["lo"] == 100
+    assert project["calibration"]["pixel_size_um"] == 0.25 and client.get(base2).json()["pixel_size_um"] == 0.25
     assert applied["view"]["gallery"] is True and applied["viewer"]["smooth"] is True
     assert applied["profile_line"]["x1"] == 300 and applied["export"]["dpi"] == 600
 

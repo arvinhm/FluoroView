@@ -21,6 +21,7 @@ import os
 import uuid
 import zipfile
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
@@ -62,6 +63,13 @@ class Line(BaseModel):
     y1: FiniteFloat
 
 
+class Calibration(BaseModel):
+    """A pixel size set by the user (Set Scale), which replaces the one in the file."""
+
+    pixel_size_um: FiniteFloat = Field(gt=0, le=1e6)
+    source: Literal["user"] = "user"
+
+
 class Session(BaseModel):
     """Contents of session.json."""
 
@@ -73,6 +81,7 @@ class Session(BaseModel):
     notes: list[AnnotationRestore] = Field(default_factory=list, max_length=100_000)
     profile_line: Line | None = None
     export: dict | None = None
+    calibration: Calibration | None = None
     analysis: dict = Field(default_factory=dict)
 
 
@@ -93,7 +102,7 @@ def content_fingerprint(source) -> str:
     return "sha256:" + h.hexdigest()
 
 
-def image_manifest(ds, fingerprint: str) -> dict:
+def image_manifest(ds, fingerprint: str, pixel_size: float | None) -> dict:
     info = ds.info
     paths = list(info.files) if info.files else [info.path]
     return {
@@ -103,7 +112,7 @@ def image_manifest(ds, fingerprint: str) -> dict:
         "height": info.height,
         "channels": [ch.name for ch in info.channels],
         "dtype": np.dtype(info.dtype).name,
-        "pixel_size_um": info.pixel_size_um,
+        "pixel_size_um": pixel_size,
         "fingerprint": fingerprint,
     }
 
@@ -111,7 +120,8 @@ def image_manifest(ds, fingerprint: str) -> dict:
 def session_from_state(state: dict, **client) -> Session:
     """A session holding a scan's stored project state plus what only the studio knows (view, options)."""
     return Session(regions=[RegionRestore(**r) for r in state["regions"]], background_region=state["background_region"],
-                   notes=[AnnotationRestore(**a) for a in state["annotations"]], **client)
+                   notes=[AnnotationRestore(**a) for a in state["annotations"]],
+                   calibration=state.get("calibration"), **client)
 
 
 def write_session(path: Path, image: dict, session: Session, measurements_csv: str | None = None,
@@ -206,6 +216,7 @@ def replace_state(state: dict, session: Session, n_channels: int) -> None:
     state["background_region"] = session.background_region if session.background_region in ids else None
     if session.display and len(session.display) == n_channels:
         state["display"] = [d.model_dump() for d in session.display]
+    state["calibration"] = session.calibration.model_dump() if session.calibration else None
 
 
 def merge_state(state: dict, session: Session) -> None:
@@ -232,3 +243,5 @@ def merge_state(state: dict, session: Session) -> None:
         background = renamed.get(session.background_region, session.background_region)
         if background in taken:
             state["background_region"] = background
+    if not state.get("calibration") and session.calibration:
+        state["calibration"] = session.calibration.model_dump()

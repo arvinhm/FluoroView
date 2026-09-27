@@ -56,8 +56,8 @@ def histogram_stats(hist: np.ndarray, saturation: int) -> dict:
             "max": int(nz[-1]), "sum": total, "n_clipped": int(hist[saturation:].sum())}
 
 
-def measure_region(ds, region: dict) -> dict:
-    """Area, centroid and per-channel statistics of one region of a dataset."""
+def measure_region(ds, region: dict, pixel_size: float | None) -> dict:
+    """Area, centroid and per-channel statistics of one region; `pixel_size` in µm (None: pixels only)."""
     info = ds.info
     n_ch = len(info.channels)
     n_bins = 1 << (8 * np.dtype(info.dtype).itemsize)
@@ -80,7 +80,7 @@ def measure_region(ds, region: dict) -> dict:
             sx += float((xs * inside.sum(axis=0)).sum())
             for c in range(n_ch):
                 masked_histogram(ds.read_region(0, c, x0, ya, x1, yb), inside, hists[c])
-    px = info.pixel_size_um
+    px = pixel_size
     cx = sx / count if count else None
     cy = sy / count if count else None
     return {

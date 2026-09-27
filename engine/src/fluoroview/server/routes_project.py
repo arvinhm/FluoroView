@@ -23,7 +23,7 @@ from ..display import DisplayChannel
 from ..figure import Display, Plan, clip_box, encode_png, encode_tiff, plan, provenance, render_figure, write_ome
 from ..measure import measure_region, rows_for_scan, to_csv
 from ..profile import line_profile, profile_csv
-from ..projects import ProjectStore, now_iso
+from ..projects import ProjectStore, calibrated_pixel_size, now_iso
 from ..regions import (
     AnnotationIn,
     AnnotationPatch,
@@ -40,6 +40,7 @@ from ..regions import (
 from ..session import (
     MAX_EXPORT_BYTES,
     SUFFIX,
+    Calibration,
     Line,
     SessionError,
     View,
@@ -73,6 +74,11 @@ class FigureIn(BaseModel):
     dpi: int = Field(300, ge=72, le=2400)
     max_side: int = Field(8000, ge=256, le=16000)
     plan_only: bool = False
+
+
+class CalibrationIn(BaseModel):
+    pixel_size_um: FiniteFloat | None = Field(gt=0, le=1e6)
+    """µm per pixel, or null to go back to the pixel size recorded in the file"""
 
 
 class RawIn(BaseModel):
@@ -137,16 +143,20 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
         base = f"{Path(files[0]).parent.name}_{len(files)}ch" if files else Path(ds.info.path).stem
         return re.sub(r"[^\w.-]+", "_", base)
 
-    def measured(ds: Dataset, region: dict) -> dict:
-        """Measurement of a region; cached by geometry, so renaming never re-reads the pixels."""
-        key = (ds.id, region["id"], region["shape"], tuple(map(tuple, region["points"])))
+    def pixel_size_of(ds: Dataset, state: dict | None = None) -> float | None:
+        """The scan's pixel size in µm: the user's calibration if set, else the file's."""
+        return calibrated_pixel_size(state if state is not None else projects.scan(*where(ds)), ds.info.pixel_size_um)
+
+    def measured(ds: Dataset, region: dict, px: float | None) -> dict:
+        """Measurement of a region; cached by geometry and scale, so renaming never re-reads the pixels."""
+        key = (ds.id, region["id"], region["shape"], tuple(map(tuple, region["points"])), px)
         with cache_lock:
             result = cache.get(key)
             if result is not None:
                 cache.move_to_end(key)
         if result is None:
             try:
-                result = measure_region(ds, region)
+                result = measure_region(ds, region, px)
             except NotReady:
                 raise HTTPException(409, "the image is still loading; try again in a moment") from None
             with cache_lock:
@@ -155,11 +165,26 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
                     cache.popitem(last=False)
         return {**result, "region": region["name"]}
 
+    def project_view(state: dict) -> dict:
+        return {k: state.get(k) for k in ("regions", "annotations", "background_region", "display", "calibration")}
+
     @router.get("/project")
     def get_project(ds_id: str) -> dict:
+        return project_view(projects.scan(*where(dataset(ds_id))))
+
+    @router.put("/calibration")
+    def set_calibration(ds_id: str, req: CalibrationIn) -> dict:
+        """Set Scale: a pixel size that replaces the file's everywhere, or null to go back to the file's."""
         ds = dataset(ds_id)
-        state = projects.scan(*where(ds))
-        return {k: state[k] for k in ("regions", "annotations", "background_region", "display")}
+
+        def change(state: dict) -> dict:
+            state["calibration"] = (Calibration(pixel_size_um=req.pixel_size_um).model_dump()
+                                    if req.pixel_size_um is not None else None)
+            return state
+
+        state = projects.update(*where(ds), change)
+        return {"calibration": state["calibration"], "pixel_size_um": pixel_size_of(ds, state),
+                "file_pixel_size_um": ds.info.pixel_size_um}
 
     @router.post("/regions")
     def create_region(ds_id: str, req: RegionIn) -> dict:
@@ -254,10 +279,11 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
     def get_measurement(ds_id: str, rid: str) -> dict:
         ds = dataset(ds_id)
         state = projects.scan(*where(ds))
-        result = dict(measured(ds, find(state, rid)))
+        px = pixel_size_of(ds, state)
+        result = dict(measured(ds, find(state, rid), px))
         background = state["background_region"]
         if background and background != rid:
-            bg = measured(ds, find(state, background))
+            bg = measured(ds, find(state, background), px)
             result["background"] = {"region_id": background, "region": bg["region"],
                                     "means": {c["channel"]: c["mean"] for c in bg["channels"]}}
         return result
@@ -341,7 +367,7 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
 
     def profile_of(ds: Dataset, x0: float, y0: float, x1: float, y1: float, max_samples: int) -> dict:
         try:
-            return line_profile(ds, x0, y0, x1, y1, max_samples)
+            return line_profile(ds, x0, y0, x1, y1, max_samples, pixel_size=pixel_size_of(ds))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
         except NotReady:
@@ -356,7 +382,7 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
     def get_profile_csv(ds_id: str, x0: float, y0: float, x1: float, y1: float,
                         max_samples: int = Query(2048, ge=16, le=8192)) -> Response:
         ds = dataset(ds_id)
-        text = profile_csv(profile_of(ds, x0, y0, x1, y1, max_samples), ds.info.pixel_size_um)
+        text = profile_csv(profile_of(ds, x0, y0, x1, y1, max_samples), pixel_size_of(ds))
         return Response(text, media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-profile.csv"'})
 
@@ -381,13 +407,14 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
         if req.plan_only:
             return JSONResponse(p.to_json())
         state = projects.scan(*where(ds))
+        px = pixel_size_of(ds, state)
         try:
             img = render_figure(ds, p, displays, regions=state["regions"] if req.regions else [],
                                 notes=state["annotations"] if req.notes else [], scale_bar=req.scale_bar,
-                                labels=req.labels)
+                                labels=req.labels, pixel_size=px)
         except NotReady:
             raise HTTPException(409, "the image is still loading; try again in a moment") from None
-        meta = provenance(ds, p, displays)
+        meta = provenance(ds, p, displays, px)
         if req.format == "png":
             body, ext, media = encode_png(img, req.dpi, meta), "png", "image/png"
         else:
@@ -404,7 +431,7 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
             return JSONResponse(p.to_json())
         path = exports_dir / f"{uuid.uuid4().hex}.ome.tif"
         try:
-            write_ome(ds, p, path)
+            write_ome(ds, p, path, pixel_size_of(ds))
         except NotReady:
             path.unlink(missing_ok=True)
             raise HTTPException(409, "the image is still loading; try again in a moment") from None
@@ -413,9 +440,10 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
 
     def measurements_csv(ds: Dataset, state: dict) -> str | None:
         """The regions CSV, or None while the image is still loading."""
+        px = pixel_size_of(ds, state)
         try:
-            rows = rows_for_scan(ds.info.scan_key, ds.info.pixel_size_um,
-                                 [measured(ds, r) for r in state["regions"]], state["background_region"])
+            rows = rows_for_scan(ds.info.scan_key, px, [measured(ds, r, px) for r in state["regions"]],
+                                 state["background_region"])
         except HTTPException:
             return None
         return to_csv(rows)
@@ -449,8 +477,8 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
         session = session_from_state(state, display=req.display, view=req.view, viewer=req.viewer,
                                      profile_line=req.profile_line, export=req.export)
         try:
-            size = write_session(target, image_manifest(ds, content_fingerprint(ds.source)), session,
-                                 measurements_csv(ds, state), thumbnail_of(ds))
+            manifest = image_manifest(ds, content_fingerprint(ds.source), pixel_size_of(ds, state))
+            size = write_session(target, manifest, session, measurements_csv(ds, state), thumbnail_of(ds))
         except OSError as exc:
             raise HTTPException(403, f"could not write {target}: {exc.strerror}") from None
         return {"path": str(target), "bytes": size}
@@ -481,12 +509,12 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
                     stamp = time.strftime("%Y%m%d-%H%M%S")
                     target = backups_dir / f"{file_stem(ds)}-before-import-{stamp}{SUFFIX}"
                     current = session_from_state(state, display=state["display"])
-                    write_session(target, image_manifest(ds, fingerprint), current)
+                    write_session(target, image_manifest(ds, fingerprint, pixel_size_of(ds, state)), current)
                     backup.append(target)
                 replace_state(state, session, len(info.channels))
             else:
                 merge_state(state, session)
-            return {k: state[k] for k in ("regions", "annotations", "background_region", "display")}
+            return project_view(state)
 
         project = projects.update(*where(ds), change)
         return {
@@ -504,8 +532,9 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
     def get_csv(ds_id: str) -> Response:
         ds = dataset(ds_id)
         state = projects.scan(*where(ds))
-        rows = rows_for_scan(ds.info.scan_key, ds.info.pixel_size_um,
-                             [measured(ds, r) for r in state["regions"]], state["background_region"])
+        px = pixel_size_of(ds, state)
+        rows = rows_for_scan(ds.info.scan_key, px, [measured(ds, r, px) for r in state["regions"]],
+                             state["background_region"])
         return Response(to_csv(rows), media_type="text/csv; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-regions.csv"'})
 

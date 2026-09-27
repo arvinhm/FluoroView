@@ -91,7 +91,7 @@ def test_measurement_is_exact(biotek_image, tmp_path, region):
     path, data = biotek_image
     cache = PyramidCache(tmp_path / "cache", 10**9)
     ds = Dataset(cache.key_for(path), TiffSource(path), cache, EventBus())
-    m = measure_region(ds, region)
+    m = measure_region(ds, region, ds.info.pixel_size_um)
     x0, y0, x1, y1 = bounds(region["shape"], region["points"], data.shape[2], data.shape[1])
     make = reference_mask if region["shape"] == "polygon" else mask
     inside = make(region["shape"], region["points"], x0, y0, x1 - x0, y1 - y0)
