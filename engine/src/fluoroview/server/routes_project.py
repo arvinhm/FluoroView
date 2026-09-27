@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field, FiniteFloat
 from starlette.background import BackgroundTask
 
+from ..counting import counts_csv, points_csv
 from ..datasets import Dataset, NotReady, Registry
 from ..display import DisplayChannel
 from ..figure import Display, Plan, clip_box, encode_png, encode_tiff, plan, provenance, render_figure, write_ome
@@ -28,11 +29,16 @@ from ..regions import (
     AnnotationIn,
     AnnotationPatch,
     AnnotationRestore,
+    CounterIn,
+    CounterPatch,
+    PointIn,
+    PointPatch,
     RegionIn,
     RegionPatch,
     RegionRestore,
     ReplyIn,
     new_annotation,
+    new_id,
     new_region,
     new_reply,
     validate_shape,
@@ -166,7 +172,110 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
         return {**result, "region": region["name"]}
 
     def project_view(state: dict) -> dict:
-        return {k: state.get(k) for k in ("regions", "annotations", "background_region", "display", "calibration")}
+        keys = ("regions", "annotations", "background_region", "display", "calibration")
+        return {**{k: state.get(k) for k in keys}, "counters": state.get("counters") or [],
+                "points": state.get("points") or []}
+
+    @router.post("/counters")
+    def create_counter(ds_id: str, req: CounterIn) -> dict:
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            counter = {"id": new_id(), **req.model_dump()}
+            state.setdefault("counters", []).append(counter)
+            return counter
+
+        return projects.update(*where(ds), change)
+
+    def find_counter(state: dict, cid: str) -> dict:
+        for c in state.get("counters") or []:
+            if c["id"] == cid:
+                return c
+        raise HTTPException(404, "unknown counter")
+
+    @router.patch("/counters/{cid}")
+    def patch_counter(ds_id: str, cid: str, req: CounterPatch) -> dict:
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            counter = find_counter(state, cid)
+            counter.update(req.model_dump(exclude_none=True))
+            return counter
+
+        return projects.update(*where(ds), change)
+
+    @router.delete("/counters/{cid}")
+    def delete_counter(ds_id: str, cid: str) -> dict:
+        """Remove a category and every point counted in it."""
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            find_counter(state, cid)
+            state["counters"] = [c for c in state["counters"] if c["id"] != cid]
+            kept = [p for p in state.get("points") or [] if p["counter"] != cid]
+            removed = len(state.get("points") or []) - len(kept)
+            state["points"] = kept
+            return {"deleted": cid, "points_deleted": removed}
+
+        return projects.update(*where(ds), change)
+
+    @router.post("/points")
+    def create_point(ds_id: str, req: PointIn) -> dict:
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            find_counter(state, req.counter)
+            point = {"id": new_id(), **req.model_dump()}
+            state.setdefault("points", []).append(point)
+            return point
+
+        return projects.update(*where(ds), change)
+
+    def find_point(state: dict, pid: str) -> dict:
+        for p in state.get("points") or []:
+            if p["id"] == pid:
+                return p
+        raise HTTPException(404, "unknown point")
+
+    @router.patch("/points/{pid}")
+    def patch_point(ds_id: str, pid: str, req: PointPatch) -> dict:
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            point = find_point(state, pid)
+            if req.counter is not None:
+                find_counter(state, req.counter)
+            point.update(req.model_dump(exclude_none=True))
+            return point
+
+        return projects.update(*where(ds), change)
+
+    @router.delete("/points/{pid}")
+    def delete_point(ds_id: str, pid: str) -> dict:
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            find_point(state, pid)
+            state["points"] = [p for p in state["points"] if p["id"] != pid]
+            return {"deleted": pid}
+
+        return projects.update(*where(ds), change)
+
+    @router.get("/points.csv")
+    def get_points_csv(ds_id: str) -> Response:
+        ds = dataset(ds_id)
+        state = projects.scan(*where(ds))
+        text = points_csv(ds.info.scan_key, state, pixel_size_of(ds, state))
+        return Response(text, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-points.csv"'})
+
+    @router.get("/counts.csv")
+    def get_counts_csv(ds_id: str) -> Response:
+        ds = dataset(ds_id)
+        state = projects.scan(*where(ds))
+        text = counts_csv(ds.info.scan_key, state, ds.info.width, ds.info.height, pixel_size_of(ds, state))
+        return Response(text, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-counts.csv"'})
 
     @router.get("/project")
     def get_project(ds_id: str) -> dict:

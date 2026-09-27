@@ -89,6 +89,42 @@ class AnnotationRestore(BaseModel):
     replies: list[ReplyRestore] = Field(default_factory=list, max_length=1000)
 
 
+class CounterIn(BaseModel):
+    """A Cell Counter category, such as CD8+."""
+
+    name: str = Field(min_length=1, max_length=100)
+    color: str = Field(pattern=COLOR)
+
+
+class CounterPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    color: str | None = Field(default=None, pattern=COLOR)
+
+
+class Counter(CounterIn):
+    id: str = Field(pattern=ITEM_ID)
+
+
+class PointIn(BaseModel):
+    x: FiniteFloat
+    y: FiniteFloat
+    counter: str = Field(pattern=ITEM_ID)
+
+
+class PointPatch(BaseModel):
+    x: FiniteFloat | None = None
+    y: FiniteFloat | None = None
+    counter: str | None = Field(default=None, pattern=ITEM_ID)
+
+
+class CountPoint(PointIn):
+    id: str = Field(pattern=ITEM_ID)
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
 def new_annotation(req: AnnotationIn) -> dict:
     stamp = now_iso()
     return {"id": uuid.uuid4().hex[:12], "x": req.x, "y": req.y, "text": req.text.strip(), "author": req.author,
@@ -220,6 +256,37 @@ def feret(shape: str, points) -> tuple[float, float, float]:
         spans = np.abs(e[:, 0, None] * rel[..., 1] - e[:, 1, None] * rel[..., 0]).max(axis=1) / lengths[i:i + chunk]
         width = min(width, float(spans.min()))
     return best, imagej_angle(bx - ax, by - ay), width
+
+
+def contains_points(shape: str, points, xs: np.ndarray, ys: np.ndarray) -> np.ndarray:
+    """Which of the points lie inside the region, by the same rules as `mask` (half-open, even-odd)."""
+    xs = np.asarray(xs, dtype=np.float64)
+    ys = np.asarray(ys, dtype=np.float64)
+    if shape in ("rectangle", "ellipse"):
+        x0, y0, x1, y1 = _box(points)
+        if shape == "rectangle":
+            return (xs >= x0) & (xs < x1) & (ys >= y0) & (ys < y1)
+        rx, ry = (x1 - x0) / 2.0, (y1 - y0) / 2.0
+        return ((xs - x0 - rx) / rx) ** 2 + ((ys - y0 - ry) / ry) ** 2 <= 1.0
+    pts = np.asarray(points, dtype=np.float64)
+    inside = np.zeros(xs.shape, dtype=np.bool_)
+    for (xa, ya), (xb, yb) in zip(pts, np.roll(pts, -1, axis=0), strict=True):
+        spans = ((ya <= ys) & (ys < yb)) | ((yb <= ys) & (ys < ya))
+        if not spans.any():
+            continue
+        with np.errstate(divide="ignore", invalid="ignore"):
+            cross = xa + (ys - ya) * (xb - xa) / (yb - ya)
+        inside ^= spans & (cross <= xs)
+    return inside
+
+
+def pixel_count(shape: str, points, width: int, height: int, band: int = 512) -> int:
+    """Pixels whose centres are inside the region (its area in pixels), without reading any image data."""
+    box = bounds(shape, points, width, height)
+    if box is None:
+        return 0
+    x0, y0, x1, y1 = box
+    return sum(int(mask(shape, points, x0, y, x1 - x0, min(band, y1 - y)).sum()) for y in range(y0, y1, band))
 
 
 def bounds(shape: str, points, width: int, height: int) -> tuple[int, int, int, int] | None:

@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from . import __version__
 from .display import DisplayChannel
 from .projects import now_iso
-from .regions import AnnotationRestore, RegionRestore, validate_shape
+from .regions import AnnotationRestore, Counter, CountPoint, RegionRestore, new_id, validate_shape
 
 FORMAT = "fluoroview-session"
 VERSION = 1
@@ -82,6 +82,8 @@ class Session(BaseModel):
     profile_line: Line | None = None
     export: dict | None = None
     calibration: Calibration | None = None
+    counters: list[Counter] = Field(default_factory=list, max_length=1000)
+    points: list[CountPoint] = Field(default_factory=list, max_length=2_000_000)
     analysis: dict = Field(default_factory=dict)
 
 
@@ -121,7 +123,8 @@ def session_from_state(state: dict, **client) -> Session:
     """A session holding a scan's stored project state plus what only the studio knows (view, options)."""
     return Session(regions=[RegionRestore(**r) for r in state["regions"]], background_region=state["background_region"],
                    notes=[AnnotationRestore(**a) for a in state["annotations"]],
-                   calibration=state.get("calibration"), **client)
+                   calibration=state.get("calibration"), counters=state.get("counters") or [],
+                   points=state.get("points") or [], **client)
 
 
 def write_session(path: Path, image: dict, session: Session, measurements_csv: str | None = None,
@@ -170,9 +173,13 @@ def read_session(path: Path) -> tuple[dict, Session]:
         raise SessionError(f"the session could not be read: {exc}"[:400]) from None
     if not isinstance(manifest.get("image"), dict):
         raise SessionError("the session does not describe its image")
-    for items, what in ((session.regions, "region"), (session.notes, "note")):
+    for items, what in ((session.regions, "region"), (session.notes, "note"), (session.counters, "counter"),
+                        (session.points, "point")):
         if len({i.id for i in items}) != len(items):
             raise SessionError(f"the session has two {what}s with the same id")
+    categories = {c.id for c in session.counters}
+    if any(p.counter not in categories for p in session.points):
+        raise SessionError("the session has counted points without a category")
     for r in session.regions:
         try:
             validate_shape(r.shape, r.points)
@@ -217,18 +224,21 @@ def replace_state(state: dict, session: Session, n_channels: int) -> None:
     if session.display and len(session.display) == n_channels:
         state["display"] = [d.model_dump() for d in session.display]
     state["calibration"] = session.calibration.model_dump() if session.calibration else None
+    state["counters"] = [c.model_dump() for c in session.counters]
+    state["points"] = [p.model_dump() for p in session.points]
 
 
 def merge_state(state: dict, session: Session) -> None:
-    """Add the session's regions and notes; an id already in use gets a new one and links follow it."""
+    """Add the session's regions, notes, categories and points; an id already in use gets a new one
+    and links (notes to regions, points to categories) follow it."""
     taken = {r["id"] for r in state["regions"]}
     renamed: dict[str, str] = {}
     for r in session.regions:
         region = _region(r)
         if region["id"] in taken:
-            new_id = uuid.uuid4().hex[:12]
-            renamed[region["id"]] = new_id
-            region["id"] = new_id
+            fresh = new_id()
+            renamed[region["id"]] = fresh
+            region["id"] = fresh
         taken.add(region["id"])
         state["regions"].append(region)
     note_ids = {a["id"] for a in state["annotations"]}
@@ -236,7 +246,7 @@ def merge_state(state: dict, session: Session) -> None:
         note = n.model_dump()
         note["region_id"] = renamed.get(note["region_id"], note["region_id"]) if note["region_id"] else None
         if note["id"] in note_ids:
-            note["id"] = uuid.uuid4().hex[:12]
+            note["id"] = new_id()
         note_ids.add(note["id"])
         state["annotations"].append(note)
     if state["background_region"] is None and session.background_region:
@@ -245,3 +255,23 @@ def merge_state(state: dict, session: Session) -> None:
             state["background_region"] = background
     if not state.get("calibration") and session.calibration:
         state["calibration"] = session.calibration.model_dump()
+    counters = state.setdefault("counters", [])
+    used = {c["id"] for c in counters}
+    recoded: dict[str, str] = {}
+    for c in session.counters:
+        counter = c.model_dump()
+        if counter["id"] in used:
+            fresh = new_id()
+            recoded[counter["id"]] = fresh
+            counter["id"] = fresh
+        used.add(counter["id"])
+        counters.append(counter)
+    points = state.setdefault("points", [])
+    point_ids = {p["id"] for p in points}
+    for p in session.points:
+        point = p.model_dump()
+        point["counter"] = recoded.get(point["counter"], point["counter"])
+        if point["id"] in point_ids:
+            point["id"] = new_id()
+        point_ids.add(point["id"])
+        points.append(point)

@@ -24,7 +24,7 @@ def now_iso() -> str:
 
 def empty_scan() -> dict:
     return {"regions": [], "annotations": [], "background_region": None, "display": None, "calibration": None,
-            "updated": None}
+            "counters": [], "points": [], "updated": None}
 
 
 def calibrated_pixel_size(state: dict, file_value: float | None) -> float | None:
