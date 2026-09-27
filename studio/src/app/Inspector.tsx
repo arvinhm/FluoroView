@@ -1,8 +1,11 @@
+import { ChevronRight } from "lucide-react";
 import { type CSSProperties, useLayoutEffect, useRef, useState } from "react";
 import type { DatasetInfo } from "../api/types";
 import { AUTO_HIGH, AUTO_LOW, dtypeMax } from "../lib/contrast";
 import { fmtInt, fmtPercent } from "../lib/format";
+import { isIdentity } from "../lib/lut";
 import { useActive, useStudio } from "../state/store";
+import { Adjustments, ColorButton } from "./ChannelControls";
 import { HistogramView } from "./HistogramView";
 import { NumberField } from "./NumberField";
 import { RegionsTab } from "./RegionsTab";
@@ -15,10 +18,12 @@ function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
   const h = useStudio((s) => s.histograms[ds.id]?.[c]);
   const log = useStudio((s) => s.options.histLog);
   const setChannel = useStudio((s) => s.setChannel);
+  const [adjusting, setAdjusting] = useState(false);
   const ch = ds.channels[c];
   if (!d || !ch) return null;
   const top = h?.range[1] ?? dtypeMax(ds.dtype);
   const clipped = h && h.total ? h.saturated / h.total : null;
+  const adjusted = !isIdentity(d.curve) || d.intensity !== 1;
 
   return (
     <div className={`ch${d.visible ? "" : " off"}`}>
@@ -34,9 +39,10 @@ function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
             {clipped > 0 ? `${fmtPercent(clipped)} clipped` : "no clipping"}
           </span>
         )}
+        <ColorButton ds={ds} c={c} d={d} />
       </div>
-      <HistogramView histogram={h} lo={d.lo} hi={d.hi} gamma={d.gamma} color={d.color} log={log}
-        onWindow={(lo, hi) => setChannel(ds.id, c, { lo, hi })} />
+      <HistogramView histogram={h} lo={d.lo} hi={d.hi} gamma={d.gamma} look={d} log={log}
+        onWindow={(lo, hi) => setChannel(ds.id, c, { lo, hi })} onGamma={(gamma) => setChannel(ds.id, c, { gamma })} />
       <div className="fields">
         <NumberField label="Min" value={d.lo} min={0} max={d.hi - 1} step={Math.max(1, Math.round(top / 1000))}
           onCommit={(v) => setChannel(ds.id, c, { lo: v })} />
@@ -45,6 +51,12 @@ function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
         <NumberField label="γ" value={d.gamma} digits={2} step={0.05} min={0.1} max={5}
           onCommit={(v) => setChannel(ds.id, c, { gamma: v })} title="Display gamma: above 1 brightens mid-tones" />
       </div>
+      <button className={`adjust-toggle${adjusting ? " on" : ""}`} aria-expanded={adjusting}
+        onClick={() => setAdjusting(!adjusting)} title="Brightness, contrast, intensity and curves">
+        <ChevronRight /> Adjust
+        {adjusted && <span className="adjust-dot" title="This channel has a curve or reduced intensity" />}
+      </button>
+      {adjusting && <Adjustments ds={ds} c={c} d={d} top={top} />}
     </div>
   );
 }
@@ -77,6 +89,9 @@ function ChannelsTab({ ds }: { ds: DatasetInfo }) {
         <button className="btn" onClick={() => autoContrast(ds.id)} title="Auto contrast all channels (A)">Auto contrast</button>
         <span className="muted" style={{ fontSize: "var(--fv-fs-sm)" }}>
           {AUTO_LOW}–{AUTO_HIGH} %, clipped excluded
+        </span>
+        <span className="toolrow-end" title="How channels combine: Add sums them, Max keeps the brightest">
+          <Segmented value={options.blend} options={[["add", "Add"], ["max", "Max"]]} onChange={(v) => setOption("blend", v)} />
         </span>
       </div>
       {ds.channels.map((_, c) => <ChannelRow key={c} ds={ds} c={c} />)}

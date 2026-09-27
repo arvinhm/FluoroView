@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { BuildInfo, DatasetInfo, Histogram, SavedDisplay } from "../api/types";
 import { autoWindow, dtypeMax } from "../lib/contrast";
+import { type Blend, type CurvePoint, IDENTITY_CURVE, type Lut } from "../lib/lut";
 
 export interface ChannelDisplay {
   visible: boolean;
@@ -10,6 +11,28 @@ export interface ChannelDisplay {
   gamma: number;
   /** false until the user edits the window; auto-contrast may still be refined while false */
   touched: boolean;
+  /** "color" tints with `color`; otherwise a colour map */
+  lut: Lut;
+  invert: boolean;
+  /** tone curve after the window and gamma */
+  curve: readonly CurvePoint[];
+  /** output level, 0 to 1 */
+  intensity: number;
+}
+
+type Look = Pick<ChannelDisplay, "lut" | "invert" | "curve" | "intensity">;
+
+const PLAIN_LOOK: Look = { lut: "color", invert: false, curve: IDENTITY_CURVE, intensity: 1 };
+
+/** The colour settings of a saved channel; saves from before they existed show as before. */
+function savedLook(v: SavedDisplay): Look {
+  return { lut: v.lut ?? "color", invert: v.invert ?? false, curve: v.curve ?? IDENTITY_CURVE, intensity: v.intensity ?? 1 };
+}
+
+/** A channel's display as the engine stores it (project settings, sessions, figures). */
+export function toSaved(d: ChannelDisplay): SavedDisplay {
+  return { visible: d.visible, color: d.color, lo: d.lo, hi: d.hi, gamma: d.gamma, touched: d.touched, lut: d.lut,
+    invert: d.invert, curve: d.curve, intensity: d.intensity };
 }
 
 export interface ViewReadout {
@@ -42,6 +65,8 @@ export interface Options {
   histLog: boolean;
   /** magnified raw pixels and values around the cursor */
   loupe: boolean;
+  /** how visible channels combine: summed, or their maximum */
+  blend: Blend;
 }
 
 export type Dialog =
@@ -148,7 +173,7 @@ function initialDisplay(ds: DatasetInfo): ChannelDisplay[] {
   const hasFluorescence = ds.channels.some((ch) => ch.kind === "fluorescence");
   return ds.channels.map((ch) => ({
     visible: !(hasFluorescence && ch.kind === "transmitted"),
-    color: ch.color, lo: 0, hi: top, gamma: 1, touched: false,
+    color: ch.color, lo: 0, hi: top, gamma: 1, touched: false, ...PLAIN_LOOK,
   }));
 }
 
@@ -161,7 +186,9 @@ export const useStudio = create<StudioState>((set, get) => ({
   histograms: {},
   view: null,
   cursor: null,
-  options: { smooth: false, grid: true, clip: false, minimap: true, gallery: false, histLog: true, loupe: false },
+  options: {
+    smooth: false, grid: true, clip: false, minimap: true, gallery: false, histLog: true, loupe: false, blend: "add",
+  },
   tool: "move",
   dialog: null,
   accent: storedAccent(),
@@ -257,10 +284,12 @@ export const useStudio = create<StudioState>((set, get) => ({
           ...s.display,
           [id]: list.map((d, i) => {
             const v = saved[i]!;
-            if (v.touched) return { visible: v.visible, color: v.color, lo: v.lo, hi: v.hi, gamma: v.gamma, touched: true };
+            if (v.touched) {
+              return { visible: v.visible, color: v.color, lo: v.lo, hi: v.hi, gamma: v.gamma, touched: true, ...savedLook(v) };
+            }
             const h = hs[i];
             const [lo, hi] = h && h.total > 0 ? autoWindow(h) : [d.lo, d.hi];
-            return { ...d, visible: v.visible, color: v.color, lo, hi };
+            return { ...d, visible: v.visible, color: v.color, lo, hi, ...savedLook(v) };
           }),
         },
       };

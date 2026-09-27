@@ -5,7 +5,7 @@ import type { Box, DatasetInfo, ExportPlan, FigureRequest } from "../api/types";
 import { saveBlob } from "../lib/dom";
 import { fmtInt } from "../lib/format";
 import { useProject } from "../state/project";
-import { useActive, useStudio } from "../state/store";
+import { toSaved, useActive, useStudio } from "../state/store";
 import { regionBox } from "../viewer/geometry";
 import { EXPORT_SETTINGS_KEY } from "./actions";
 import { Checkbox } from "./Checkbox";
@@ -42,6 +42,7 @@ function ExportBody({ ds }: { ds: DatasetInfo }) {
   const setDialog = useStudio((s) => s.setDialog);
   const setNotice = useStudio((s) => s.setNotice);
   const display = useStudio((s) => s.display[ds.id]);
+  const blend = useStudio((s) => s.options.blend);
   const viewBox = useStudio((s) => s.view?.box);
   const selection = useProject((s) => s.selection);
   const region = useProject((s) => (selection?.kind === "region"
@@ -59,10 +60,11 @@ function ExportBody({ ds }: { ds: DatasetInfo }) {
   const visibleCount = display?.filter((d) => d.visible).length ?? 0;
   const body = useMemo((): FigureRequest | null => (box && display ? {
     box,
-    display: display.map(({ visible, color, lo, hi, gamma }) => ({ visible, color, lo, hi, gamma })),
+    display: display.map(toSaved),
+    blend,
     format: "png", scale_bar: settings.scaleBar, labels: settings.labels, regions: settings.regions,
     notes: settings.notes, dpi: settings.dpi,
-  } : null), [box?.join(), display, settings]);
+  } : null), [box?.join(), display, blend, settings]);
 
   useEffect(() => localStorage.setItem(EXPORT_SETTINGS_KEY, JSON.stringify(settings)), [settings]);
 
