@@ -10,5 +10,7 @@
   // No public *.workers.dev or preview addresses: the site is reached only through its own domain,
   // where the Cloudflare Access policy applies.
   "workers_dev": false,
-  "preview_urls": false
+  "preview_urls": false,
+  // A route on the existing proxied hostname: no DNS records are created or changed.
+  "routes": [{ "pattern": "fluoroview.com/*", "zone_name": "fluoroview.com" }]
 }
