@@ -95,6 +95,12 @@ export interface Region {
   author: string | null;
 }
 
+export interface ImportedRegions {
+  regions: Region[];
+  /** what the file held that is not a region (lines, points, text, detections…) and how many */
+  skipped: Record<string, number>;
+}
+
 export type RegionCombine = "union" | "intersect" | "xor" | "subtract";
 export type RegionOp = RegionCombine | "enlarge" | "hull" | "ellipse";
 

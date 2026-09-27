@@ -5,7 +5,7 @@ import { type Accent, useStudio } from "../state/store";
 import { runViewerCommand } from "../viewer/commands";
 import { TOOLS } from "../viewer/ToolPalette";
 import { activeTools } from "../viewer/tools";
-import { exportRegionsCsv } from "./actions";
+import { exportGeoJson, exportRegionsCsv, exportRoiSet, importRegionsFile } from "./actions";
 
 export type CommandGroup = "File" | "View" | "Image" | "Region" | "Tools" | "Help";
 
@@ -86,6 +86,12 @@ export function buildCommands(): Command[] {
     { id: "region-ellipse", group: "Region", title: "Fit ellipse", disabled: none || !picked.length,
       run: op({ op: "ellipse", ids: picked }) },
     { id: "region-specify", group: "Region", title: "Specify…", disabled: none, run: () => s.setDialog("specify") },
+    { id: "region-import", group: "Region", title: "Import regions (ImageJ, QuPath)…", disabled: none,
+      run: () => id && void importRegionsFile(id) },
+    { id: "region-export-roiset", group: "Region", title: "Export ImageJ RoiSet (.zip)", disabled: !regions,
+      run: () => id && void exportRoiSet(id) },
+    { id: "region-export-geojson", group: "Region", title: "Export QuPath GeoJSON", disabled: !regions,
+      run: () => id && void exportGeoJson(id) },
   );
   ds?.channels.slice(0, 9).forEach((ch, i) => {
     commands.push({

@@ -1,4 +1,4 @@
-import { Download } from "lucide-react";
+import { Download, Upload } from "lucide-react";
 import { useEffect } from "react";
 import type { DatasetInfo, RegionCombine } from "../api/types";
 import { fmtArea, fmtInt } from "../lib/format";
@@ -9,7 +9,7 @@ import { useStudio } from "../state/store";
 import { focusViewer } from "../viewer/commands";
 import { regionBox } from "../viewer/geometry";
 import { SHAPE_ICON } from "../viewer/MeasureCard";
-import { exportRegionsCsv } from "./actions";
+import { exportRegionsCsv, importRegionsFile } from "./actions";
 import { COMBINE } from "./commands";
 import { CountsSection } from "./CountsSection";
 
@@ -36,6 +36,10 @@ export function RegionsTab({ ds }: { ds: DatasetInfo }) {
           title="One row per region × channel, measured on raw full-resolution pixels">
           <Download /> Export CSV
         </button>
+        <button className="btn" onClick={() => void importRegionsFile(ds.id)}
+          title="Add regions from an ImageJ .roi or RoiSet.zip, or a QuPath GeoJSON file">
+          <Upload /> Import
+        </button>
         <span className="muted" style={{ fontSize: "var(--fv-fs-sm)" }}>
           {scan.regions.length} {scan.regions.length === 1 ? "region" : "regions"}
         </span>
@@ -44,8 +48,8 @@ export function RegionsTab({ ds }: { ds: DatasetInfo }) {
       {scan.regions.length === 0 ? (
         <div className="empty-note">
           Draw a region with <span className="kbd-inline">R</span> <span className="kbd-inline">E</span>{" "}
-          <span className="kbd-inline">P</span> or <span className="kbd-inline">F</span>. Measurements use the raw
-          full-resolution pixels.
+          <span className="kbd-inline">P</span> or <span className="kbd-inline">F</span>, or import ImageJ or QuPath
+          regions. Measurements use the raw full-resolution pixels.
         </div>
       ) : (
         <>

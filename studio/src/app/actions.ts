@@ -1,8 +1,8 @@
 import { api, ApiError, project, sessions } from "../api/client";
 import type { DatasetInfo, SessionInfo, SessionSaveRequest } from "../api/types";
-import { saveBlob } from "../lib/dom";
+import { pickFile, saveBlob } from "../lib/dom";
 import { fmtBytes } from "../lib/format";
-import { type Line, setLine, setScanState, useProject } from "../state/project";
+import { importRegions, type Line, setLine, setScanState, useProject } from "../state/project";
 import { useStudio } from "../state/store";
 
 /** Export dialog choices, remembered in the browser and carried in session files. */
@@ -38,6 +38,20 @@ export function exportPointsCsv(id: string): Promise<void> {
 /** Cell Counter: counts and densities per category and region, and over the whole image. */
 export function exportCountsCsv(id: string): Promise<void> {
   return download(() => project.countsCsv(id));
+}
+
+export function exportRoiSet(id: string): Promise<void> {
+  return download(() => project.roiSet(id));
+}
+
+export function exportGeoJson(id: string): Promise<void> {
+  return download(() => project.geojson(id));
+}
+
+/** Pick an ImageJ .roi or RoiSet.zip, or a QuPath GeoJSON file, and add its regions to the scan. */
+export async function importRegionsFile(id: string): Promise<void> {
+  const file = await pickFile(".roi,.zip,.geojson,.json");
+  if (file) await importRegions(id, file);
 }
 
 export async function loadHistograms(id: string): Promise<void> {

@@ -245,6 +245,34 @@ export function commitRegion(dsId: string, rid: string, points: Point[], rings?:
   return saveRegion(dsId, rid, { points: tidied, ...(tidiedRings ? { rings: tidiedRings } : {}) });
 }
 
+const LEFT_OUT: Record<string, [string, string]> = {
+  lines: ["line", "lines"], points: ["point selection", "point selections"], text: ["text label", "text labels"],
+  images: ["image overlay", "image overlays"], detections: ["QuPath detection", "QuPath detections"],
+  empty: ["shape without area", "shapes without area"], damaged: ["unreadable item", "unreadable items"],
+  other: ["other item", "other items"],
+};
+
+export function describeLeftOut(skipped: Record<string, number>): string {
+  return Object.entries(skipped).map(([kind, n]) => {
+    const [one, many] = LEFT_OUT[kind] ?? [kind, kind];
+    return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+  }).join(", ");
+}
+
+/** Regions from an ImageJ or QuPath file, added to the scan's regions and selected. */
+export async function importRegions(dsId: string, file: File): Promise<void> {
+  try {
+    const { regions, skipped } = await papi.importRegions(dsId, file);
+    patchScan(dsId, (s) => ({ regions: [...s.regions, ...regions] }));
+    selectRegions(regions.map((r) => r.id));
+    const left = describeLeftOut(skipped);
+    const count = `${regions.length.toLocaleString()} ${regions.length === 1 ? "region" : "regions"}`;
+    useStudio.getState().setNotice(`Imported ${count} from ${file.name}${left ? `; left out ${left}` : ""}.`);
+  } catch (e) {
+    report(e);
+  }
+}
+
 /** Union, intersect, XOR, subtract, enlarge/shrink, convex hull or fit ellipse: the new regions are added
  * and selected; the regions they came from are kept. */
 export async function regionOp(dsId: string, req: RegionOpRequest): Promise<boolean> {

@@ -1,6 +1,6 @@
 import type {
   Annotation, Counter, CountPoint, DatasetInfo, EngineEvent, ExportPlan, FigureRequest, FsListing, Histogram,
-  Measurement, Patch, Point,
+  ImportedRegions, Measurement, Patch, Point,
   Profile, Project, RawRequest, Region, RegionOpRequest, RegionShape, SavedDisplay, SessionApplied, SessionInfo,
   SessionSaveRequest,
 } from "./types";
@@ -62,6 +62,12 @@ export const project = {
   /** Union, intersect, XOR, subtract, enlarge/shrink, convex hull or fit ellipse; the results are new regions. */
   regionOp: (id: string, body: RegionOpRequest) =>
     request<{ regions: Region[] }>(`/datasets/${id}/regions/op`, send("POST", body)),
+  /** Regions from an ImageJ .roi or RoiSet.zip, or a QuPath GeoJSON file, added to the scan's regions. */
+  importRegions: (id: string, file: File) =>
+    request<ImportedRegions>(`/datasets/${id}/regions/import?filename=${encodeURIComponent(file.name)}`,
+      { method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" } }),
+  roiSet: (id: string) => download(`/datasets/${id}/regions.zip`, "RoiSet.zip"),
+  geojson: (id: string) => download(`/datasets/${id}/regions.geojson`, "regions.geojson"),
   deleteRegion: (id: string, rid: string) =>
     request<{ deleted: string; background_region: string | null }>(`/datasets/${id}/regions/${rid}`, send("DELETE")),
   /** Put back a deleted region with its original id. */
