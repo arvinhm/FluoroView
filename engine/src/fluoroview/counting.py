@@ -8,7 +8,7 @@ import io
 import numpy as np
 
 from . import __version__
-from .regions import contains_points, pixel_count
+from .regions import contains_points, pixel_count, rings_of
 
 POINT_COLUMNS = ["file", "point_id", "counter", "x_px", "y_px", "x_um", "y_um", "regions", "fluoroview_version"]
 COUNT_COLUMNS = ["file", "counter", "region_id", "region", "count", "area_px", "area_um2", "density_per_mm2",
@@ -32,7 +32,8 @@ def _membership(state: dict) -> tuple[list[dict], np.ndarray]:
     points = state.get("points") or []
     xs = np.array([p["x"] for p in points], dtype=np.float64)
     ys = np.array([p["y"] for p in points], dtype=np.float64)
-    table = np.array([contains_points(r["shape"], r["points"], xs, ys) for r in state["regions"]], dtype=np.bool_)
+    table = np.array([contains_points(r["shape"], r["points"], xs, ys, rings_of(r)) for r in state["regions"]],
+                     dtype=np.bool_)
     return points, table.reshape(len(state["regions"]), len(points))
 
 
@@ -56,7 +57,7 @@ def counts_csv(scan: str, state: dict, width: int, height: int, pixel_size: floa
     """One row per category and region, then per category over the whole image."""
     points, inside = _membership(state)
     counter_of = np.array([p["counter"] for p in points], dtype=object)
-    areas = [(r["id"], r["name"], pixel_count(r["shape"], r["points"], width, height), inside[i])
+    areas = [(r["id"], r["name"], pixel_count(r["shape"], r["points"], width, height, rings=rings_of(r)), inside[i])
              for i, r in enumerate(state["regions"])]
     areas.append(("", "whole image", width * height, np.ones(len(points), dtype=np.bool_)))
     rows = []

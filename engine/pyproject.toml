@@ -16,6 +16,7 @@ dependencies = [
   "platformdirs>=4.2",
   "numba>=0.61",
   "pillow>=11",
+  "shapely>=2.0",
 ]
 
 [project.scripts]

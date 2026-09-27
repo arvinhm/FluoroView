@@ -21,6 +21,7 @@ from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 from . import __version__
 from .projects import now_iso
 from .pyramid.kernels import downsample2
+from .regions import rings_of
 
 GAP_FRACTION = 0.02
 GAP_COLOR = (255, 255, 255)
@@ -169,6 +170,9 @@ class _Overlay:
                 self.draw.ellipse(box, outline=color, width=self.line)
         else:
             self.draw.line([*pts, pts[0]], fill=color, width=self.line, joint="curve")
+        for ring in rings_of(r):
+            ring_pts = [self.xy(x, y) for x, y in ring]
+            self.draw.line([*ring_pts, ring_pts[0]], fill=color, width=self.line, joint="curve")
 
     def pin(self, x: float, y: float, label: str) -> None:
         cx, cy = self.xy(x, y)

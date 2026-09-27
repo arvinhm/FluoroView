@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from . import __version__
 from .display import DisplayChannel
 from .projects import now_iso
-from .regions import AnnotationRestore, Counter, CountPoint, RegionRestore, new_id, validate_shape
+from .regions import AnnotationRestore, Counter, CountPoint, RegionRestore, new_id, region_record, validate_shape
 
 FORMAT = "fluoroview-session"
 VERSION = 1
@@ -182,7 +182,7 @@ def read_session(path: Path) -> tuple[dict, Session]:
         raise SessionError("the session has counted points without a category")
     for r in session.regions:
         try:
-            validate_shape(r.shape, r.points)
+            validate_shape(r.shape, r.points, r.rings)
         except ValueError as exc:
             raise SessionError(f"region {r.name!r}: {exc}") from None
     return manifest, session
@@ -210,14 +210,8 @@ def find_image(manifest: dict, fv_path: Path) -> list[str] | None:
     return None
 
 
-def _region(r: RegionRestore) -> dict:
-    region = r.model_dump()
-    region["points"] = [[float(x), float(y)] for x, y in r.points]
-    return region
-
-
 def replace_state(state: dict, session: Session, n_channels: int) -> None:
-    state["regions"] = [_region(r) for r in session.regions]
+    state["regions"] = [region_record(r) for r in session.regions]
     state["annotations"] = [n.model_dump() for n in session.notes]
     ids = {r["id"] for r in state["regions"]}
     state["background_region"] = session.background_region if session.background_region in ids else None
@@ -234,7 +228,7 @@ def merge_state(state: dict, session: Session) -> None:
     taken = {r["id"] for r in state["regions"]}
     renamed: dict[str, str] = {}
     for r in session.regions:
-        region = _region(r)
+        region = region_record(r)
         if region["id"] in taken:
             fresh = new_id()
             renamed[region["id"]] = fresh

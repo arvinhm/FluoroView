@@ -17,7 +17,7 @@ import numpy as np
 
 from . import __version__
 from .projects import now_iso
-from .regions import bounds, feret, imagej_angle, mask, perimeter, solidity
+from .regions import band_moments, bounds, feret, imagej_angle, mask, perimeter, rings_of, solidity
 
 MEASURE_ROWS = 512
 
@@ -90,28 +90,21 @@ def measure_region(ds, region: dict, pixel_size: float | None) -> dict:
     n_bins = 1 << (8 * np.dtype(info.dtype).itemsize)
     saturation = info.saturation if info.saturation is not None else n_bins - 1
     hists = np.zeros((n_ch, n_bins), np.int64)
-    count, sx, sy, sxx, syy, sxy = 0, 0.0, 0.0, 0.0, 0.0, 0.0
+    shape, points, rings = region["shape"], region["points"], rings_of(region)
+    moments = np.zeros(6)
     px_box = [math.inf, math.inf, -math.inf, -math.inf]
-    box = bounds(region["shape"], region["points"], info.width, info.height)
+    box = bounds(shape, points, info.width, info.height, rings)
     if box is not None:
         x0, y0, x1, y1 = box
         xs = np.arange(x1 - x0) + 0.5  # pixel centres, relative to the box for precise moments
         for ya in range(y0, y1, MEASURE_ROWS):
             yb = min(y1, ya + MEASURE_ROWS)
-            inside = mask(region["shape"], region["points"], x0, ya, x1 - x0, yb - ya)
-            rows = inside.sum(axis=1)
-            n = int(rows.sum())
-            if n == 0:
+            inside = mask(shape, points, x0, ya, x1 - x0, yb - ya, rings)
+            band = band_moments(inside, xs, ya - y0 + np.arange(yb - ya) + 0.5)
+            if band[0] == 0:
                 continue
-            cols = inside.sum(axis=0)
-            ys = ya - y0 + np.arange(yb - ya) + 0.5
-            count += n
-            sx += float((xs * cols).sum())
-            sy += float((ys * rows).sum())
-            sxx += float((xs**2 * cols).sum())
-            syy += float((ys**2 * rows).sum())
-            sxy += float(ys @ (inside.astype(np.float64) @ xs))
-            used_cols, used_rows = np.flatnonzero(cols), np.flatnonzero(rows)
+            moments += band
+            used_cols, used_rows = np.flatnonzero(inside.any(axis=0)), np.flatnonzero(inside.any(axis=1))
             px_box = [min(px_box[0], x0 + int(used_cols[0])), min(px_box[1], ya + int(used_rows[0])),
                       max(px_box[2], x0 + int(used_cols[-1]) + 1), max(px_box[3], ya + int(used_rows[-1]) + 1)]
             for c in range(n_ch):
@@ -119,13 +112,15 @@ def measure_region(ds, region: dict, pixel_size: float | None) -> dict:
     px = pixel_size
     geometry = dict.fromkeys(GEOMETRY)
     cx = cy = None
+    count = int(moments[0])
     if count:
+        _, sx, sy, sxx, syy, sxy = moments
         mx, my = sx / count, sy / count
         cx, cy = x0 + mx, y0 + my
         major, minor, angle = fitted_ellipse(count, sxx - count * mx * mx, syy - count * my * my,
                                              sxy - count * mx * my)
-        perim = perimeter(region["shape"], region["points"])
-        fmax, fangle, fmin = feret(region["shape"], region["points"])
+        perim = perimeter(shape, points, rings)
+        fmax, fangle, fmin = feret(shape, points, rings)
         geometry.update({
             "perimeter_px": perim, "perimeter_um": perim * px if px else None,
             "bbox_x_px": px_box[0], "bbox_y_px": px_box[1], "bbox_w_px": px_box[2] - px_box[0],
@@ -133,7 +128,7 @@ def measure_region(ds, region: dict, pixel_size: float | None) -> dict:
             "ellipse_angle_deg": angle, "circularity": min(1.0, 4 * math.pi * count / perim**2) if perim else None,
             "aspect_ratio": major / minor if minor else None,
             "roundness": 4 * count / (math.pi * major**2) if major else None,
-            "solidity": solidity(region["shape"], region["points"]), "feret_px": fmax,
+            "solidity": solidity(shape, points, rings), "feret_px": fmax,
             "feret_um": fmax * px if px else None, "feret_angle_deg": fangle, "min_feret_px": fmin,
             "min_feret_um": fmin * px if px else None,
         })

@@ -11,7 +11,7 @@ import uuid
 from collections import OrderedDict
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, assert_never
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -37,12 +37,17 @@ from ..regions import (
     RegionPatch,
     RegionRestore,
     ReplyIn,
+    as_lists,
     new_annotation,
     new_id,
     new_region,
     new_reply,
+    region_record,
+    rings_of,
     validate_shape,
+    with_rings,
 )
+from ..roi_ops import OperationError, combine, combined_name, enlarge, fit_ellipse, hull
 from ..session import (
     MAX_EXPORT_BYTES,
     SUFFIX,
@@ -109,6 +114,15 @@ class SessionApplyIn(BaseModel):
     mode: Literal["replace", "merge"]
 
 
+class RegionOpIn(BaseModel):
+    op: Literal["union", "intersect", "xor", "subtract", "enlarge", "hull", "ellipse"]
+    ids: list[str] = Field(min_length=1, max_length=500)
+    """for subtract, the first region is the one the others are cut out of"""
+    distance: FiniteFloat | None = None
+    """enlarge by this much (negative: shrink)"""
+    unit: Literal["px", "um"] = "px"
+
+
 def _unique_name(state: dict) -> str:
     taken = {r["name"] for r in state["regions"]}
     numbers = [int(m.group(1)) for n in taken if (m := re.fullmatch(r"Region (\d+)", n))]
@@ -155,7 +169,8 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
 
     def measured(ds: Dataset, region: dict, px: float | None) -> dict:
         """Measurement of a region; cached by geometry and scale, so renaming never re-reads the pixels."""
-        key = (ds.id, region["id"], region["shape"], tuple(map(tuple, region["points"])), px)
+        key = (ds.id, region["id"], region["shape"], tuple(map(tuple, region["points"])),
+               tuple(tuple(map(tuple, r)) for r in rings_of(region)), px)
         with cache_lock:
             result = cache.get(key)
             if result is not None:
@@ -317,12 +332,15 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
 
         def change(state: dict) -> dict:
             region = find(state, rid)
-            if req.points is not None:
+            if req.points is not None or req.rings is not None:
+                points = req.points if req.points is not None else region["points"]
+                rings = req.rings if req.rings is not None else rings_of(region)
                 try:
-                    validate_shape(region["shape"], req.points)
+                    validate_shape(region["shape"], points, rings)
                 except ValueError as exc:
                     raise HTTPException(422, str(exc)) from None
-                region["points"] = [[float(x), float(y)] for x, y in req.points]
+                region["points"] = as_lists(points)
+                with_rings(region, rings)
             if req.name is not None and req.name.strip():
                 region["name"] = req.name.strip()
             if req.color is not None:
@@ -354,15 +372,65 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
             if any(r["id"] == req.id for r in state["regions"]):
                 raise HTTPException(409, "a region with this id already exists")
             try:
-                validate_shape(req.shape, req.points)
+                validate_shape(req.shape, req.points, req.rings)
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from None
-            region = req.model_dump()
-            region["points"] = [[float(x), float(y)] for x, y in req.points]
+            region = region_record(req)
             state["regions"].append(region)
             return region
 
         return projects.update(*where(ds), change)
+
+    @router.post("/regions/op")
+    def region_op(ds_id: str, req: RegionOpIn) -> dict:
+        """Union, intersect, XOR or subtract (the first region minus the others) of several regions, or
+        enlarge/shrink, convex hull or fit ellipse of each. The results are new regions."""
+        ds = dataset(ds_id)
+        state = projects.scan(*where(ds))
+        sources = [find(state, rid) for rid in dict.fromkeys(req.ids)]
+        try:
+            results = operate(ds, state, req, sources)
+        except OperationError as exc:
+            raise HTTPException(422, str(exc)) from None
+
+        def change(state: dict) -> dict:
+            created = []
+            for result, name, color in results:
+                try:
+                    region = new_region(RegionIn(**result, name=name[:200], color=color), 0)
+                except ValueError as exc:
+                    raise HTTPException(422, str(exc)) from None
+                state["regions"].append(region)
+                created.append(region)
+            return {"regions": created}
+
+        return projects.update(*where(ds), change)
+
+    def operate(ds: Dataset, state: dict, req: RegionOpIn, sources: list[dict]) -> list[tuple[dict, str, str]]:
+        match req.op:
+            case "union" | "intersect" | "xor" | "subtract":
+                if len(sources) < 2:
+                    raise HTTPException(422, "select at least two regions")
+                name = combined_name(req.op, [r["name"] for r in sources])
+                return [(combine(req.op, sources), name, sources[0]["color"])]
+            case "enlarge":
+                if not req.distance:
+                    raise HTTPException(422, "give the distance to enlarge or shrink by")
+                d = req.distance
+                if req.unit == "um":
+                    px = pixel_size_of(ds, state)
+                    if not px:
+                        raise HTTPException(422, "the image has no pixel size: use pixels, or set the scale first")
+                    d /= px
+                label = f"{'+' if req.distance > 0 else '−'}{abs(req.distance):g} {'µm' if req.unit == 'um' else 'px'}"
+                return [(enlarge(r, d), f"{r['name']} {label}", r["color"]) for r in sources]
+            case "hull":
+                return [(hull(r), f"{r['name']} hull", r["color"]) for r in sources]
+            case "ellipse":
+                return [(fit_ellipse(r, ds.info.width, ds.info.height), f"{r['name']} ellipse", r["color"])
+                        for r in sources]
+            case _:
+                assert_never(req.op)
 
     @router.put("/background")
     def set_background(ds_id: str, req: BackgroundIn) -> dict:
