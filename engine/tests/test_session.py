@@ -85,6 +85,10 @@ def test_save_inspect_and_restore_a_session(client, biotek_image, tmp_path):
     assert session["notes"][0]["replies"][0]["author"] == "PH" and session["view"]["zoom"] == 2.5
     assert session["display"][1]["visible"] is False and header == COLUMNS
 
+    preview = client.get("/api/v1/sessions/thumbnail", params={"path": saved["path"]})
+    assert preview.status_code == 200 and preview.content.startswith(b"\x89PNG")
+    assert client.get("/api/v1/sessions/thumbnail", params={"path": str(image)}).status_code == 404
+
     moved = tmp_path / "moved"
     shutil.move(folder, moved)
     fv = moved / "work.fv"

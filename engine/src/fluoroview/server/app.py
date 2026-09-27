@@ -8,6 +8,7 @@ import math
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.encoders import jsonable_encoder
@@ -20,12 +21,12 @@ from .. import __version__
 from ..config import Settings
 from ..datasets import Dataset, NotReady, Registry
 from ..events import EventBus
-from ..io import TiffSource, UnsupportedImage, is_openable
+from ..io import MultiFileSource, TiffSource, UnsupportedImage, file_fingerprint, is_openable
 from ..projects import ProjectStore
 from ..pyramid.cache import PyramidCache
 from ..pyramid.store import PyramidStore
 from ..session import SUFFIX as SESSION_SUFFIX
-from ..session import SessionError, find_image, read_session
+from ..session import SessionError, find_image, read_session, read_thumbnail
 from ..thumbnail import render_thumbnail
 from .routes_project import project_router
 from .security import LocalAccessMiddleware
@@ -184,6 +185,15 @@ def create_app(settings: Settings) -> FastAPI:
         return Response(thumbnail_png(key, size, info_of), media_type="image/png",
                         headers={"Cache-Control": "private, max-age=86400"})
 
+    @api.get("/sessions/thumbnail")
+    def session_preview(path: str) -> Response:
+        """The preview saved inside a .fv (for recent-session cards)."""
+        real = Path(os.path.expanduser(path))
+        png = read_thumbnail(real) if real.is_file() and real.name.lower().endswith(SESSION_SUFFIX) else None
+        if png is None:
+            raise HTTPException(404, "no preview in this session")
+        return Response(png, media_type="image/png", headers={"Cache-Control": "private, max-age=60"})
+
     @api.post("/sessions/inspect")
     def inspect_session(req: SessionPath) -> dict:
         """What a .fv holds and where its image is, before anything is opened or changed."""
@@ -198,17 +208,21 @@ def create_app(settings: Settings) -> FastAPI:
                 "image_paths": find_image(manifest, path)}
 
     @api.get("/thumbnail")
-    def file_thumbnail(path: str, size: int = Query(320, ge=64, le=1024)) -> Response:
-        """Preview of a scan whose pyramid is already cached; never reads an uncached scan."""
-        real = os.path.realpath(os.path.expanduser(path))
-        if not os.path.isfile(real) or not is_openable(os.path.basename(real)):
+    def file_thumbnail(path: Annotated[list[str], Query(max_length=64)],
+                       size: int = Query(320, ge=64, le=1024)) -> Response:
+        """Preview of a scan (or of files combined as channels, in order) whose pyramid is already cached.
+
+        Never reads an uncached scan."""
+        reals = [os.path.realpath(os.path.expanduser(p)) for p in path]
+        if not reals or not all(os.path.isfile(r) and is_openable(os.path.basename(r)) for r in reals):
             raise HTTPException(404, "no such image")
-        key = PyramidCache.key_for(real)
+        key = (PyramidCache.key_for(reals[0]) if len(reals) == 1
+               else cache.key_for_fingerprint("\n".join(file_fingerprint(r) for r in reals)))
         if not cache.is_complete(key):
             raise HTTPException(404, "not cached yet")
 
         def info():
-            src = TiffSource(real)
+            src = TiffSource(reals[0]) if len(reals) == 1 else MultiFileSource(reals)
             try:
                 return src.info
             finally:

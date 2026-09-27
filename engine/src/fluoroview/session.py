@@ -171,6 +171,15 @@ def read_session(path: Path) -> tuple[dict, Session]:
     return manifest, session
 
 
+def read_thumbnail(path: Path) -> bytes | None:
+    """The preview stored in a .fv, if it has one."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            return _member(z, "thumbnail.png") if "thumbnail.png" in z.namelist() else None
+    except (zipfile.BadZipFile, SessionError):
+        return None
+
+
 def find_image(manifest: dict, fv_path: Path) -> list[str] | None:
     """The image files at their last known paths, else with the same names next to the .fv."""
     image = manifest["image"]

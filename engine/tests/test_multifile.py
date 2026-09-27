@@ -8,7 +8,7 @@ from fluoroview.io import Layout, MultiFileSource, UnsupportedImage
 from fluoroview.io.colors import PALETTE
 from fluoroview.io.multifile import channel_name_from_file
 
-from .conftest import make_planes
+from .conftest import make_planes, wait_ready
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "example_data"
 
@@ -41,6 +41,15 @@ def channel_files(tmp_path):
         tifffile.imwrite(p, plane, photometric="minisblack")
         paths.append(str(p))
     return paths, data
+
+
+def test_combined_files_have_a_preview(client, channel_files):
+    paths, _ = channel_files
+    wait_ready(client, client.post("/api/v1/datasets", json={"paths": paths}).json()["id"])
+    res = client.get("/api/v1/thumbnail", params={"path": paths, "size": 128})
+    assert res.status_code == 200 and res.content.startswith(b"\x89PNG")
+    other_order = client.get("/api/v1/thumbnail", params={"path": paths[::-1]})
+    assert other_order.status_code == 404, "another combination is another image"
 
 
 def test_reads_files_as_channels(channel_files):
