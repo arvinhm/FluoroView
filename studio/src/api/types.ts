@@ -138,6 +138,12 @@ export interface ChannelStats {
   max: number | null;
   sum: number;
   n_clipped: number;
+  mode: number | null;
+  skewness: number | null;
+  /** excess kurtosis, as ImageJ reports it */
+  kurtosis: number | null;
+  /** calibrated area × mean (ImageJ IntDen); `sum` is RawIntDen */
+  int_den: number | null;
 }
 
 export interface Measurement {
@@ -148,6 +154,18 @@ export interface Measurement {
   area_um2: number | null;
   centroid_x_px: number | null;
   centroid_y_px: number | null;
+  perimeter_px: number | null;
+  perimeter_um: number | null;
+  circularity: number | null;
+  aspect_ratio: number | null;
+  roundness: number | null;
+  solidity: number | null;
+  feret_px: number | null;
+  feret_um: number | null;
+  min_feret_px: number | null;
+  ellipse_major_px: number | null;
+  ellipse_minor_px: number | null;
+  ellipse_angle_deg: number | null;
   channels: ChannelStats[];
 }
 

@@ -331,6 +331,11 @@ table.stats th:first-child, table.stats td:first-child { text-align: left; font-
   font-variant-numeric: tabular-nums; color: var(--fv-text-1);
 }
 .mcard-busy { margin-left: auto; font-family: var(--fv-font-ui); }
+.mcard-shape {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 10px 6px; color: var(--fv-text-3);
+  font: 400 var(--fv-fs-xs) var(--fv-font-num); font-variant-numeric: tabular-nums;
+}
+.mcard-shape b { font-weight: 500; color: var(--fv-text-2); }
 .badge {
   padding: 0 5px; font: 600 9.5px / 15px var(--fv-font-ui); letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--fv-accent); border: 1px solid color-mix(in srgb, var(--fv-accent) 40%, transparent); border-radius: var(--fv-r-1);

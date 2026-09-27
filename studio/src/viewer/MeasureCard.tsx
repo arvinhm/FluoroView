@@ -4,6 +4,7 @@ import type { DatasetInfo, Measurement, RegionShape } from "../api/types";
 import { fmt1, fmtArea, fmtInt, fmtPercent, fmtSigned } from "../lib/format";
 import { deleteRegion, measure, measureKey, renameRegion, setBackground, useProject } from "../state/project";
 import { useStudio } from "../state/store";
+import { formatLength } from "./camera";
 import { type Anchor, type Bounds, placeBeside } from "./overlay";
 
 const CARD_W = 272;
@@ -115,6 +116,16 @@ export function MeasureCard({ ds, anchor, bounds, avoid }: {
           <span className="muted mcard-busy">{entry.loading ? "measuring" : "release to measure"}</span>
         )}
       </div>
+      {m && m.circularity !== null && (
+        <div className="mcard-shape" title={`Perimeter ${fmt1(m.perimeter_px ?? 0)} px · fitted ellipse ${fmt1(m.ellipse_major_px ?? 0)}`
+          + ` × ${fmt1(m.ellipse_minor_px ?? 0)} px at ${fmt1(m.ellipse_angle_deg ?? 0)}° · roundness `
+          + `${(m.roundness ?? 0).toFixed(3)} · min Feret ${fmt1(m.min_feret_px ?? 0)} px`}>
+          <span>circ <b>{m.circularity.toFixed(3)}</b></span>
+          <span>AR <b>{(m.aspect_ratio ?? 0).toFixed(2)}</b></span>
+          <span>solidity <b>{(m.solidity ?? 0).toFixed(3)}</b></span>
+          <span>Feret <b>{m.feret_um !== null ? formatLength(m.feret_um) : `${fmt1(m.feret_px ?? 0)} px`}</b></span>
+        </div>
+      )}
       <div className={`mcard-rows${m && (entry?.loading || entry?.stale) ? " stale" : ""}`}>
         {ds.channels.map((ch, i) => {
           const c = m?.channels[i];
@@ -127,7 +138,9 @@ export function MeasureCard({ ds, anchor, bounds, avoid }: {
           const delta = mean !== null && bg?.[i] != null ? mean - bg[i]! : null;
           const clipped = c && c.n_pixels ? c.n_clipped / c.n_pixels : 0;
           const detail = c && mean !== null
-            ? `${ch.name}: mean ${fmt1(mean)}, SD ${fmt1(sd)}, median ${fmtInt(c.median ?? 0)}, min ${fmtInt(c.min ?? 0)}, max ${fmtInt(c.max ?? 0)}`
+            ? `${ch.name}: mean ${fmt1(mean)}, SD ${fmt1(sd)}, median ${fmtInt(c.median ?? 0)}, mode ${fmtInt(c.mode ?? 0)}, `
+              + `min ${fmtInt(c.min ?? 0)}, max ${fmtInt(c.max ?? 0)}, skewness ${(c.skewness ?? 0).toFixed(3)}, `
+              + `kurtosis ${(c.kurtosis ?? 0).toFixed(3)}, IntDen ${fmtInt(c.int_den ?? 0)}`
               + (clipped > 0 ? `, ${fmtPercent(clipped)} clipped` : "") : ch.name;
           return (
             <div key={ch.index} className={`mrow${d?.visible ? "" : " off"}${bg ? " with-delta" : ""}`} title={detail}>
