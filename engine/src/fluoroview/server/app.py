@@ -216,7 +216,8 @@ def create_app(settings: Settings) -> FastAPI:
         return {"path": str(real), "parent": parent, "entries": entries}
 
     app.include_router(api)
-    app.include_router(project_router(registry, ProjectStore(settings.projects_dir)))
+    exports = settings.cache_dir.parent / "exports"
+    app.include_router(project_router(registry, ProjectStore(settings.projects_dir), exports))
 
     @app.websocket("/api/v1/events")
     async def event_stream(ws: WebSocket) -> None:

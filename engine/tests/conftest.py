@@ -24,6 +24,14 @@ def client(tmp_path):
         yield c
 
 
+@pytest.fixture
+def opened(client, biotek_image):
+    """The BioTek-like test image, opened and built: (client, dataset json, raw planes, path)."""
+    path, data = biotek_image
+    ds = wait_ready(client, client.post("/api/v1/datasets", json={"path": str(path)}).json()["id"])
+    return client, ds, data, path
+
+
 def wait_ready(client, ds_id: str, timeout: float = 60.0) -> dict:
     t0 = time.time()
     while time.time() - t0 < timeout:

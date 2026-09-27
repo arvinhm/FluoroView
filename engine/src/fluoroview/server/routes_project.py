@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import re
 import threading
+import uuid
 from collections import OrderedDict
+from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from ..datasets import Dataset, NotReady, Registry
+from ..figure import Display, Plan, clip_box, encode_png, encode_tiff, plan, provenance, render_figure, write_ome
 from ..measure import measure_region, rows_for_scan, to_csv
 from ..profile import line_profile, profile_csv
 from ..projects import ProjectStore, now_iso
@@ -41,6 +46,29 @@ class BackgroundIn(BaseModel):
     region_id: str | None
 
 
+Box = tuple[float, float, float, float]
+
+
+class FigureIn(BaseModel):
+    box: Box
+    """full-resolution pixels x0, y0, x1, y1"""
+    display: list[DisplayChannel]
+    format: Literal["png", "tiff"] = "png"
+    scale_bar: bool = True
+    labels: bool = True
+    regions: bool = True
+    notes: bool = True
+    dpi: int = Field(300, ge=72, le=2400)
+    max_side: int = Field(8000, ge=256, le=16000)
+    plan_only: bool = False
+
+
+class RawIn(BaseModel):
+    box: Box
+    max_side: int = Field(8000, ge=256, le=16000)
+    plan_only: bool = False
+
+
 def _unique_name(state: dict) -> str:
     taken = {r["name"] for r in state["regions"]}
     numbers = [int(m.group(1)) for n in taken if (m := re.fullmatch(r"Region (\d+)", n))]
@@ -50,8 +78,11 @@ def _unique_name(state: dict) -> str:
     return f"Region {k}"
 
 
-def project_router(registry: Registry, projects: ProjectStore) -> APIRouter:
+def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path) -> APIRouter:
     router = APIRouter(prefix="/api/v1/datasets/{ds_id}")
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    for stale in exports_dir.glob("*.tif"):
+        stale.unlink(missing_ok=True)
     cache: OrderedDict[tuple, dict] = OrderedDict()
     cache_lock = threading.Lock()
 
@@ -69,6 +100,12 @@ def project_router(registry: Registry, projects: ProjectStore) -> APIRouter:
             if region["id"] == rid:
                 return region
         raise HTTPException(404, "unknown region")
+
+    def file_stem(ds: Dataset) -> str:
+        """Download name: the scan's file name without extension, or `<folder>_<n>ch` for combined files."""
+        files = ds.info.files
+        base = f"{Path(files[0]).parent.name}_{len(files)}ch" if files else Path(ds.info.path).stem
+        return re.sub(r"[^\w.-]+", "_", base)
 
     def measured(ds: Dataset, region: dict) -> dict:
         """Measurement of a region; cached by geometry, so renaming never re-reads the pixels."""
@@ -258,9 +295,59 @@ def project_router(registry: Registry, projects: ProjectStore) -> APIRouter:
                         max_samples: int = Query(2048, ge=16, le=8192)) -> Response:
         ds = dataset(ds_id)
         text = profile_csv(profile_of(ds, x0, y0, x1, y1, max_samples), ds.info.pixel_size_um)
-        name = re.sub(r"[^\w.+-]+", "_", ds.info.scan_key)
         return Response(text, media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="{name}-profile.csv"'})
+                        headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-profile.csv"'})
+
+    def area_plan(ds: Dataset, box: Box, panels: tuple[int | None, ...], max_side: int) -> Plan:
+        try:
+            area = clip_box(box, ds.info.width, ds.info.height)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return plan(ds.levels, area, panels, max_side)
+
+    @router.post("/figure")
+    def export_figure(ds_id: str, req: FigureIn) -> Response:
+        """Composite plus one panel per visible channel, rendered with the given display settings."""
+        ds = dataset(ds_id)
+        if len(req.display) != len(ds.info.channels):
+            raise HTTPException(422, f"expected {len(ds.info.channels)} channels, got {len(req.display)}")
+        displays = [Display(d.visible, d.color, d.lo, d.hi, d.gamma) for d in req.display]
+        visible = tuple(i for i, d in enumerate(displays) if d.visible)
+        if not visible:
+            raise HTTPException(422, "no channel is visible")
+        p = area_plan(ds, req.box, (None, *visible), req.max_side)
+        if req.plan_only:
+            return JSONResponse(p.to_json())
+        state = projects.scan(*where(ds))
+        try:
+            img = render_figure(ds, p, displays, regions=state["regions"] if req.regions else [],
+                                notes=state["annotations"] if req.notes else [], scale_bar=req.scale_bar,
+                                labels=req.labels)
+        except NotReady:
+            raise HTTPException(409, "the image is still loading; try again in a moment") from None
+        meta = provenance(ds, p, displays)
+        if req.format == "png":
+            body, ext, media = encode_png(img, req.dpi, meta), "png", "image/png"
+        else:
+            body, ext, media = encode_tiff(img, req.dpi, meta), "tif", "image/tiff"
+        return Response(body, media_type=media,
+                        headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-figure.{ext}"'})
+
+    @router.post("/export.ome.tif")
+    def export_raw(ds_id: str, req: RawIn) -> Response:
+        """Raw values of every channel in the area as OME-TIFF, with the physical pixel size."""
+        ds = dataset(ds_id)
+        p = area_plan(ds, req.box, (None,), req.max_side)
+        if req.plan_only:
+            return JSONResponse(p.to_json())
+        path = exports_dir / f"{uuid.uuid4().hex}.ome.tif"
+        try:
+            write_ome(ds, p, path)
+        except NotReady:
+            path.unlink(missing_ok=True)
+            raise HTTPException(409, "the image is still loading; try again in a moment") from None
+        return FileResponse(path, media_type="image/tiff", filename=f"{file_stem(ds)}-area.ome.tif",
+                            background=BackgroundTask(path.unlink, missing_ok=True))
 
     @router.get("/measurements.csv")
     def get_csv(ds_id: str) -> Response:
@@ -268,8 +355,7 @@ def project_router(registry: Registry, projects: ProjectStore) -> APIRouter:
         state = projects.scan(*where(ds))
         rows = rows_for_scan(ds.info.scan_key, ds.info.pixel_size_um,
                              [measured(ds, r) for r in state["regions"]], state["background_region"])
-        name = re.sub(r"[^\w.+-]+", "_", ds.info.scan_key)
         return Response(to_csv(rows), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="{name}-regions.csv"'})
+                        headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-regions.csv"'})
 
     return router

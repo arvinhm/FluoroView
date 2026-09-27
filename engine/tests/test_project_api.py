@@ -7,15 +7,6 @@ import pytest
 from fluoroview.measure import COLUMNS
 from fluoroview.server import routes_project
 
-from .conftest import wait_ready
-
-
-@pytest.fixture
-def opened(client, biotek_image):
-    path, data = biotek_image
-    ds = wait_ready(client, client.post("/api/v1/datasets", json={"path": str(path)}).json()["id"])
-    return client, ds, data, path
-
 
 def test_region_lifecycle_and_measurement(opened):
     client, ds, data, _ = opened
