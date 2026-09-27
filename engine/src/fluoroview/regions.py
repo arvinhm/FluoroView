@@ -463,11 +463,14 @@ MIN_PART_AREA = 0.01
 
 
 def ellipse_points(cx: float, cy: float, a: float, b: float, theta: float = 0.0) -> np.ndarray:
-    """Vertices on an ellipse with semi-axes a (along direction theta, radians, y down) and b, close enough
-    that the polygon stays within ELLIPSE_TOLERANCE of the curve."""
+    """A polygon for an ellipse with semi-axes a (along direction theta, radians, y down) and b. It has the
+    ellipse's area (vertices sit slightly outside the curve, edge midpoints slightly inside), so it gains
+    as many boundary pixels as it loses, and it stays within ELLIPSE_TOLERANCE of the curve."""
     n = int(min(4096, max(32, math.ceil(math.pi * math.sqrt(max(a, b) / (2 * ELLIPSE_TOLERANCE))))))
-    t = np.arange(n) * (2.0 * math.pi / n)
-    ex, ey = a * np.cos(t), b * np.sin(t)
+    step = 2.0 * math.pi / n
+    grow = math.sqrt(step / math.sin(step))
+    t = np.arange(n) * step
+    ex, ey = grow * a * np.cos(t), grow * b * np.sin(t)
     c, s = math.cos(theta), math.sin(theta)
     return np.column_stack([cx + ex * c - ey * s, cy + ex * s + ey * c])
 
@@ -504,10 +507,11 @@ def region_geometry(region: dict):
     return to_geometry(region["shape"], region["points"], rings_of(region))
 
 
-def _polygons(geom) -> list[Polygon]:
+def polygons_of(geom) -> list[Polygon]:
+    """Every non-empty polygon in a geometry, collections flattened; lines and points are left out."""
     if isinstance(geom, Polygon):
         return [] if geom.is_empty else [geom]
-    return [p for part in getattr(geom, "geoms", ()) for p in _polygons(part)]
+    return [p for part in getattr(geom, "geoms", ()) for p in polygons_of(part)]
 
 
 def _ring_list(coords, digits: int) -> list[list[float]] | None:
@@ -519,7 +523,7 @@ def _ring_list(coords, digits: int) -> list[list[float]] | None:
 def from_geometry(geom, digits: int = 2) -> tuple[list, list] | None:
     """Outline and rings of a shapely (multi)polygon: the largest part's outline, then its holes and the
     other parts with their holes. None when nothing with an area is left."""
-    parts = sorted((p for p in _polygons(geom) if p.area >= MIN_PART_AREA), key=lambda p: p.area, reverse=True)
+    parts = sorted((p for p in polygons_of(geom) if p.area >= MIN_PART_AREA), key=lambda p: p.area, reverse=True)
     outlines = [ring for p in parts
                 for ring in (p.exterior, *(i for i in p.interiors if Polygon(i).area >= MIN_PART_AREA))]
     lists = [r for r in (_ring_list(o.coords, digits) for o in outlines) if r is not None]

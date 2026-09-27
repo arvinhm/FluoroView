@@ -8,20 +8,22 @@ import re
 import threading
 import time
 import uuid
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal, assert_never
+from typing import Annotated, Literal, assert_never
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, Field, FiniteFloat
+from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from ..counting import counts_csv, points_csv
 from ..datasets import Dataset, NotReady, Registry
 from ..display import DisplayChannel
 from ..figure import Display, Plan, clip_box, encode_png, encode_tiff, plan, provenance, render_figure, write_ome
+from ..interop import InteropError, geojson_text, read_regions, roiset_bytes
 from ..measure import measure_region, rows_for_scan, to_csv
 from ..profile import line_profile, profile_csv
 from ..projects import ProjectStore, calibrated_pixel_size, now_iso
@@ -112,6 +114,9 @@ class SessionSaveIn(BaseModel):
 class SessionApplyIn(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
     mode: Literal["replace", "merge"]
+
+
+MAX_IMPORT_BYTES = 64 << 20
 
 
 class RegionOpIn(BaseModel):
@@ -405,6 +410,67 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
             return {"regions": created}
 
         return projects.update(*where(ds), change)
+
+    @router.get("/regions.zip")
+    def export_roiset(ds_id: str) -> Response:
+        """Every region as an ImageJ RoiSet.zip."""
+        ds = dataset(ds_id)
+        regions = projects.scan(*where(ds))["regions"]
+        if not regions:
+            raise HTTPException(422, "there are no regions to export")
+        return Response(roiset_bytes(regions), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-RoiSet.zip"'})
+
+    @router.get("/regions.geojson")
+    def export_geojson(ds_id: str) -> Response:
+        """Every region as a QuPath annotation, in a GeoJSON FeatureCollection."""
+        ds = dataset(ds_id)
+        regions = projects.scan(*where(ds))["regions"]
+        if not regions:
+            raise HTTPException(422, "there are no regions to export")
+        return Response(geojson_text(regions), media_type="application/geo+json",
+                        headers={"Content-Disposition": f'attachment; filename="{file_stem(ds)}-regions.geojson"'})
+
+    @router.post("/regions/import")
+    async def import_regions(ds_id: str, request: Request,
+                             filename: Annotated[str, Query(min_length=1, max_length=512)]) -> dict:
+        """Regions from an ImageJ .roi or RoiSet.zip, or a QuPath GeoJSON file (the request body), added to
+        the scan's regions."""
+        ds = dataset(ds_id)
+        if int(request.headers.get("content-length") or 0) > MAX_IMPORT_BYTES:
+            raise HTTPException(413, "the file is too large to import")
+        data = await request.body()
+        if len(data) > MAX_IMPORT_BYTES:
+            raise HTTPException(413, "the file is too large to import")
+        return await run_in_threadpool(add_imported, ds, data, filename)
+
+    def add_imported(ds: Dataset, data: bytes, filename: str) -> dict:
+        try:
+            found = read_regions(data, filename)
+        except InteropError as exc:
+            raise HTTPException(422, str(exc)) from None
+        skipped = Counter(found.skipped)
+
+        def change(state: dict) -> dict:
+            created = []
+            for item in found.regions:
+                try:
+                    region = new_region(RegionIn(**item), 0)
+                except (ValueError, ValidationError):
+                    skipped["empty"] += 1
+                    continue
+                if not item["name"]:
+                    region["name"] = _unique_name(state)
+                state["regions"].append(region)
+                created.append(region)
+            return {"regions": created, "skipped": dict(skipped)}
+
+        result = projects.update(*where(ds), change)
+        if not result["regions"]:
+            left_out = ", ".join(f"{n} {kind}" for kind, n in skipped.items())
+            raise HTTPException(422, f"no regions found in {filename}"
+                                + (f" ({left_out} left out)" if left_out else ""))
+        return result
 
     def operate(ds: Dataset, state: dict, req: RegionOpIn, sources: list[dict]) -> list[tuple[dict, str, str]]:
         match req.op:

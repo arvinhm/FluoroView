@@ -106,6 +106,8 @@ dependencies = [
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pillow" },
     { name = "platformdirs" },
+    { name = "roifile", version = "2026.2.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "roifile", version = "2026.9.22", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "shapely" },
     { name = "tifffile", version = "2026.3.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "tifffile", version = "2026.9.20", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
@@ -130,6 +132,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.0" },
     { name = "pillow", specifier = ">=11" },
     { name = "platformdirs", specifier = ">=4.2" },
+    { name = "roifile", specifier = ">=2024.1" },
     { name = "shapely", specifier = ">=2.0" },
     { name = "tifffile", specifier = ">=2025.1.10" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
@@ -987,6 +990,36 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/da/92/1446574745d74df0c92e6aa4a7b0b3130706a4142b2d1a5869f2eaa423c6/pyyaml-6.0.3-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:16249ee61e95f858e83976573de0f5b2893b3677ba71c9dd36b9cf8be9ac6d65", size = 829923 },
     { url = "https://files.pythonhosted.org/packages/f0/7a/1c7270340330e575b92f397352af856a8c06f230aa3e76f86b39d01b416a/pyyaml-6.0.3-cp314-cp314t-win_amd64.whl", hash = "sha256:4ad1906908f2f5ae4e5a8ddfce73c320c2a1429ec52eafd27138b7f1cbe341c9", size = 174062 },
     { url = "https://files.pythonhosted.org/packages/f1/12/de94a39c2ef588c7e6455cfbe7343d3b2dc9d6b6b2f40c4c6565744c873d/pyyaml-6.0.3-cp314-cp314t-win_arm64.whl", hash = "sha256:ebc55a14a21cb14062aa4162f906cd962b28e2e9ea38f9b4391244cd8de4ae0b", size = 149341 },
+]
+
+[[package]]
+name = "roifile"
+version = "2026.2.10"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version < '3.12'",
+]
+dependencies = [
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/59/cf/49d9a139e292415d669dccd0c283d99a4d027b9edbd533d7f56db8ff85e0/roifile-2026.2.10.tar.gz", hash = "sha256:87d2b685b00a4ca15125187727e634ae5c00b902362de302b592f892259f3751", size = 27311 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/34/78/3cc84d58e13234861adf91d2897254cd84d3d4a90534d91c960b672e67d1/roifile-2026.2.10-py3-none-any.whl", hash = "sha256:5928a616b58a8ff1c9f89a0590db3616ccbf069c6692f8ecec2a7349f8bbb6ec", size = 21201 },
+]
+
+[[package]]
+name = "roifile"
+version = "2026.9.22"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.12'",
+]
+dependencies = [
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5f/2c/d0706309b51ee03c180d34cbe914150188f0d3cb9b7c31ce30c934910ad5/roifile-2026.9.22.tar.gz", hash = "sha256:ba1de699dbabef664564cba6c021c2a01b47437d95b17d6ecf78287f46ef1a54", size = 29015 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/dc/4b2843b4d5f7ce8f328f8c17616f76f3d935b313047ca1c67e4c6d31392a/roifile-2026.9.22-py3-none-any.whl", hash = "sha256:2bde74e084c4f2f07edd0d54df41fc3b482a548044ed43fbbed3e0db6b77363e", size = 21894 },
 ]
 
 [[package]]

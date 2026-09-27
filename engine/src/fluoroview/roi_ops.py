@@ -79,6 +79,14 @@ def _half_up(v: float) -> int:
     return math.floor(v + 0.5)
 
 
+def arc_segments(radius: float) -> int:
+    """Segments per quarter circle that keep an arc of this radius within ELLIPSE_TOLERANCE of the curve."""
+    r = abs(radius)
+    if r <= ELLIPSE_TOLERANCE:
+        return 8
+    return min(256, max(8, math.ceil((math.pi / 2) / math.acos(1 - ELLIPSE_TOLERANCE / r))))
+
+
 def enlarge(region: dict, distance: float) -> dict:
     """Grow (distance > 0, px) or shrink the region. Rectangles and ellipses keep their shape, on whole
     pixels, as in ImageJ; other shapes are offset with round corners."""
@@ -90,10 +98,7 @@ def enlarge(region: dict, distance: float) -> dict:
         if x1 <= x0 or y1 <= y0:
             raise OperationError("Nothing is left after shrinking.")
         return {"shape": shape, "points": [[x0, y0], [x1, y1]], "rings": []}
-    d = abs(distance)
-    quad = 8 if d <= ELLIPSE_TOLERANCE else min(256, max(8, math.ceil(
-        (math.pi / 2) / math.acos(1 - ELLIPSE_TOLERANCE / d))))
-    geom = region_geometry(region).buffer(distance, quad_segs=quad, join_style="round")
+    geom = region_geometry(region).buffer(distance, quad_segs=arc_segments(distance), join_style="round")
     return polygon_result(geom, "Nothing is left after shrinking.")
 
 

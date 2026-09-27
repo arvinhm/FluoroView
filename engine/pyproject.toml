@@ -17,6 +17,7 @@ dependencies = [
   "numba>=0.61",
   "pillow>=11",
   "shapely>=2.0",
+  "roifile>=2024.1",
 ]
 
 [project.scripts]
