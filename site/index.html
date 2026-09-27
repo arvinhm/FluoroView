@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FluoroView · Multiplex fluorescence microscopy at full resolution</title>
+    <meta name="description" content="Open multi-gigabyte multiplex fluorescence scans at full resolution, measure regions on the raw 16-bit pixels, count cells and export figures, on your own computer." />
+    <meta name="theme-color" content="#070708" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="FluoroView" />
+    <meta property="og:description" content="Multiplex fluorescence microscopy at full resolution, on your own computer." />
+    <meta property="og:image" content="https://fluoroview.com/img/og.jpg" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <!-- @header -->
+    <main class="wrap">
+      <section class="hero">
+        <p class="eyebrow">Multiplex fluorescence microscopy</p>
+        <h1>Every pixel of the scan, at full resolution.</h1>
+        <p class="lede">
+          FluoroView opens multi-gigabyte multiplex scans on your own computer, shows the raw 16-bit values under
+          the cursor, and measures regions on the original pixels with ImageJ's conventions.
+        </p>
+        <div class="actions">
+          <a class="btn primary" href="/install/">Install</a>
+          <a class="btn" href="/docs/">Read the docs</a>
+          <a class="btn quiet" href="https://github.com/arvinhm/FluoroView/tree/v4" rel="noopener">Source on GitHub</a>
+        </div>
+      </section>
+      <figure class="shot">
+        <img src="/img/studio.webp" width="3024" height="1890" alt="The FluoroView studio showing a five-channel multiplex scan, a polygon region and its measurements" />
+        <figcaption>The five-channel example scan from the repository, with a region measured on its raw pixels.</figcaption>
+      </figure>
+
+      <section class="band" id="features">
+        <header class="sec-head">
+          <p class="eyebrow">What it does</p>
+          <h2>Measurement first. Everything else in service of it.</h2>
+        </header>
+        <div class="grid">
+          <article>
+            <span class="num">01</span>
+            <h3>Full-resolution viewing</h3>
+            <p>Zoom levels are built once from the raw data. A badge says when you see the scan's own pixels, and from 3,200% each pixel prints its value.</p>
+          </article>
+          <article>
+            <span class="num">02</span>
+            <h3>Channels you can trust</h3>
+            <p>Exact histograms, display range and gamma per channel, a clipping highlight, a channel gallery locked to one view, and a pixel loupe.</p>
+          </article>
+          <article>
+            <span class="num">03</span>
+            <h3>ImageJ's measurements</h3>
+            <p>Area, perimeter, fitted ellipse, circularity, solidity, Feret diameters and per-channel statistics up to kurtosis and integrated density, with background subtraction.</p>
+          </article>
+          <article>
+            <span class="num">04</span>
+            <h3>Exact regions</h3>
+            <p>Rectangles, ellipses, polygons and freehand shapes. Union, intersection, XOR and subtraction; enlarge or shrink by microns; holes and multi-part regions.</p>
+          </article>
+          <article>
+            <span class="num">05</span>
+            <h3>Cell Counter</h3>
+            <p>Click to count cells by category. Counts and densities per square millimetre for each region, and every point's position, export as CSV.</p>
+          </article>
+          <article>
+            <span class="num">06</span>
+            <h3>Line profiles</h3>
+            <p>Intensity of every channel along a line, sampled from the right zoom level and exported with the scale and version it came from.</p>
+          </article>
+          <article>
+            <span class="num">07</span>
+            <h3>Sessions</h3>
+            <p>One .fv file keeps regions, notes, counts, display settings, scale and view. It reopens onto the same image, checked by a content fingerprint.</p>
+          </article>
+          <article>
+            <span class="num">08</span>
+            <h3>Publication figures</h3>
+            <p>Composite and per-channel panels with scale bar and labels, as PNG or TIFF at your DPI, or the raw 16-bit area as OME-TIFF.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="band">
+        <figure class="shot">
+          <img src="/img/gallery.webp" width="3024" height="1890" loading="lazy" alt="The channel gallery: the composite and each visible channel of the example scan side by side, at the same position and zoom" />
+          <figcaption>The channel gallery: each visible channel beside the composite, at the same position and zoom.</figcaption>
+        </figure>
+      </section>
+
+      <section class="band pair" id="local">
+        <div>
+          <p class="eyebrow">Local by design</p>
+          <h2>Your scans stay on your computer.</h2>
+        </div>
+        <div>
+          <p>
+            The engine runs on your machine and the studio opens in your browser. Nothing is uploaded: the engine
+            listens only on your own computer and answers only requests that carry the random token it prints at
+            start-up.
+          </p>
+          <dl class="specs">
+            <div><dt>Formats</dt><dd>TIFF and OME-TIFF, as one file or one file per channel</dd></div>
+            <div><dt>Pixels</dt><dd>Raw values kept end to end: tiles, statistics and exports</dd></div>
+            <div><dt>Cache</dt><dd>Zoom levels built once per scan and reused, 20 GB at most by default</dd></div>
+            <div><dt>Requires</dt><dd>Python 3.11 or newer, and a browser with WebGL 2</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="band pair" id="cite">
+        <div>
+          <p class="eyebrow">Cite</p>
+          <h2>Citing FluoroView</h2>
+        </div>
+        <div>
+          <p>If FluoroView contributes to your work, please cite it as follows.</p>
+          <pre class="citation" data-copy>Haj-Mirzaian A, Heidari P. FluoroView: An Open-Source Desktop Application for Interactive Multiplex Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping. Version 2.0.0. 2026. doi:10.5281/zenodo.19059504</pre>
+        </div>
+      </section>
+    </main>
+    <!-- @footer -->
+  </body>
+</html>
