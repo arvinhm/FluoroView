@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import threading
+import time
 import uuid
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -15,12 +19,12 @@ from pydantic import BaseModel, Field, FiniteFloat
 from starlette.background import BackgroundTask
 
 from ..datasets import Dataset, NotReady, Registry
+from ..display import DisplayChannel
 from ..figure import Display, Plan, clip_box, encode_png, encode_tiff, plan, provenance, render_figure, write_ome
 from ..measure import measure_region, rows_for_scan, to_csv
 from ..profile import line_profile, profile_csv
 from ..projects import ProjectStore, now_iso
 from ..regions import (
-    COLOR,
     AnnotationIn,
     AnnotationPatch,
     AnnotationRestore,
@@ -33,16 +37,21 @@ from ..regions import (
     new_reply,
     validate_shape,
 )
-
-
-class DisplayChannel(BaseModel):
-    visible: bool
-    color: str = Field(pattern=COLOR)
-    lo: FiniteFloat
-    hi: FiniteFloat
-    gamma: FiniteFloat = Field(gt=0, le=10)
-    touched: bool = True
-    """False when the window is still the automatic one, so the studio may refine it."""
+from ..session import (
+    MAX_EXPORT_BYTES,
+    SUFFIX,
+    Line,
+    SessionError,
+    View,
+    ViewerOptions,
+    content_fingerprint,
+    image_manifest,
+    merge_state,
+    read_session,
+    replace_state,
+    session_from_state,
+    write_session,
+)
 
 
 class BackgroundIn(BaseModel):
@@ -72,6 +81,22 @@ class RawIn(BaseModel):
     plan_only: bool = False
 
 
+class SessionSaveIn(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    """absolute path of the .fv to write"""
+    overwrite: bool = False
+    display: list[DisplayChannel]
+    view: View
+    viewer: ViewerOptions
+    profile_line: Line | None = None
+    export: dict | None = None
+
+
+class SessionApplyIn(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    mode: Literal["replace", "merge"]
+
+
 def _unique_name(state: dict) -> str:
     taken = {r["name"] for r in state["regions"]}
     numbers = [int(m.group(1)) for n in taken if (m := re.fullmatch(r"Region (\d+)", n))]
@@ -81,9 +106,11 @@ def _unique_name(state: dict) -> str:
     return f"Region {k}"
 
 
-def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path) -> APIRouter:
+def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path, backups_dir: Path,
+                   thumbnail_of: Callable[[Dataset], bytes | None]) -> APIRouter:
     router = APIRouter(prefix="/api/v1/datasets/{ds_id}")
     exports_dir.mkdir(parents=True, exist_ok=True)
+    backups_dir.mkdir(parents=True, exist_ok=True)
     for stale in exports_dir.glob("*.tif"):
         stale.unlink(missing_ok=True)
     cache: OrderedDict[tuple, dict] = OrderedDict()
@@ -383,6 +410,95 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
             raise HTTPException(409, "the image is still loading; try again in a moment") from None
         return FileResponse(path, media_type="image/tiff", filename=f"{file_stem(ds)}-area.ome.tif",
                             background=BackgroundTask(path.unlink, missing_ok=True))
+
+    def measurements_csv(ds: Dataset, state: dict) -> str | None:
+        """The regions CSV, or None while the image is still loading."""
+        try:
+            rows = rows_for_scan(ds.info.scan_key, ds.info.pixel_size_um,
+                                 [measured(ds, r) for r in state["regions"]], state["background_region"])
+        except HTTPException:
+            return None
+        return to_csv(rows)
+
+    @router.get("/fingerprint")
+    def get_fingerprint(ds_id: str) -> dict:
+        return {"fingerprint": content_fingerprint(dataset(ds_id).source)}
+
+    @router.post("/session")
+    def save_session(ds_id: str, req: SessionSaveIn) -> dict:
+        """Write everything done on this image to a .fv file the user chose."""
+        ds = dataset(ds_id)
+        target = Path(os.path.expanduser(req.path))
+        if not target.is_absolute():
+            raise HTTPException(422, "give the full path of the session file")
+        if target.suffix.lower() != SUFFIX:
+            target = target.with_name(target.name + SUFFIX)
+        if not target.parent.is_dir():
+            raise HTTPException(404, f"folder not found: {target.parent}")
+        if target.exists() and not req.overwrite:
+            raise HTTPException(409, f"{target.name} already exists")
+        if len(req.display) != len(ds.info.channels):
+            raise HTTPException(422, f"expected {len(ds.info.channels)} channels, got {len(req.display)}")
+        if req.export is not None and len(json.dumps(req.export)) > MAX_EXPORT_BYTES:
+            raise HTTPException(422, "the export settings are too large")
+        def keep_display(state: dict) -> dict:
+            state["display"] = [d.model_dump() for d in req.display]
+            return state
+
+        state = projects.update(*where(ds), keep_display)
+        session = session_from_state(state, display=req.display, view=req.view, viewer=req.viewer,
+                                     profile_line=req.profile_line, export=req.export)
+        try:
+            size = write_session(target, image_manifest(ds, content_fingerprint(ds.source)), session,
+                                 measurements_csv(ds, state), thumbnail_of(ds))
+        except OSError as exc:
+            raise HTTPException(403, f"could not write {target}: {exc.strerror}") from None
+        return {"path": str(target), "bytes": size}
+
+    @router.post("/session/apply")
+    def apply_session(ds_id: str, req: SessionApplyIn) -> dict:
+        """Restore a .fv onto this image: replace its work (kept as a backup .fv first) or merge into it."""
+        ds = dataset(ds_id)
+        path = Path(os.path.expanduser(req.path))
+        if not path.is_file():
+            raise HTTPException(404, f"session not found: {path}")
+        try:
+            manifest, session = read_session(path)
+        except SessionError as exc:
+            raise HTTPException(422, str(exc)) from None
+        image = manifest["image"]
+        info = ds.info
+        if (image.get("width"), image.get("height"), len(image.get("channels") or [])) != (
+                info.width, info.height, len(info.channels)):
+            raise HTTPException(409, f"this session belongs to another image ({image.get('width')} × "
+                                     f"{image.get('height')} px, {len(image.get('channels') or [])} channels)")
+        fingerprint = content_fingerprint(ds.source)
+        backup: list[Path] = []
+
+        def change(state: dict) -> dict:
+            if req.mode == "replace":
+                if state["regions"] or state["annotations"]:
+                    stamp = time.strftime("%Y%m%d-%H%M%S")
+                    target = backups_dir / f"{file_stem(ds)}-before-import-{stamp}{SUFFIX}"
+                    current = session_from_state(state, display=state["display"])
+                    write_session(target, image_manifest(ds, fingerprint), current)
+                    backup.append(target)
+                replace_state(state, session, len(info.channels))
+            else:
+                merge_state(state, session)
+            return {k: state[k] for k in ("regions", "annotations", "background_region", "display")}
+
+        project = projects.update(*where(ds), change)
+        return {
+            "project": project,
+            "view": session.view.model_dump() if session.view else None,
+            "viewer": session.viewer.model_dump() if session.viewer else None,
+            "profile_line": session.profile_line.model_dump() if session.profile_line else None,
+            "export": session.export,
+            "fingerprint_ok": image.get("fingerprint") == fingerprint,
+            "channels_match": image.get("channels") == [ch.name for ch in info.channels],
+            "backup": str(backup[0]) if backup else None,
+        }
 
     @router.get("/measurements.csv")
     def get_csv(ds_id: str) -> Response:

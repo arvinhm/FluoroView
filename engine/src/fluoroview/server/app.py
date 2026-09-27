@@ -14,7 +14,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..config import Settings
@@ -24,6 +24,8 @@ from ..io import TiffSource, UnsupportedImage, is_openable
 from ..projects import ProjectStore
 from ..pyramid.cache import PyramidCache
 from ..pyramid.store import PyramidStore
+from ..session import SUFFIX as SESSION_SUFFIX
+from ..session import SessionError, find_image, read_session
 from ..thumbnail import render_thumbnail
 from .routes_project import project_router
 from .security import LocalAccessMiddleware
@@ -43,6 +45,10 @@ def _json_safe(value):
     if isinstance(value, list | tuple):
         return [_json_safe(v) for v in value]
     return value
+
+
+class SessionPath(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
 
 
 class OpenRequest(BaseModel):
@@ -165,14 +171,31 @@ def create_app(settings: Settings) -> FastAPI:
             raise HTTPException(409, "pixels not available yet") from None
         return {"x0": x0, "y0": y0, "size": size, "channels": [p.ravel().tolist() for p in planes]}
 
-    def cached_thumbnail(key: str, size: int, info_of) -> Response:
+    def thumbnail_png(key: str, size: int, info_of) -> bytes:
         thumb = cache.dir(key) / f"thumbnail-{size}.png"
         if not thumb.exists():
             png = render_thumbnail(PyramidStore.open(cache.pyramid_dir(key)), cache.histograms(key), info_of(), size)
             tmp = thumb.with_suffix(".tmp")
             tmp.write_bytes(png)
             os.replace(tmp, thumb)
-        return Response(thumb.read_bytes(), media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+        return thumb.read_bytes()
+
+    def cached_thumbnail(key: str, size: int, info_of) -> Response:
+        return Response(thumbnail_png(key, size, info_of), media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=86400"})
+
+    @api.post("/sessions/inspect")
+    def inspect_session(req: SessionPath) -> dict:
+        """What a .fv holds and where its image is, before anything is opened or changed."""
+        path = Path(os.path.expanduser(req.path))
+        if not path.is_file():
+            raise HTTPException(404, f"session not found: {path}")
+        try:
+            manifest, session = read_session(path)
+        except SessionError as exc:
+            raise HTTPException(422, str(exc)) from None
+        return {"manifest": manifest, "regions": len(session.regions), "notes": len(session.notes),
+                "image_paths": find_image(manifest, path)}
 
     @api.get("/thumbnail")
     def file_thumbnail(path: str, size: int = Query(320, ge=64, le=1024)) -> Response:
@@ -222,20 +245,28 @@ def create_app(settings: Settings) -> FastAPI:
                 st = entry.stat()
             except OSError:
                 continue
-            if not is_dir and not is_openable(entry.name):
+            is_session = not is_dir and entry.name.lower().endswith(SESSION_SUFFIX)
+            if not is_dir and not is_session and not is_openable(entry.name):
                 continue
             item = {"name": entry.name, "path": os.path.join(real, entry.name), "dir": is_dir,
                     "size": None if is_dir else st.st_size, "mtime": st.st_mtime}
-            if not is_dir:
+            if is_session:
+                item["session"] = True
+            elif not is_dir:
                 item["cached"] = cache.is_complete(PyramidCache.key_for(item["path"]))
             entries.append(item)
         entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
         parent = str(real.parent) if real.parent != real else None
         return {"path": str(real), "parent": parent, "entries": entries}
 
+    def session_thumbnail(ds: Dataset) -> bytes | None:
+        return thumbnail_png(ds.id, 480, lambda: ds.info) if ds.state == "ready" else None
+
     app.include_router(api)
     exports = settings.cache_dir.parent / "exports"
-    app.include_router(project_router(registry, ProjectStore(settings.projects_dir), exports))
+    backups = settings.projects_dir.parent / "backups"
+    projects = ProjectStore(settings.projects_dir)
+    app.include_router(project_router(registry, projects, exports, backups, session_thumbnail))
 
     @app.websocket("/api/v1/events")
     async def event_stream(ws: WebSocket) -> None:

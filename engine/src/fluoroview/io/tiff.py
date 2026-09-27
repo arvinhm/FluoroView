@@ -206,13 +206,21 @@ class TiffSource:
             return out
         return np.ascontiguousarray(self._zarr_view()[self._index(c, slice(y0, y1))])
 
-    def _index(self, c: int, rows: slice) -> tuple:
+    def read_segment(self, c: int, y: int, x0: int, x1: int) -> np.ndarray:
+        """Pixels ``[x0, x1)`` of row ``y`` of channel ``c``, reading only the bytes or chunks they need."""
+        if self._offsets is not None:
+            out = np.empty(x1 - x0, self._file_dtype)
+            _pread_into(self._fd, out, self._offsets[c] + (y * self.info.width + x0) * out.itemsize)
+            return out.byteswap().view(self._dtype) if out.dtype != self._dtype else out
+        return np.ascontiguousarray(self._zarr_view()[self._index(c, slice(y, y + 1), slice(x0, x1))]).reshape(-1)
+
+    def _index(self, c: int, rows: slice, cols: slice = slice(None)) -> tuple:
         idx = []
         for a in self._axes:
             if a == "Y":
                 idx.append(rows)
             elif a == "X":
-                idx.append(slice(None))
+                idx.append(cols)
             elif a == self._chan_axis:
                 idx.append(c)
             else:

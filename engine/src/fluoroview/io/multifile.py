@@ -102,6 +102,9 @@ class MultiFileSource:
     def read_rows(self, c: int, y0: int, y1: int, *, fd: Any = None) -> np.ndarray:
         return self.members[c].read_rows(0, y0, y1, fd=fd[c] if fd else None)
 
+    def read_segment(self, c: int, y: int, x0: int, x1: int) -> np.ndarray:
+        return self.members[c].read_segment(0, y, x0, x1)
+
     @contextmanager
     def stream(self) -> Iterator[list[Any]]:
         with ExitStack() as stack:
