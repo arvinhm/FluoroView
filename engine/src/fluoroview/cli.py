@@ -13,7 +13,7 @@ from pathlib import Path
 import uvicorn
 
 from . import __version__
-from .config import Settings, default_cache_dir
+from .config import Settings, default_cache_dir, saved_token
 from .server.app import create_app
 
 
@@ -34,8 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     port = sock.getsockname()[1]
 
     settings = Settings(host=args.host, port=port, cache_limit_bytes=int(args.cache_limit_gb * 1e9))
-    if token := os.environ.get("FLUOROVIEW_TOKEN"):
-        settings.token = token
+    settings.token = os.environ.get("FLUOROVIEW_TOKEN") or saved_token()
     if args.cache_dir:
         settings.cache_dir = args.cache_dir
     app = create_app(settings)
