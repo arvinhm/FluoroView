@@ -123,11 +123,11 @@ pre .comment { color: var(--text-3); }
 .sec-head { max-width: 720px; margin-bottom: 52px; }
 .sec-head p:not(.eyebrow) { margin: 18px 0 0; color: var(--text-2); font-size: 16px; }
 .grid {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--hair);
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--hair);
   background: var(--line); border-block: var(--hair) solid var(--line-strong);
 }
-.grid article { padding: 30px 30px 36px 0; background: var(--bg); }
-.grid article:not(:nth-child(4n + 1)) { padding-left: 30px; }
+.grid article { padding: 30px 36px 36px 0; background: var(--bg); }
+.grid article:not(:nth-child(3n + 1)) { padding-left: 36px; }
 .grid .num { display: block; margin-bottom: 22px; font: 400 11px/1 var(--font-num); color: var(--accent); }
 .grid h3 { margin-bottom: 10px; font: 500 15px/1.35 var(--font-ui); letter-spacing: 0; }
 .grid p { margin: 0; font-size: 14px; line-height: 1.62; color: var(--text-2); }
@@ -177,8 +177,9 @@ td:first-child { color: var(--text-1); white-space: nowrap; }
 
 @media (max-width: 960px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .grid article:not(:nth-child(4n + 1)) { padding-left: 0; }
+  .grid article:not(:nth-child(3n + 1)) { padding-left: 0; }
   .grid article:nth-child(2n) { padding-left: 30px; }
+  .grid article:last-child:nth-child(odd) { grid-column: 1 / -1; }
   .pair, .doc { grid-template-columns: minmax(0, 1fr); gap: 36px; }
   .doc-index { position: static; }
 }

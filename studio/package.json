@@ -1,7 +1,7 @@
 {
   "name": "fluoroview-studio",
   "private": true,
-  "version": "4.0.0-dev",
+  "version": "4.0.0",
   "type": "module",
   "description": "FluoroView studio: the browser UI served by the local FluoroView engine",
   "scripts": {

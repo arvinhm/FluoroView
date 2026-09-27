@@ -4,12 +4,13 @@ Viewer and analysis engine for multiplex fluorescence whole-slide scans. A local
 images where they are; the studio, a browser UI served by the engine, draws raw 16-bit pixels on the
 GPU, so what you see at any zoom is the data in the file.
 
-> **Status:** FluoroView 4 is in development on the `v4` branch. The engine and viewer are working;
-> regions and measurements, export, segmentation, per-cell quantification, phenotyping, spatial
-> statistics and batch projects follow. The JOSS paper in `paper.md` describes FluoroView 2.0
-> (tag `v2.0.0`).
+> **Status:** FluoroView 4.0 is the current release. It replaces the 3.x apps with a local engine and a
+> browser studio built for full-resolution viewing and measurement. Cell segmentation, per-cell
+> quantification, phenotyping, spatial statistics, H&E → spatial transcriptomics and the AI assistant of
+> FluoroView 3.5 are not in 4.0 yet; they remain available in tag `v3.5.1`. The JOSS paper in `paper.md`
+> describes FluoroView 2.0 (tag `v2.0.0`).
 
-## What works today
+## Viewing
 
 - Opens BioTek Gen5 (Cytation, Lionheart), OME-TIFF, ImageJ and multi-page TIFF files in place.
   Nothing is uploaded, copied or converted before the image is shown.
@@ -22,7 +23,24 @@ GPU, so what you see at any zoom is the data in the file.
   exact pixels, with a pixel grid from 800%.
 - Auto contrast uses exact whole-image percentiles and ignores saturated pixels; each channel shows its
   clipped fraction, and clipped pixels can be highlighted.
-- The status bar shows the raw value of every visible channel under the cursor, in pixels and µm.
+- The status bar shows the raw value of every visible channel under the cursor, in pixels and µm. From
+  3,200% every pixel prints its value; the view zooms to 12,800%. A channel gallery, minimap and pixel
+  loupe are one key away.
+
+## Measuring
+
+- Rectangle, ellipse, polygon and freehand regions, measured on the raw full-resolution pixels: area,
+  perimeter, bounding box, fitted ellipse, circularity, aspect ratio, roundness, solidity and Feret
+  diameters, and per channel the mean, SD, median, mode, min, max, sum, integrated density, skewness,
+  kurtosis and clipped pixels, with ImageJ's conventions and an optional background region.
+- Region operations: union, intersection, XOR and subtraction, enlarge or shrink by µm or px, convex
+  hull, fitted ellipse and exact coordinates; regions can have holes and several parts.
+- Cell Counter with categories, line profiles of every channel, Set Scale, and notes with replies.
+- Exports: regions, counts, points and profiles as CSV; figures (composite and per-channel panels with
+  scale bar) as PNG or TIFF, or the raw 16-bit area as OME-TIFF.
+- ImageJ `.roi` and `RoiSet.zip` and QuPath GeoJSON regions, in and out.
+- Sessions: one `.fv` file keeps regions, notes, counts, display settings, scale and view, and reopens
+  onto the same image, checked by a content fingerprint.
 
 ## Measured
 
@@ -45,7 +63,7 @@ decoded completely in the browser and then shown at a quarter of its resolution.
 Requirements: Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), Node.js 20 or newer (to build the studio).
 
 ```bash
-git clone -b v4 https://github.com/arvinhm/FluoroView.git
+git clone https://github.com/arvinhm/FluoroView.git     # add --branch v4.0.0 for exactly this release
 cd FluoroView/studio && npm ci && npm run build      # builds the UI into the engine package
 cd ../engine && uv sync
 uv run fluoroview /path/to/scan.tif
@@ -61,7 +79,9 @@ recently used caches are removed first).
 - `engine/` (Python): TIFF-family readers; a one-pass pyramid builder (a reader thread, one compute
   thread per channel, compiled histogram and downsampling kernels); a cache of raw 512 × 512 chunks
   in OME-Zarr v0.4 layout under `~/Library/Caches/FluoroView`; a FastAPI server for tiles,
-  histograms, pixel values, folder listing and build progress over WebSocket.
+  histograms, pixel values, folder listing and build progress over WebSocket, and for regions,
+  measurements, sessions and exports.
+- `site/`: the fluoroview.com website (static, Vite).
 - `studio/` (TypeScript, React): a WebGL2 renderer that keeps each tile as a 16-bit integer texture
   array (one layer per channel), chooses the pyramid level in device pixels, loads the coarsest level
   first and shows it until finer tiles arrive.
@@ -84,7 +104,8 @@ cd studio && npm run dev        # then open http://localhost:5173/#token=dev
 ## Earlier versions
 
 - FluoroView 2.0: Python desktop application (CustomTkinter); tag `v2.0.0`, described in `paper.md`.
-- FluoroView 3.5: web application; tag `v3.5.1`.
+- FluoroView 3.5: web application and Python desktop application, with segmentation, phenotyping,
+  spatial statistics and H&E → spatial transcriptomics; tag `v3.5.1`.
 
 ## Citation
 

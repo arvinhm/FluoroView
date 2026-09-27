@@ -16,8 +16,8 @@
         <p class="eyebrow">Install</p>
         <h1>Install FluoroView</h1>
         <p class="lede">
-          FluoroView 4 is a preview on the <code>v4</code> branch. It runs as a local engine that serves the studio
-          to your browser; setting it up takes four commands.
+          FluoroView 4.0 runs as a local engine that serves the studio to your browser. Setting it up takes four
+          commands.
         </p>
       </header>
 
@@ -33,7 +33,8 @@
         <ol class="steps">
           <li>
             <h3>Get the source</h3>
-            <pre data-copy><code>git clone -b v4 https://github.com/arvinhm/FluoroView.git</code></pre>
+            <p>Add <code>--branch v4.0.0</code> to get exactly this release rather than the latest.</p>
+            <pre data-copy><code>git clone https://github.com/arvinhm/FluoroView.git</code></pre>
           </li>
           <li>
             <h3>Build the studio</h3>
@@ -87,8 +88,12 @@ cd ../engine &amp;&amp; uv sync</code></pre>
 
         <h2>Status</h2>
         <p>
-          FluoroView 4 is under active development, and is developed and tested on macOS. Session files (.fv)
-          record their format version.
+          FluoroView 4.0 is developed on macOS; its engine tests also run on Ubuntu, with Python 3.11 and 3.12.
+          Session files (.fv) record their format version.
+        </p>
+        <p>
+          Cell segmentation, phenotyping, spatial statistics and H&amp;E → spatial transcriptomics from FluoroView
+          3.5 are not in 4.0 yet. For them, use <code>git clone --branch v3.5.1</code>.
         </p>
       </div>
     </main>

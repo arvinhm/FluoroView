@@ -1,7 +1,7 @@
 {
   "name": "fluoroview-site",
   "private": true,
-  "version": "4.0.0-dev",
+  "version": "4.0.0",
   "type": "module",
   "description": "fluoroview.com: the FluoroView website (static, served by Cloudflare Workers static assets)",
   "scripts": {

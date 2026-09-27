@@ -25,6 +25,7 @@
           <a href="#regions">Regions</a>
           <a href="#measurements">Measurements</a>
           <a href="#operations">Region operations</a>
+          <a href="#exchange">ImageJ and QuPath</a>
           <a href="#counter">Cell Counter</a>
           <a href="#profile">Line profile</a>
           <a href="#scale">Scale</a>
@@ -118,6 +119,28 @@
           <p>
             Each result is a new region named after its sources, such as “Tissue − Lumen”; the originals are kept.
             Results can have holes and several parts, and move as a whole.
+          </p>
+
+          <h2 id="exchange">ImageJ and QuPath</h2>
+          <p>
+            <strong>Region › Import regions (ImageJ, QuPath)…</strong>, or <strong>Import</strong> in the Regions tab,
+            reads an ImageJ <code>.roi</code> or <code>RoiSet.zip</code>, or a QuPath GeoJSON file. Its regions are
+            added to the scan's regions and selected. <strong>Export ImageJ RoiSet (.zip)</strong> and
+            <strong>Export QuPath GeoJSON</strong> in the same menu write every region.
+          </p>
+          <table>
+            <thead><tr><th>FluoroView</th><th>ImageJ</th><th>QuPath</th></tr></thead>
+            <tbody>
+              <tr><td>Rectangle</td><td>Rectangle ROI</td><td>Polygon</td></tr>
+              <tr><td>Ellipse</td><td>Oval ROI</td><td>Polygon of the same area</td></tr>
+              <tr><td>Polygon, freehand</td><td>Polygon, freehand ROI, sub-pixel</td><td>Polygon</td></tr>
+              <tr><td>Holes and several parts</td><td>Composite ROI</td><td>Polygon with holes, MultiPolygon</td></tr>
+            </tbody>
+          </table>
+          <p>
+            Rotated rectangles and ImageJ ellipses arrive as polygons, and curved composite outlines are followed
+            closely. Lines, points, text and QuPath detections are not regions: an import leaves them out and says
+            how many.
           </p>
 
           <h2 id="counter">Cell Counter</h2>
