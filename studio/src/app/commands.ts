@@ -1,7 +1,12 @@
+import { isTyping } from "../lib/dom";
+import { deleteNote, deleteRegion, useProject } from "../state/project";
 import { type Accent, useStudio } from "../state/store";
 import { runViewerCommand } from "../viewer/commands";
+import { TOOLS } from "../viewer/ToolPalette";
+import { activeTools } from "../viewer/tools";
+import { exportRegionsCsv } from "./actions";
 
-export type CommandGroup = "File" | "View" | "Image" | "Help";
+export type CommandGroup = "File" | "View" | "Image" | "Tools" | "Help";
 
 export interface Command {
   id: string;
@@ -13,7 +18,7 @@ export interface Command {
   run: () => void;
 }
 
-export const MENU_GROUPS: CommandGroup[] = ["File", "View", "Image", "Help"];
+export const MENU_GROUPS: CommandGroup[] = ["File", "View", "Image", "Tools", "Help"];
 
 /** Every action in the studio; menus, the palette and shortcuts all read this list. */
 export function buildCommands(): Command[] {
@@ -22,14 +27,18 @@ export function buildCommands(): Command[] {
   const ds = id ? s.datasets[id] : undefined;
   const display = id ? s.display[id] ?? [] : [];
   const none = !ds;
-  const toggle = (key: "grid" | "smooth" | "minimap" | "clip" | "gallery" | "histLog") => () =>
+  const toggle = (key: "grid" | "smooth" | "minimap" | "clip" | "gallery" | "histLog" | "loupe") => () =>
     s.setOption(key, !s.options[key]);
   const accents: [Accent, string][] = [["champagne", "Champagne"], ["ice", "Ice"], ["white", "White"]];
+  const regions = id ? useProject.getState().scans[id]?.regions.length ?? 0 : 0;
+  const selection = useProject.getState().selection;
 
   const commands: Command[] = [
     { id: "open", group: "File", title: "Open image…", keys: "⌘O", run: () => s.setDialog("open") },
     { id: "scans", group: "File", title: "Scan gallery", checked: s.page === "scans", disabled: none,
       run: () => s.setPage(s.page === "scans" ? "viewer" : "scans") },
+    { id: "export-regions", group: "File", title: "Export region measurements (CSV)", keys: "⌘E", disabled: !regions,
+      run: () => id && void exportRegionsCsv(id) },
     { id: "zoom-in", group: "View", title: "Zoom in", keys: "⌘=", disabled: none, run: () => runViewerCommand("zoom-in") },
     { id: "zoom-out", group: "View", title: "Zoom out", keys: "⌘−", disabled: none, run: () => runViewerCommand("zoom-out") },
     { id: "fit", group: "View", title: "Fit to window", keys: "⌘0", disabled: none, run: () => runViewerCommand("fit") },
@@ -39,7 +48,7 @@ export function buildCommands(): Command[] {
     { id: "smooth", group: "View", title: "Smooth magnification", keys: "S", checked: s.options.smooth, run: toggle("smooth") },
     { id: "minimap", group: "View", title: "Minimap", keys: "M", checked: s.options.minimap, run: toggle("minimap") },
     { id: "clip", group: "View", title: "Highlight clipped pixels", keys: "C", checked: s.options.clip, run: toggle("clip") },
-    { id: "hist-log", group: "View", title: "Log-scaled histograms", keys: "L", checked: s.options.histLog, run: toggle("histLog") },
+    { id: "hist-log", group: "View", title: "Log-scaled histograms", keys: "⇧L", checked: s.options.histLog, run: toggle("histLog") },
     ...accents.map(([accent, label]): Command => ({
       id: `accent-${accent}`, group: "View", title: `Accent: ${label}`, checked: s.accent === accent,
       run: () => s.setAccent(accent),
@@ -53,15 +62,22 @@ export function buildCommands(): Command[] {
       run: () => id && s.setChannel(id, i, { visible: !display[i]?.visible }),
     });
   });
+  for (const [tool, title, keys] of TOOLS) {
+    commands.push({ id: `tool-${tool}`, group: "Tools", title, keys, checked: s.tool === tool, disabled: none,
+      run: () => s.setTool(tool) });
+  }
   commands.push(
+    { id: "loupe", group: "Tools", title: "Pixel loupe", keys: "Z", checked: s.options.loupe, disabled: none, run: toggle("loupe") },
+    { id: "delete", group: "Tools", title: "Delete selection", keys: "⌫", disabled: !selection || none,
+      run: () => {
+        if (!id || !selection) return;
+        if (selection.kind === "region") void deleteRegion(id, selection.id);
+        else void deleteNote(id, selection.id);
+      } },
     { id: "palette", group: "Help", title: "Command palette", keys: "⌘K", run: () => s.setDialog("palette") },
     { id: "shortcuts", group: "Help", title: "Keyboard shortcuts", keys: "?", run: () => s.setDialog("shortcuts") },
   );
   return commands;
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable='true']") !== null;
 }
 
 export function handleShortcut(e: KeyboardEvent): void {
@@ -70,6 +86,8 @@ export function handleShortcut(e: KeyboardEvent): void {
   const key = e.key.toLowerCase();
   if (e.key === "Escape") {
     if (s.dialog) s.setDialog(null);
+    else if (s.page === "scans") s.setPage("viewer");
+    else if (activeTools.current?.key(e)) e.preventDefault();
     return;
   }
   if (mod && key === "k") {
@@ -93,7 +111,14 @@ export function handleShortcut(e: KeyboardEvent): void {
     if (cmd && id) {
       e.preventDefault();
       runViewerCommand(cmd);
+    } else if (key === "e" && id) {
+      e.preventDefault();
+      void exportRegionsCsv(id);
     }
+    return;
+  }
+  if (s.page === "viewer" && activeTools.current?.key(e)) {
+    e.preventDefault();
     return;
   }
   const digit = /^Digit([1-9])$/.exec(e.code);
@@ -115,10 +140,12 @@ export function handleShortcut(e: KeyboardEvent): void {
     s: () => s.setOption("smooth", !s.options.smooth),
     m: () => s.setOption("minimap", !s.options.minimap),
     c: () => s.setOption("clip", !s.options.clip),
-    l: () => s.setOption("histLog", !s.options.histLog),
+    L: () => s.setOption("histLog", !s.options.histLog),
+    z: () => s.setOption("loupe", !s.options.loupe),
     a: () => id && s.autoContrast(id),
     "?": () => s.setDialog("shortcuts"),
   };
+  for (const [tool, , keys] of TOOLS) single[keys.toLowerCase()] = () => s.setTool(tool);
   const action = single[e.key] ?? (e.shiftKey ? undefined : single[key]);
   if (action && (id || e.key === "?")) {
     e.preventDefault();

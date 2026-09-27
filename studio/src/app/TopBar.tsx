@@ -1,6 +1,7 @@
 import { Check, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fmtInt } from "../lib/format";
+import { useProject } from "../state/project";
 import { useActive, useStudio } from "../state/store";
 import { buildCommands, type CommandGroup, MENU_GROUPS } from "./commands";
 
@@ -8,7 +9,10 @@ export function TopBar() {
   const ds = useActive();
   const setDialog = useStudio((s) => s.setDialog);
   useStudio((s) => s.options);
+  useStudio((s) => s.tool);
   useStudio((s) => (s.activeId ? s.display[s.activeId] : undefined));
+  useProject((s) => s.selection);
+  useProject((s) => (ds ? s.scans[ds.id]?.regions.length : 0));
   const [open, setOpen] = useState<CommandGroup | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
 

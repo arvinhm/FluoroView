@@ -1,5 +1,15 @@
 import { fmt1, fmtInt, fmtZoom } from "../lib/format";
-import { useActive, useStudio } from "../state/store";
+import { type Tool, useActive, useStudio } from "../state/store";
+
+const HINTS: Record<Tool, string | null> = {
+  move: null,
+  rectangle: "Drag to draw · ⇧ square · ⌥ from centre · Esc cancels",
+  ellipse: "Drag to draw · ⇧ circle · ⌥ from centre · Esc cancels",
+  polygon: "Click to add points · Enter or double-click closes · ⌫ removes the last point",
+  freehand: "Drag around the area · release to close",
+  line: "Drag to draw a line · ⇧ snaps to 45°",
+  note: "Click to pin a note",
+};
 
 function BuildStatus() {
   const ds = useActive();
@@ -34,6 +44,7 @@ export function StatusBar() {
   const view = useStudio((s) => s.view);
   const display = useStudio((s) => (ds ? s.display[ds.id] : undefined));
   const connected = useStudio((s) => s.connected);
+  const hint = useStudio((s) => HINTS[s.tool]);
   const px = ds?.pixel_size_um ?? null;
 
   return (
@@ -61,6 +72,12 @@ export function StatusBar() {
         <span className="k">{ds ? "Move over the image to read raw pixel values" : "FluoroView 4.0"}</span>
       )}
       <span className="end">
+        {ds && hint && (
+          <>
+            <span className="hint-live">{hint}</span>
+            <span className="d" />
+          </>
+        )}
         {ds && view && <span>{fmtZoom(view.scale)} <span className="k">·</span> L{view.level}{view.level === 0 ? " native" : ""}</span>}
         {px && (
           <>

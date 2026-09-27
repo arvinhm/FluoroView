@@ -73,6 +73,99 @@ export interface FsListing {
   entries: FsEntry[];
 }
 
+export type RegionShape = "rectangle" | "ellipse" | "polygon" | "freehand";
+export type Point = [number, number];
+
+export interface Region {
+  id: string;
+  name: string;
+  shape: RegionShape;
+  /** full-resolution pixel coordinates; two opposite corners for rectangles and ellipses */
+  points: Point[];
+  color: string;
+  created: string;
+  modified: string;
+  author: string | null;
+}
+
+export interface Reply {
+  id: string;
+  text: string;
+  author: string | null;
+  created: string;
+}
+
+export interface Annotation {
+  id: string;
+  x: number;
+  y: number;
+  text: string;
+  author: string | null;
+  region_id: string | null;
+  created: string;
+  modified: string;
+  replies: Reply[];
+}
+
+export interface SavedDisplay {
+  visible: boolean;
+  color: string;
+  lo: number;
+  hi: number;
+  gamma: number;
+  touched: boolean;
+}
+
+export interface Project {
+  regions: Region[];
+  annotations: Annotation[];
+  background_region: string | null;
+  display: SavedDisplay[] | null;
+}
+
+export interface ChannelStats {
+  channel: string;
+  n_pixels: number;
+  mean: number | null;
+  sd: number | null;
+  median: number | null;
+  min: number | null;
+  max: number | null;
+  sum: number;
+  n_clipped: number;
+}
+
+export interface Measurement {
+  region_id: string;
+  region: string;
+  shape: RegionShape;
+  area_px: number;
+  area_um2: number | null;
+  centroid_x_px: number | null;
+  centroid_y_px: number | null;
+  channels: ChannelStats[];
+}
+
+export interface Profile {
+  level: number;
+  samples: number;
+  length_px: number;
+  /** full-resolution position of each sample */
+  x_px: number[];
+  y_px: number[];
+  distance_px: number[];
+  distance_um: number[] | null;
+  channels: { name: string; values: number[] }[];
+}
+
+export interface Patch {
+  x0: number;
+  y0: number;
+  size: number;
+  /** row-major raw values, one array per channel */
+  channels: number[][];
+}
+
 export type EngineEvent =
   | { type: "hello"; version: string }
   | { type: "build"; id: string; build: BuildInfo };

@@ -63,8 +63,12 @@ export function ShortcutsDialog() {
     ["Show / hide channel 1–9", "1 … 9"],
     ["Show only channel 1–9", "⇧1 … ⇧9"],
     ["Pan", "Drag · two-finger scroll"],
+    ["Pan while drawing", "Space-drag · middle-drag"],
     ["Zoom about the cursor", "Pinch · mouse wheel"],
     ["Zoom in 2× (⌥ out)", "Double-click"],
+    ["Zoom to a region", "Double-click the region"],
+    ["Nudge the selected region (⇧ 10 px)", "← ↑ → ↓"],
+    ["Cancel drawing · deselect", "Esc"],
   ];
   return (
     <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && setDialog(null)}>

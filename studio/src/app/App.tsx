@@ -1,14 +1,18 @@
 import { X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 import { api, openEvents } from "../api/client";
 import type { EngineEvent } from "../api/types";
+import { persistDisplays } from "../state/persist";
+import { select, setLine, useProject } from "../state/project";
 import { useActive, useStudio } from "../state/store";
+import { PROFILE_DRAWER_CSS } from "../viewer/overlay";
 import { Viewer } from "../viewer/Viewer";
 import { loadHistograms } from "./actions";
 import { CommandPalette, ShortcutsDialog } from "./CommandPalette";
 import { handleShortcut } from "./commands";
 import { Inspector } from "./Inspector";
 import { OpenDialog } from "./OpenDialog";
+import { ProfilePanel } from "./ProfilePanel";
 import { ProjectPanel } from "./ProjectPanel";
 import { ScanGallery } from "./ScanGallery";
 import { StatusBar } from "./StatusBar";
@@ -38,11 +42,20 @@ export function App() {
   const page = useStudio((s) => s.page);
   const accent = useStudio((s) => s.accent);
   const setNotice = useStudio((s) => s.setNotice);
+  const lineOnScan = useProject((s) => s.line !== null && s.line.dsId === ds?.id);
   const histogramAt = useRef<Record<string, number>>({});
 
   useEffect(() => {
     document.documentElement.dataset.accent = accent;
   }, [accent]);
+
+  useEffect(() => persistDisplays(), []);
+
+  useEffect(() => {
+    select(null);
+    const line = useProject.getState().line;
+    if (line && line.dsId !== ds?.id) setLine(line.dsId, null);
+  }, [ds?.id]);
 
   useEffect(() => {
     const s = useStudio.getState();
@@ -94,8 +107,10 @@ export function App() {
     <div className="app">
       <TopBar />
       <ProjectPanel />
-      <main className="canvas-area">
+      <main className={`canvas-area${ds && lineOnScan ? " has-drawer" : ""}`}
+        style={{ "--fv-drawer": `${PROFILE_DRAWER_CSS}px` } as CSSProperties}>
         {ds ? <Viewer key={ds.id} dataset={ds} /> : <Welcome />}
+        {ds && lineOnScan && <ProfilePanel ds={ds} />}
         {ds && page === "scans" && <ScanGallery />}
       </main>
       <Inspector />
@@ -105,7 +120,10 @@ export function App() {
       {dialog === "shortcuts" && <ShortcutsDialog />}
       {notice && (
         <div className="toast" role="status">
-          <span>{notice}</span>
+          <span>{notice.text}</span>
+          {notice.action && (
+            <button className="btn" onClick={notice.action.run}>{notice.action.label}</button>
+          )}
           <button className="ib" onClick={() => setNotice(null)} title="Dismiss"><X /></button>
         </div>
       )}

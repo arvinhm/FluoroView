@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { BuildInfo, DatasetInfo, Histogram } from "../api/types";
+import type { BuildInfo, DatasetInfo, Histogram, SavedDisplay } from "../api/types";
 import { autoWindow, dtypeMax } from "../lib/contrast";
 
 export interface ChannelDisplay {
@@ -22,6 +22,9 @@ export interface CursorReadout {
   x: number;
   y: number;
   values: (number | null)[];
+  /** pointer position in CSS pixels, relative to the viewer */
+  left: number;
+  top: number;
 }
 
 export interface Options {
@@ -32,11 +35,19 @@ export interface Options {
   /** composite plus one panel per visible channel, all showing the same view */
   gallery: boolean;
   histLog: boolean;
+  /** magnified raw pixels and values around the cursor */
+  loupe: boolean;
 }
 
 export type Dialog = "open" | "palette" | "shortcuts" | null;
 export type Accent = "champagne" | "ice" | "white";
 export type Page = "viewer" | "scans";
+export type Tool = "move" | "rectangle" | "ellipse" | "polygon" | "freehand" | "line" | "note";
+
+export interface Notice {
+  text: string;
+  action?: { label: string; run: () => void };
+}
 
 const ACCENT_KEY = "fluoroview.accent";
 
@@ -50,15 +61,18 @@ interface StudioState {
   order: string[];
   activeId: string | null;
   display: Record<string, ChannelDisplay[]>;
+  /** true once the user has changed a dataset's display; only then is it saved to the project */
+  displayEdited: Record<string, boolean>;
   histograms: Record<string, (Histogram | undefined)[]>;
   view: ViewReadout | null;
   cursor: CursorReadout | null;
   options: Options;
+  tool: Tool;
   dialog: Dialog;
   accent: Accent;
   page: Page;
   connected: boolean;
-  notice: string | null;
+  notice: Notice | null;
 
   upsertDataset: (ds: DatasetInfo) => void;
   setActive: (id: string) => void;
@@ -67,14 +81,16 @@ interface StudioState {
   soloChannel: (id: string, c: number) => void;
   setHistogram: (id: string, c: number, h: Histogram) => void;
   autoContrast: (id: string, channels?: number[]) => void;
+  applySavedDisplay: (id: string, saved: SavedDisplay[]) => void;
   setView: (v: ViewReadout) => void;
   setCursor: (c: CursorReadout | null) => void;
   setOption: <K extends keyof Options>(key: K, value: Options[K]) => void;
+  setTool: (t: Tool) => void;
   setDialog: (d: Dialog) => void;
   setAccent: (a: Accent) => void;
   setPage: (p: Page) => void;
   setConnected: (v: boolean) => void;
-  setNotice: (n: string | null) => void;
+  setNotice: (n: string | Notice | null) => void;
 }
 
 /** Transmitted-light channels start hidden when there is fluorescence: summed with it they wash the image out. */
@@ -92,10 +108,12 @@ export const useStudio = create<StudioState>((set, get) => ({
   order: [],
   activeId: null,
   display: {},
+  displayEdited: {},
   histograms: {},
   view: null,
   cursor: null,
-  options: { smooth: false, grid: true, clip: false, minimap: true, gallery: false, histLog: true },
+  options: { smooth: false, grid: true, clip: false, minimap: true, gallery: false, histLog: true, loupe: false },
+  tool: "move",
   dialog: null,
   accent: storedAccent(),
   page: "viewer",
@@ -125,7 +143,7 @@ export const useStudio = create<StudioState>((set, get) => ({
       const next = list.slice();
       const touched = "lo" in patch || "hi" in patch || "gamma" in patch;
       next[c] = { ...list[c], ...patch, touched: list[c].touched || touched };
-      return { display: { ...s.display, [id]: next } };
+      return { display: { ...s.display, [id]: next }, displayEdited: { ...s.displayEdited, [id]: true } };
     }),
 
   soloChannel: (id, c) =>
@@ -133,7 +151,10 @@ export const useStudio = create<StudioState>((set, get) => ({
       const list = s.display[id];
       if (!list) return {};
       const alreadySolo = list.every((d, i) => d.visible === (i === c));
-      return { display: { ...s.display, [id]: list.map((d, i) => ({ ...d, visible: alreadySolo || i === c })) } };
+      return {
+        display: { ...s.display, [id]: list.map((d, i) => ({ ...d, visible: alreadySolo || i === c })) },
+        displayEdited: { ...s.displayEdited, [id]: true },
+      };
     }),
 
   setHistogram: (id, c, h) => {
@@ -168,12 +189,34 @@ export const useStudio = create<StudioState>((set, get) => ({
             return { ...d, lo, hi, gamma: 1, touched: false };
           }),
         },
+        displayEdited: { ...s.displayEdited, [id]: true },
+      };
+    }),
+
+  /** Saved windows replace the automatic ones; channels saved untouched keep following auto-contrast. */
+  applySavedDisplay: (id, saved) =>
+    set((s) => {
+      const list = s.display[id];
+      if (!list || saved.length !== list.length) return {};
+      const hs = s.histograms[id] ?? [];
+      return {
+        display: {
+          ...s.display,
+          [id]: list.map((d, i) => {
+            const v = saved[i]!;
+            if (v.touched) return { visible: v.visible, color: v.color, lo: v.lo, hi: v.hi, gamma: v.gamma, touched: true };
+            const h = hs[i];
+            const [lo, hi] = h && h.total > 0 ? autoWindow(h) : [d.lo, d.hi];
+            return { ...d, visible: v.visible, color: v.color, lo, hi };
+          }),
+        },
       };
     }),
 
   setView: (view) => set({ view }),
   setCursor: (cursor) => set({ cursor }),
   setOption: (key, value) => set((s) => ({ options: { ...s.options, [key]: value } })),
+  setTool: (tool) => set({ tool }),
   setDialog: (dialog) => set({ dialog }),
   setAccent: (accent) => {
     localStorage.setItem(ACCENT_KEY, accent);
@@ -181,7 +224,7 @@ export const useStudio = create<StudioState>((set, get) => ({
   },
   setPage: (page) => set({ page }),
   setConnected: (connected) => set({ connected }),
-  setNotice: (notice) => set({ notice }),
+  setNotice: (notice) => set({ notice: typeof notice === "string" ? { text: notice } : notice }),
 }));
 
 export function useActive(): DatasetInfo | null {

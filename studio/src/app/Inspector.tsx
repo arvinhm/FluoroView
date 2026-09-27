@@ -5,8 +5,10 @@ import { fmtInt, fmtPercent } from "../lib/format";
 import { useActive, useStudio } from "../state/store";
 import { HistogramView } from "./HistogramView";
 import { NumberField } from "./NumberField";
+import { RegionsTab } from "./RegionsTab";
+import { Segmented } from "./Segmented";
 
-type Tab = "channels" | "info";
+type Tab = "channels" | "regions" | "info";
 
 function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
   const d = useStudio((s) => s.display[ds.id]?.[c]);
@@ -44,18 +46,6 @@ function ChannelRow({ ds, c }: { ds: DatasetInfo; c: number }) {
           onCommit={(v) => setChannel(ds.id, c, { gamma: v })} title="Display gamma: above 1 brightens mid-tones" />
       </div>
     </div>
-  );
-}
-
-function Segmented<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
-  const index = Math.max(0, options.findIndex(([v]) => v === value));
-  return (
-    <span className="seg" style={{ "--n": options.length, "--i": index } as CSSProperties}>
-      <span className="seg-thumb" />
-      {options.map(([v, label]) => (
-        <button key={v} className={v === value ? "on" : ""} onClick={() => onChange(v)}>{label}</button>
-      ))}
-    </span>
   );
 }
 
@@ -169,13 +159,28 @@ function InfoTab({ ds }: { ds: DatasetInfo }) {
   );
 }
 
+function TabBody({ ds, tab }: { ds: DatasetInfo; tab: Tab }) {
+  switch (tab) {
+    case "channels":
+      return <ChannelsTab ds={ds} />;
+    case "regions":
+      return <RegionsTab ds={ds} />;
+    case "info":
+      return <InfoTab ds={ds} />;
+    default: {
+      const unreachable: never = tab;
+      throw new Error(`unknown tab ${unreachable}`);
+    }
+  }
+}
+
 export function Inspector() {
   const ds = useActive();
   const [tab, setTab] = useState<Tab>("channels");
   return (
     <aside className="panel right">
-      <Tabs value={tab} options={[["channels", "Channels"], ["info", "Info"]]} onChange={setTab} />
-      {!ds ? <div className="empty-note">No image open.</div> : tab === "channels" ? <ChannelsTab ds={ds} /> : <InfoTab ds={ds} />}
+      <Tabs value={tab} options={[["channels", "Channels"], ["regions", "Regions"], ["info", "Info"]]} onChange={setTab} />
+      {!ds ? <div className="empty-note">No image open.</div> : <TabBody ds={ds} tab={tab} />}
     </aside>
   );
 }

@@ -1,6 +1,26 @@
-import { api, ApiError } from "../api/client";
+import { api, ApiError, project } from "../api/client";
 import type { DatasetInfo } from "../api/types";
+import { saveBlob } from "../lib/dom";
+import type { Line } from "../state/project";
 import { useStudio } from "../state/store";
+
+async function download(fetchFile: () => Promise<{ blob: Blob; name: string }>): Promise<void> {
+  try {
+    const { blob, name } = await fetchFile();
+    saveBlob(blob, name);
+  } catch (e) {
+    useStudio.getState().setNotice(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** One row per region × channel, measured by the engine on raw full-resolution pixels. */
+export function exportRegionsCsv(id: string): Promise<void> {
+  return download(() => project.regionsCsv(id));
+}
+
+export function exportProfileCsv(id: string, line: Line): Promise<void> {
+  return download(() => project.profileCsv(id, line));
+}
 
 export async function loadHistograms(id: string): Promise<void> {
   const s = useStudio.getState();

@@ -1,4 +1,7 @@
-import type { DatasetInfo, EngineEvent, FsListing, Histogram } from "./types";
+import type {
+  Annotation, DatasetInfo, EngineEvent, FsListing, Histogram, Measurement, Patch, Point, Profile, Project, Region,
+  RegionShape, SavedDisplay,
+} from "./types";
 
 const TOKEN_KEY = "fluoroview.token";
 
@@ -34,6 +37,62 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as T;
+}
+
+function send(method: "POST" | "PATCH" | "PUT" | "DELETE", body?: unknown): RequestInit {
+  return body === undefined ? { method }
+    : { method, body: JSON.stringify(body), headers: { "Content-Type": "application/json" } };
+}
+
+/** File name from a Content-Disposition header, if it gives one. */
+function attachmentName(header: string | null, fallback: string): string {
+  return /filename="([^"]+)"/.exec(header ?? "")?.[1] ?? fallback;
+}
+
+export const project = {
+  get: (id: string) => request<Project>(`/datasets/${id}/project`),
+  createRegion: (id: string, body: { shape: RegionShape; points: Point[]; name?: string; color?: string }) =>
+    request<Region>(`/datasets/${id}/regions`, send("POST", body)),
+  patchRegion: (id: string, rid: string, body: { name?: string; points?: Point[]; color?: string }) =>
+    request<Region>(`/datasets/${id}/regions/${rid}`, send("PATCH", body)),
+  deleteRegion: (id: string, rid: string) =>
+    request<{ deleted: string; background_region: string | null }>(`/datasets/${id}/regions/${rid}`, send("DELETE")),
+  setBackground: (id: string, rid: string | null) =>
+    request<{ background_region: string | null }>(`/datasets/${id}/background`, send("PUT", { region_id: rid })),
+  saveDisplay: (id: string, channels: SavedDisplay[]) => request<{ saved: number }>(`/datasets/${id}/display`, send("PUT", channels)),
+  measurement: (id: string, rid: string, signal?: AbortSignal) =>
+    request<Measurement>(`/datasets/${id}/regions/${rid}/measurement`, { signal }),
+  createNote: (id: string, body: { x: number; y: number; text: string; author: string | null; region_id?: string | null }) =>
+    request<Annotation>(`/datasets/${id}/annotations`, send("POST", body)),
+  patchNote: (id: string, aid: string, body: { x?: number; y?: number; text?: string }) =>
+    request<Annotation>(`/datasets/${id}/annotations/${aid}`, send("PATCH", body)),
+  deleteNote: (id: string, aid: string) => request<{ deleted: string }>(`/datasets/${id}/annotations/${aid}`, send("DELETE")),
+  reply: (id: string, aid: string, text: string, author: string | null) =>
+    request<Annotation>(`/datasets/${id}/annotations/${aid}/replies`, send("POST", { text, author })),
+  profile: (id: string, line: LineQuery, signal?: AbortSignal) =>
+    request<Profile>(`/datasets/${id}/profile?${lineQuery(line)}`, { signal }),
+  patch: (id: string, x: number, y: number, r: number, signal?: AbortSignal) =>
+    request<Patch>(`/datasets/${id}/patch?x=${x}&y=${y}&r=${r}`, { signal }),
+  /** The regions CSV as the engine writes it, with the file name it suggests. */
+  regionsCsv: (id: string) => download(`/datasets/${id}/measurements.csv`, "regions.csv"),
+  profileCsv: (id: string, line: LineQuery) => download(`/datasets/${id}/profile.csv?${lineQuery(line)}`, "profile.csv"),
+};
+
+interface LineQuery {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+function lineQuery(l: LineQuery): string {
+  return `x0=${l.x0}&y0=${l.y0}&x1=${l.x1}&y1=${l.y1}`;
+}
+
+async function download(path: string, fallback: string): Promise<{ blob: Blob; name: string }> {
+  const res = await fetch(`/api/v1${path}`, { headers: auth });
+  if (!res.ok) throw new ApiError(res.status, res.status === 409 ? "The image is still loading; try again in a moment." : res.statusText);
+  return { blob: await res.blob(), name: attachmentName(res.headers.get("Content-Disposition"), fallback) };
 }
 
 export const api = {

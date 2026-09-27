@@ -1,23 +1,33 @@
 import { LayoutGrid, Maximize, Minus, Plus } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { DatasetInfo } from "../api/types";
+import type { DatasetInfo, Point } from "../api/types";
+import { isTyping } from "../lib/dom";
 import { fmtZoom, hexToRgb } from "../lib/format";
 import { approach, ease, reducedMotion, tween } from "../motion/motion";
+import { EMPTY_SCAN, ensureProject, useProject } from "../state/project";
 import { type ChannelDisplay, type Options, useStudio } from "../state/store";
 import {
   type Camera, clampCenter, clampScale, fit, type ScaleBar, scaleBar, screenToImage, type Viewport, zoomAt,
 } from "./camera";
-import { onViewerCommand, type ViewerCommand } from "./commands";
+import { onViewerCommand, onViewerFocus, type ViewerCommand } from "./commands";
 import { type Flight, flight, flightDuration } from "./flight";
 import { galleryLayout, lerpRect, panelShrink, type Rect } from "./gallery";
+import { type Box, regionBox } from "./geometry";
+import { Loupe } from "./Loupe";
+import { MeasureCard } from "./MeasureCard";
+import { NotePopover } from "./NotePopover";
+import { type Anchor, type Bounds, drawOverlay, PanelView, PROFILE_DRAWER_CSS } from "./overlay";
 import { type ChannelUniforms, Renderer } from "./renderer";
 import { TileManager } from "./tiles";
+import { ToolPalette } from "./ToolPalette";
+import { activeTools, type PointerSample, ToolController } from "./tools";
 
 const MINIMAP_CSS = 184;
 const MINIMAP_MARGIN_CSS = 12;
 const GRID_FROM_SCALE = 8;
 const GALLERY_MS = 320;
+const CLICK_SLOP_CSS = 3;
 const SURFACE: [number, number, number] = [12 / 255, 13 / 255, 15 / 255];
 
 type Motion =
@@ -45,9 +55,17 @@ interface Overlay {
   scan: { x: number; y: number; width: number; below: number; line: boolean } | null;
   labels: Label[];
   labelOpacity: number;
+  /** screen box of the selected region and position of the open note, CSS px */
+  card: Anchor | null;
+  /** screen boxes of the other visible regions, for placing the card */
+  avoid: Anchor[];
+  note: { x: number; y: number } | null;
+  size: Bounds;
 }
 
-const EMPTY: Overlay = { minimap: null, bar: null, scan: null, labels: [], labelOpacity: 0 };
+const EMPTY: Overlay = {
+  minimap: null, bar: null, scan: null, labels: [], labelOpacity: 0, card: null, avoid: [], note: null, size: { w: 0, h: 0 },
+};
 
 function uniformsFor(ds: DatasetInfo, display: ChannelDisplay[], channels: number[]): ChannelUniforms[] {
   const saturation = ds.saturation ?? (ds.dtype.endsWith("u1") ? 255 : 65535);
@@ -57,18 +75,24 @@ function uniformsFor(ds: DatasetInfo, display: ChannelDisplay[], channels: numbe
   });
 }
 
-function sameOverlay(a: Overlay, b: Overlay): boolean {
-  return a.minimap?.join() === b.minimap?.join() && a.bar?.label === b.bar?.label && a.bar?.cssPx === b.bar?.cssPx
-    && a.scan?.y === b.scan?.y && a.scan?.x === b.scan?.x && a.scan?.width === b.scan?.width
-    && a.scan?.below === b.scan?.below && a.scan?.line === b.scan?.line
-    && a.labelOpacity === b.labelOpacity && JSON.stringify(a.labels) === JSON.stringify(b.labels);
+function accentColors(cache: { key: string; accent: string; ink: string } | null) {
+  const key = document.documentElement.dataset.accent ?? "";
+  if (cache?.key === key) return cache;
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    key,
+    accent: cs.getPropertyValue("--fv-accent").trim() || "#d9c4a1",
+    ink: cs.getPropertyValue("--fv-accent-ink").trim() || "#15110b",
+  };
 }
 
 export function Viewer({ dataset }: { dataset: DatasetInfo }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const renderer = useRef<Renderer | null>(null);
   const tiles = useRef<TileManager | null>(null);
+  const tools = useRef<ToolController | null>(null);
   const camera = useRef<Camera | null>(null);
   const viewport = useRef<Viewport>({ width: 1, height: 1, dpr: 1 });
   const motion = useRef<Motion | null>(null);
@@ -77,7 +101,11 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
   const scanShown = useRef(0);
   const lastFrame = useRef(0);
   const frameRequested = useRef(false);
-  const drag = useRef<{ x: number; y: number; cam: Camera; k: number; samples: [number, number, number][] } | null>(null);
+  const drag = useRef<{ x: number; y: number; cam: Camera; k: number; samples: [number, number, number][]; moved: boolean } | null>(null);
+  const toolGesture = useRef(false);
+  const gesturePanel = useRef<Panel | null>(null);
+  const space = useRef(false);
+  const accent = useRef<ReturnType<typeof accentColors> | null>(null);
   const pixelAbort = useRef<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(EMPTY);
@@ -86,6 +114,7 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
   const setCursor = useStudio((s) => s.setCursor);
   const setOption = useStudio((s) => s.setOption);
   const options = useStudio((s) => s.options);
+  const drawing = useStudio((s) => s.tool !== "move");
   const optionsRef = useRef<Options>(options);
   optionsRef.current = options;
   const dsRef = useRef(dataset);
@@ -210,7 +239,61 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       minimap = [x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k];
     }
 
-    let scan: Overlay["scan"] = null;
+    const pj = useProject.getState();
+    const scan = pj.scans[ds.id] ?? EMPTY_SCAN;
+    const line = pj.line?.dsId === ds.id ? pj.line : null;
+    const hoverIndex = pj.profileHover;
+    const marker: Point | null = line && pj.profile && hoverIndex !== null && hoverIndex < pj.profile.samples
+      ? [pj.profile.x_px[hoverIndex]!, pj.profile.y_px[hoverIndex]!] : null;
+    const oc = overlayRef.current;
+    const octx = oc?.getContext("2d");
+    if (oc && octx) {
+      if (oc.width !== vp.width || oc.height !== vp.height) {
+        oc.width = vp.width;
+        oc.height = vp.height;
+      }
+      accent.current = accentColors(accent.current);
+      const tc = tools.current;
+      drawOverlay(octx, layout.map((p, i) => ({ rect: p.rect, cam: views[i]!.cam })), {
+        regions: scan.regions,
+        background: scan.background,
+        selected: pj.selection?.kind === "region" ? pj.selection.id : null,
+        hover: tc?.hover?.kind === "region" ? tc.hover.id : null,
+        notes: scan.notes,
+        selectedNote: pj.selection?.kind === "note" ? pj.selection.id : null,
+        noteDraft: pj.noteDraft,
+        draft: tc?.draft ?? null,
+        line,
+        marker,
+        handles: useStudio.getState().tool === "move",
+        pixelSize: ds.pixel_size_um,
+        accent: accent.current.accent,
+        accentInk: accent.current.ink,
+        dpr: vp.dpr,
+      });
+    }
+
+    const mv = new PanelView(mainRect, main.cam);
+    const css = (v: number) => Math.round(v / vp.dpr);
+    const screenBox = (b: Box): Anchor => ({ x: css(mv.x(b[0])), y: css(mv.y(b[1])), w: css(mv.x(b[2]) - mv.x(b[0])), h: css(mv.y(b[3]) - mv.y(b[1])) });
+    let card: Anchor | null = null;
+    const avoid: Anchor[] = [];
+    const sel = pj.selection;
+    const selRegion = sel?.kind === "region" ? scan.regions.find((q) => q.id === sel.id) : undefined;
+    if (selRegion) {
+      const [vx0, vy0, vx1, vy1] = mv.bounds();
+      const box = regionBox(selRegion);
+      if (box[0] < vx1 && box[2] > vx0 && box[1] < vy1 && box[3] > vy0) card = screenBox(box);
+      for (const r of scan.regions) {
+        const b = regionBox(r);
+        if (r !== selRegion && b[0] < vx1 && b[2] > vx0 && b[1] < vy1 && b[3] > vy0) avoid.push(screenBox(b));
+      }
+    }
+    const selNote = sel?.kind === "note" ? scan.notes.find((n) => n.id === sel.id) : undefined;
+    const notePt: Point | null = pj.noteDraft ?? (selNote ? [selNote.x, selNote.y] : null);
+    const note = notePt ? { x: css(mv.x(notePt[0])), y: css(mv.y(notePt[1])) } : null;
+
+    let scanLine: Overlay["scan"] = null;
     const building = ds.build.state === "building" || ds.build.state === "queued";
     if (building) {
       scanShown.current = reducedMotion() ? ds.build.progress
@@ -222,7 +305,7 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       const bottom = Math.min(mainRect.y + mainRect.height, mainRect.y + (H - main.cam.cy) * s + mainRect.height / 2);
       const top = Math.max(mainRect.y, y);
       if (bottom > top && right > left) {
-        scan = { x: left / vp.dpr, y: top / vp.dpr, width: (right - left) / vp.dpr, below: (bottom - top) / vp.dpr,
+        scanLine = { x: left / vp.dpr, y: top / vp.dpr, width: (right - left) / vp.dpr, below: (bottom - top) / vp.dpr,
           line: y >= mainRect.y };
       }
       animating = true;
@@ -243,11 +326,15 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
     const next: Overlay = {
       minimap,
       bar: ds.pixel_size_um ? scaleBar(ds.pixel_size_um / cssPerImage) : null,
-      scan,
+      scan: scanLine,
       labels,
       labelOpacity: Math.round(g * 100) / 100,
+      card,
+      avoid,
+      note,
+      size: { w: css(vp.width), h: css(vp.height) - (line ? PROFILE_DRAWER_CSS : 0) },
     };
-    setOverlay((prev) => (sameOverlay(prev, next) ? prev : next));
+    setOverlay((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     if (animating) requestFrameRef.current();
   }, [W, H, setView, stepMotion]);
 
@@ -258,6 +345,12 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
     requestAnimationFrame(draw);
   }, [draw]);
   requestFrameRef.current = requestFrame;
+
+  const setCursorStyle = useCallback(() => {
+    const host = hostRef.current;
+    const tc = tools.current;
+    if (host && tc) host.style.cursor = tc.cursor(space.current, drag.current !== null);
+  }, []);
 
   useEffect(() => {
     try {
@@ -290,13 +383,20 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
   }, [dataset.id, W, H, requestFrame]);
 
   useEffect(() => useStudio.subscribe((s, prev) => {
-    if (s.display[dataset.id] !== prev.display[dataset.id] || s.options !== prev.options) requestFrame();
+    if (s.display[dataset.id] !== prev.display[dataset.id] || s.options !== prev.options || s.accent !== prev.accent) requestFrame();
+    if (s.tool !== prev.tool) {
+      if (tools.current) tools.current.draft = null;
+      setCursorStyle();
+      requestFrame();
+    }
     const build = s.datasets[dataset.id]?.build;
     if (build && build !== prev.datasets[dataset.id]?.build) {
       tiles.current?.onBuild(build.rows_ready);
       requestFrame();
     }
-  }), [dataset.id, requestFrame]);
+  }), [dataset.id, requestFrame, setCursorStyle]);
+
+  useEffect(() => useProject.subscribe(() => requestFrame()), [requestFrame]);
 
   useEffect(() => {
     const target = options.gallery ? 1 : 0;
@@ -322,6 +422,57 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
     }
     requestFrame();
   }, [W, H, requestFrame]);
+
+  const focusBox = useCallback((box: Box) => {
+    const vp = viewport.current;
+    const w = Math.max(box[2] - box[0], 16);
+    const h = Math.max(box[3] - box[1], 16);
+    fly({ cx: (box[0] + box[2]) / 2, cy: (box[1] + box[3]) / 2, scale: Math.min(vp.width / (w * 1.6), vp.height / (h * 1.6)) });
+  }, [fly]);
+  const focusRef = useRef(focusBox);
+  focusRef.current = focusBox;
+
+  useEffect(() => onViewerFocus(focusBox), [focusBox]);
+
+  useEffect(() => {
+    const tc = new ToolController(dataset.id, () => requestFrameRef.current(), (box) => focusRef.current(box));
+    tools.current = tc;
+    activeTools.current = tc;
+    ensureProject(dataset.id);
+    setCursorStyle();
+    return () => {
+      if (activeTools.current === tc) activeTools.current = null;
+      tools.current = null;
+    };
+  }, [dataset.id, setCursorStyle]);
+
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || isTyping(e.target) || useStudio.getState().dialog) return;
+      e.preventDefault();
+      if (!space.current) {
+        space.current = true;
+        setCursorStyle();
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      space.current = false;
+      setCursorStyle();
+    };
+    const blur = () => {
+      space.current = false;
+      setCursorStyle();
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, [setCursorStyle]);
 
   const command = useCallback((cmd: ViewerCommand) => {
     const cam = camera.current;
@@ -355,6 +506,17 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
     return [(e.clientX - rect.left) * dpr, (e.clientY - rect.top) * dpr];
   };
 
+  /** Pointer position in image pixels, in `fixed` (the panel a gesture started in) or the panel under it. */
+  const sample = (e: { clientX: number; clientY: number; shiftKey: boolean; altKey: boolean }, fixed?: Panel | null): PointerSample => {
+    const [sx, sy] = devicePoint(e);
+    const vp = viewport.current;
+    const cam = camera.current!;
+    const p = fixed ?? panelAt(sx, sy);
+    const scale = cam.scale * panelShrink(p.rect, vp.width, vp.height);
+    const [x, y] = screenToImage({ ...cam, scale }, { width: p.rect.width, height: p.rect.height, dpr: vp.dpr }, sx - p.rect.x, sy - p.rect.y);
+    return { x, y, scale, dpr: vp.dpr, shift: e.shiftKey, alt: e.altKey };
+  };
+
   const updateCursor = (sx: number, sy: number) => {
     const cam = camera.current;
     const tm = tiles.current;
@@ -369,49 +531,80 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       setCursor(null);
       return;
     }
+    const left = sx / vp.dpr;
+    const top = sy / vp.dpr;
     const values = dataset.channels.map((_, c) => tm.valueAt(x, y, c));
-    setCursor({ x, y, values });
+    setCursor({ x, y, values, left, top });
     if (values.some((v) => v === null)) {
       pixelAbort.current?.abort();
       const ctl = (pixelAbort.current = new AbortController());
       api.pixel(dataset.id, x, y, ctl.signal)
         .then((res) => {
           const cur = useStudio.getState().cursor;
-          if (cur && cur.x === x && cur.y === y) setCursor({ x, y, values: res.values });
+          if (cur && cur.x === x && cur.y === y) setCursor({ ...cur, values: res.values });
         })
         .catch(() => undefined);
     }
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0 || !camera.current) return;
+    if ((e.button !== 0 && e.button !== 1) || !camera.current) return;
+    if (e.button === 1) e.preventDefault();
     motion.current = null;
     (e.target as Element).setPointerCapture(e.pointerId);
     const [x, y] = devicePoint(e);
+    const panel = panelAt(x, y);
+    gesturePanel.current = panel;
+    if (e.button === 0 && !space.current && tools.current?.down(sample(e, panel))) {
+      toolGesture.current = true;
+      setCursorStyle();
+      return;
+    }
     const vp = viewport.current;
-    const k = panelShrink(panelAt(x, y).rect, vp.width, vp.height);
-    drag.current = { x, y, cam: camera.current, k, samples: [[performance.now(), x, y]] };
+    const k = panelShrink(panel.rect, vp.width, vp.height);
+    drag.current = { x, y, cam: camera.current, k, samples: [[performance.now(), x, y]], moved: false };
+    setCursorStyle();
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
     const [x, y] = devicePoint(e);
     const d = drag.current;
-    if (d) {
+    if (toolGesture.current) {
+      tools.current?.move(sample(e, gesturePanel.current));
+    } else if (d) {
       const s = d.cam.scale * d.k;
       camera.current = clampCenter({ ...d.cam, cx: d.cam.cx - (x - d.x) / s, cy: d.cam.cy - (y - d.y) / s }, W, H);
       const now = performance.now();
       d.samples.push([now, x, y]);
       while (d.samples.length > 2 && now - d.samples[0]![0] > 100) d.samples.shift();
+      if (Math.hypot(x - d.x, y - d.y) > CLICK_SLOP_CSS * viewport.current.dpr) d.moved = true;
       requestFrame();
+    } else if (camera.current) {
+      tools.current?.move(sample(e));
     }
     updateCursor(x, y);
+    setCursorStyle();
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
+    (e.target as Element).releasePointerCapture?.(e.pointerId);
+    if (toolGesture.current) {
+      toolGesture.current = false;
+      tools.current?.up(sample(e, gesturePanel.current));
+      gesturePanel.current = null;
+      setCursorStyle();
+      return;
+    }
     const d = drag.current;
     drag.current = null;
-    (e.target as Element).releasePointerCapture?.(e.pointerId);
-    if (!d || reducedMotion() || d.samples.length < 2) return;
+    gesturePanel.current = null;
+    setCursorStyle();
+    if (!d) return;
+    if (!d.moved) {
+      tools.current?.click();
+      return;
+    }
+    if (reducedMotion() || d.samples.length < 2) return;
     const [t0, x0, y0] = d.samples[0]!;
     const [t1, x1, y1] = d.samples[d.samples.length - 1]!;
     const dt = t1 - t0;
@@ -425,9 +618,19 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
     }
   };
 
+  const onPointerLeave = () => {
+    setCursor(null);
+    const tc = tools.current;
+    if (tc?.hover && !toolGesture.current) {
+      tc.hover = null;
+      requestFrame();
+    }
+  };
+
   useEffect(() => {
     const host = hostRef.current!;
     const onWheel = (e: WheelEvent) => {
+      if ((e.target as Element).closest?.(".viewer-ui")) return;
       e.preventDefault();
       const cam = camera.current;
       if (!cam) return;
@@ -464,7 +667,8 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
 
   const onDoubleClick = (e: React.MouseEvent) => {
     const cam = camera.current;
-    if (!cam) return;
+    if (!cam || (e.target as Element).closest(".viewer-ui")) return;
+    if (tools.current?.dblclick(sample(e))) return;
     const [sx, sy] = devicePoint(e);
     fly(zoomAtPoint(cam, sx, sy, e.altKey ? 0.5 : 2));
   };
@@ -496,10 +700,13 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={() => setCursor(null)}
+      onPointerCancel={onPointerUp}
+      onPointerLeave={onPointerLeave}
       onDoubleClick={onDoubleClick}
+      onContextMenu={(e) => e.preventDefault()}
     >
       <canvas ref={canvasRef} className="viewer-canvas" />
+      <canvas ref={overlayRef} className="viewer-canvas viewer-overlay" />
       {error && <div className="viewer-error">{error}</div>}
       {overlay.scan && (
         <div className="scan-curtain" style={{
@@ -529,7 +736,11 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
           <div className="scalebar-bar" style={{ width: overlay.bar.cssPx }} />
         </div>
       )}
-      <div className="zoom" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      <ToolPalette />
+      {overlay.card && !drawing && <MeasureCard ds={dataset} anchor={overlay.card} bounds={overlay.size} avoid={overlay.avoid} />}
+      {overlay.note && !drawing && <NotePopover ds={dataset} at={overlay.note} bounds={overlay.size} />}
+      {options.loupe && <Loupe ds={dataset} bounds={overlay.size} />}
+      <div className="zoom viewer-ui" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
         <button className={`ib${options.gallery ? " on" : ""}`} title="Channel gallery (G)"
           onClick={() => setOption("gallery", !options.gallery)}><LayoutGrid /></button>
         <span className="zoom-sep" />
