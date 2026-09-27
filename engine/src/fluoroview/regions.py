@@ -41,6 +41,38 @@ class RegionPatch(BaseModel):
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 
+class AnnotationIn(BaseModel):
+    x: float
+    y: float
+    text: str = Field(min_length=1, max_length=5000)
+    author: str | None = Field(default=None, max_length=200)
+    region_id: str | None = None
+
+
+class AnnotationPatch(BaseModel):
+    x: float | None = None
+    y: float | None = None
+    text: str | None = Field(default=None, min_length=1, max_length=5000)
+    region_id: str | None = None
+
+
+class ReplyIn(BaseModel):
+    text: str = Field(min_length=1, max_length=5000)
+    author: str | None = Field(default=None, max_length=200)
+
+
+def new_annotation(req: AnnotationIn) -> dict:
+    if not (math.isfinite(req.x) and math.isfinite(req.y)):
+        raise ValueError("position must be finite")
+    stamp = now_iso()
+    return {"id": uuid.uuid4().hex[:12], "x": req.x, "y": req.y, "text": req.text.strip(), "author": req.author,
+            "region_id": req.region_id, "created": stamp, "modified": stamp, "replies": []}
+
+
+def new_reply(req: ReplyIn) -> dict:
+    return {"id": uuid.uuid4().hex[:12], "text": req.text.strip(), "author": req.author, "created": now_iso()}
+
+
 def validate_shape(shape: str, points: list[tuple[float, float]]) -> None:
     if shape in ("rectangle", "ellipse"):
         if len(points) != 2:

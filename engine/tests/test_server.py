@@ -1,15 +1,23 @@
 import io
+import json
+import socket
+import threading
+import time
 
 import numpy as np
 import pytest
 import tifffile
+import uvicorn
 from PIL import Image
 from starlette.websockets import WebSocketDisconnect
+from websockets.sync.client import connect as ws_connect
 
+from fluoroview.config import Settings
 from fluoroview.datasets import Dataset, NotReady
 from fluoroview.events import EventBus
 from fluoroview.io import TiffSource
 from fluoroview.pyramid.cache import PyramidCache
+from fluoroview.server.app import create_app
 
 from .conftest import TOKEN, ref_levels, wait_ready
 
@@ -35,6 +43,26 @@ def test_websocket_requires_token(client):
         assert ws.receive_json()["type"] == "hello"
 
 
+def test_shutdown_does_not_wait_for_an_open_studio(tmp_path):
+    """A studio tab left open must not block Ctrl+C: uvicorn waits for every handler to finish."""
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    port = sock.getsockname()[1]
+    settings = Settings(token=TOKEN, port=port, cache_dir=tmp_path / "cache", projects_dir=tmp_path / "projects",
+                        studio_dir=None)
+    server = uvicorn.Server(uvicorn.Config(create_app(settings), log_level="warning"))
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 10
+    while not server.started and time.monotonic() < deadline:
+        time.sleep(0.02)
+    with ws_connect(f"ws://127.0.0.1:{port}/api/v1/events?token={TOKEN}") as ws:
+        assert json.loads(ws.recv(timeout=5))["type"] == "hello"
+        server.should_exit = True
+        thread.join(timeout=5)
+        assert not thread.is_alive(), "shutdown waited on an idle event stream"
+
+
 def test_open_build_and_serve_tiles(client, biotek_image):
     path, data = biotek_image
     r = client.post("/api/v1/datasets", json={"path": str(path)})
@@ -55,6 +83,10 @@ def test_open_build_and_serve_tiles(client, biotek_image):
 
     px = client.get(f"/api/v1/datasets/{ds['id']}/pixel", params={"x": 1700, "y": 1102}).json()
     assert px["values"] == [int(v) for v in data[:, 1102, 1700]]
+    patch = client.get(f"/api/v1/datasets/{ds['id']}/patch", params={"x": 1700, "y": 1102, "r": 3}).json()
+    x0, y0, n = patch["x0"], patch["y0"], patch["size"]
+    assert n == 7 and x0 <= 1700 < x0 + n and y0 <= 1102 < y0 + n
+    assert patch["channels"][2] == data[2, y0:y0 + n, x0:x0 + n].ravel().tolist()
 
     hist = client.get(f"/api/v1/datasets/{ds['id']}/histogram/0").json()
     assert hist["complete"] and hist["total"] == data[0].size

@@ -26,6 +26,11 @@ class EventBus:
         with self._lock:
             self._subscribers.discard(q)
 
+    @property
+    def subscribers(self) -> int:
+        with self._lock:
+            return len(self._subscribers)
+
     def publish(self, event: dict) -> None:
         """Thread-safe; events are dropped for clients that stopped reading."""
         loop = self._loop

@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from fluoroview.measure import COLUMNS
+from fluoroview.server import routes_project
 
 from .conftest import wait_ready
 
@@ -57,6 +58,66 @@ def test_region_lifecycle_and_measurement(opened):
     assert [r["name"] for r in project["regions"]] == ["Tumour core"] and project["background_region"] is None
 
 
+def test_annotations_and_replies(opened):
+    client, ds, _, _ = opened
+    base = f"/api/v1/datasets/{ds['id']}"
+    region = client.post(f"{base}/regions", json={"shape": "ellipse", "points": [[10, 10], [90, 60]]}).json()
+    note = client.post(f"{base}/annotations", json={"x": 50.5, "y": 30.25, "text": "  PSMA+ cluster ", "author": "AH",
+                                                    "region_id": region["id"]}).json()
+    assert note["text"] == "PSMA+ cluster" and note["region_id"] == region["id"] and note["replies"] == []
+    moved = client.patch(f"{base}/annotations/{note['id']}", json={"x": 60, "region_id": None}).json()
+    assert moved["x"] == 60 and moved["y"] == 30.25 and moved["region_id"] is None
+    replied = client.post(f"{base}/annotations/{note['id']}/replies", json={"text": "agreed", "author": "PH"}).json()
+    assert [r["text"] for r in replied["replies"]] == ["agreed"]
+    assert client.post(f"{base}/annotations", json={"x": 1, "y": 1, "text": ""}).status_code == 422
+    orphan = {"x": 1, "y": 1, "text": "x", "region_id": "nope"}
+    assert client.post(f"{base}/annotations", json=orphan).status_code == 404
+    assert client.delete(f"{base}/annotations/{note['id']}").json() == {"deleted": note["id"]}
+    assert client.get(f"{base}/project").json()["annotations"] == []
+
+
+def test_line_profile(opened):
+    client, ds, data, _ = opened
+    base = f"/api/v1/datasets/{ds['id']}"
+    p = client.get(f"{base}/profile", params={"x0": 100.5, "y0": 600.5, "x1": 900.5, "y1": 600.5}).json()
+    assert p["level"] == 0 and p["samples"] == 801
+    for c, ch in enumerate(p["channels"]):
+        assert ch["values"] == data[c, 600, 100:901].tolist()
+    assert p["distance_um"][-1] == pytest.approx(800 * ds["pixel_size_um"])
+    coarse = client.get(f"{base}/profile", params={"x0": 0.5, "y0": 0.5, "x1": 1700.5, "y1": 1100.5,
+                                                    "max_samples": 256}).json()
+    assert coarse["level"] >= 2 and coarse["samples"] >= 256
+
+    res = client.get(f"{base}/profile.csv", params={"x0": 100.5, "y0": 600.5, "x1": 900.5, "y1": 600.5})
+    assert res.headers["content-disposition"].endswith('-profile.csv"')
+    rows = list(csv.reader(io.StringIO(res.text)))
+    names = [c["name"] for c in ds["channels"]]
+    assert rows[0] == ["sample", "x_px", "y_px", "distance_px", "distance_um", *names,
+                       "pyramid_level", "pixel_size_um", "fluoroview_version"]
+    assert len(rows) == 1 + 801
+    row = rows[1 + 10]
+    assert row[:4] == ["10", "110.5000", "600.5000", "10.0000"]
+    assert [int(v) for v in row[5:5 + len(names)]] == data[:, 600, 110].tolist()
+    assert row[-3:-1] == ["0", f"{ds['pixel_size_um']:.6f}"]
+
+
+def test_rename_reuses_the_measurement(opened, monkeypatch):
+    client, ds, _, _ = opened
+    base = f"/api/v1/datasets/{ds['id']}"
+    region = client.post(f"{base}/regions", json={"shape": "rectangle", "points": [[0, 0], [64, 64]]}).json()
+    calls = []
+    real = routes_project.measure_region
+    monkeypatch.setattr(routes_project, "measure_region", lambda d, r: calls.append(r["id"]) or real(d, r))
+    first = client.get(f"{base}/regions/{region['id']}/measurement").json()
+    client.patch(f"{base}/regions/{region['id']}", json={"name": "Stroma"})
+    second = client.get(f"{base}/regions/{region['id']}/measurement").json()
+    assert calls == [region["id"]]
+    assert second["region"] == "Stroma" and second["channels"] == first["channels"]
+    client.patch(f"{base}/regions/{region['id']}", json={"points": [[0, 0], [32, 64]]})
+    assert client.get(f"{base}/regions/{region['id']}/measurement").json()["area_px"] == 32 * 64
+    assert calls == [region["id"]] * 2
+
+
 def test_invalid_regions_are_rejected(opened):
     client, ds, _, _ = opened
     base = f"/api/v1/datasets/{ds['id']}/regions"
@@ -69,7 +130,8 @@ def test_invalid_regions_are_rejected(opened):
 def test_display_settings_persist_outside_the_scan_folder(opened, tmp_path):
     client, ds, _, path = opened
     before = sorted(p.name for p in path.parent.iterdir())
-    display = [{"visible": c != 3, "color": "#3d7aff", "lo": 100 + c, "hi": 5000, "gamma": 1.2} for c in range(4)]
+    display = [{"visible": c != 3, "color": "#3d7aff", "lo": 100 + c, "hi": 5000, "gamma": 1.2, "touched": c != 0}
+               for c in range(4)]
     assert client.put(f"/api/v1/datasets/{ds['id']}/display", json=display).status_code == 200
     assert client.get(f"/api/v1/datasets/{ds['id']}/project").json()["display"] == display
     assert client.put(f"/api/v1/datasets/{ds['id']}/display", json=display[:2]).status_code == 422

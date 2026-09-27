@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -53,6 +54,7 @@ def create_app(settings: Settings) -> FastAPI:
                   docs_url=None, redoc_url=None, openapi_url=None)
     app.state.registry = registry
     app.state.cache = cache
+    app.state.events = events
     app.state.settings = settings
     app.add_middleware(LocalAccessMiddleware, token=settings.token, allowed_hosts=settings.allowed_hosts)
 
@@ -129,6 +131,22 @@ def create_app(settings: Settings) -> FastAPI:
         except NotReady:
             raise HTTPException(409, "pixel not available yet") from None
 
+    @api.get("/datasets/{ds_id}/patch")
+    def get_patch(ds_id: str, x: int, y: int, r: int = Query(5, ge=1, le=16)) -> dict:
+        """Raw full-resolution values of the (2r+1)² pixels around (x, y), shifted to stay inside the image."""
+        ds = dataset(ds_id)
+        w, h = ds.info.width, ds.info.height
+        if not (0 <= x < w and 0 <= y < h):
+            raise HTTPException(404, "pixel out of range")
+        size = min(2 * r + 1, w, h)
+        x0 = min(max(0, x - r), w - size)
+        y0 = min(max(0, y - r), h - size)
+        try:
+            planes = [ds.read_region(0, c, x0, y0, x0 + size, y0 + size) for c in range(len(ds.info.channels))]
+        except NotReady:
+            raise HTTPException(409, "pixels not available yet") from None
+        return {"x0": x0, "y0": y0, "size": size, "channels": [p.ravel().tolist() for p in planes]}
+
     def cached_thumbnail(key: str, size: int, info_of) -> Response:
         thumb = cache.dir(key) / f"thumbnail-{size}.png"
         if not thumb.exists():
@@ -202,16 +220,27 @@ def create_app(settings: Settings) -> FastAPI:
 
     @app.websocket("/api/v1/events")
     async def event_stream(ws: WebSocket) -> None:
+        """Push events until the client leaves. Waiting on the socket as well as the queue lets the
+        handler end at once on disconnect, so server shutdown never waits on an idle stream."""
         await ws.accept()
         q = events.subscribe()
-        try:
+
+        async def forward() -> None:
             await ws.send_json({"type": "hello", "version": __version__})
             while True:
                 await ws.send_json(await q.get())
+
+        sender = asyncio.create_task(forward())
+        try:
+            while (await ws.receive())["type"] != "websocket.disconnect":
+                pass
         except WebSocketDisconnect:
             pass
         finally:
             events.unsubscribe(q)
+            sender.cancel()
+            with contextlib.suppress(asyncio.CancelledError, WebSocketDisconnect, RuntimeError):
+                await sender
 
     studio = settings.studio_dir
     if studio is not None and (studio / "index.html").exists():
