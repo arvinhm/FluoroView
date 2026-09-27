@@ -4,9 +4,9 @@ import json
 import numpy as np
 import pytest
 import tifffile
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from fluoroview.figure import Display, format_length, nice_length, plan, read_area, render_channel, to_u8
+from fluoroview.figure import Display, _font, format_length, nice_length, plan, read_area, render_channel, to_u8
 from fluoroview.pyramid.store import plan_levels
 
 from .conftest import ref_levels
@@ -148,3 +148,16 @@ def test_levels_past_the_pyramid_are_exact_means(opened):
         box = (0, 0, ref.shape[1], ref.shape[0])
         np.testing.assert_array_equal(read_area(dataset, level, 2, box), ref)
         np.testing.assert_array_equal(read_area(dataset, level, 2, (3, 2, 9, 7)), ref[2:7, 3:9])
+
+
+def test_scale_bar_text_has_a_micro_sign():
+    """Pillow's built-in font draws µ as a missing-glyph box; figures use the studio's typeface."""
+    font = _font(40)
+
+    def ink(ch: str) -> np.ndarray:
+        im = Image.new("L", (60, 60), 0)
+        ImageDraw.Draw(im).text((5, 5), ch, font=font, fill=255)
+        return np.asarray(im)
+
+    assert not np.array_equal(ink("µ"), ink("\uffff")), "µ is drawn, not a missing-glyph box"
+    assert format_length(20) == "20 µm"

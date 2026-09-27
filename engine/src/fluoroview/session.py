@@ -27,7 +27,7 @@ import numpy as np
 from pydantic import BaseModel, Field, FiniteFloat, ValidationError
 
 from . import __version__
-from .display import DisplayChannel
+from .display import Blend, DisplayChannel
 from .projects import now_iso
 from .regions import AnnotationRestore, Counter, CountPoint, RegionRestore, new_id, region_record, validate_shape
 
@@ -54,6 +54,7 @@ class ViewerOptions(BaseModel):
     clip: bool = False
     minimap: bool = True
     hist_log: bool = True
+    blend: Blend = "add"
 
 
 class Line(BaseModel):

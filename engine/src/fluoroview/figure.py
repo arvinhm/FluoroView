@@ -1,9 +1,10 @@
 """Publication figures and raw exports of an area, rendered from the pyramid.
 
 A figure is the composite plus one panel per visible channel, side by side, with the studio's
-display settings applied exactly as the viewer's shader does (window, gamma, colour, additive
-blend). Every file is capped in size: the finest pyramid level whose output fits is used, so
-pixels are either the originals or exact 2x2 area means, never resampled otherwise.
+display settings applied exactly as the viewer's shader does (window, gamma, tone curve, invert,
+colour or colour map, intensity, then an additive or maximum blend). Every file is capped in size:
+the finest pyramid level whose output fits is used, so pixels are either the originals or exact 2x2
+area means, never resampled otherwise.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import tifffile
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
 from . import __version__
+from .luts import IDENTITY_CURVE, channel_lut, colormap_values, hex_rgb
 from .projects import now_iso
 from .pyramid.kernels import downsample2
 from .regions import rings_of
@@ -27,6 +29,12 @@ GAP_FRACTION = 0.02
 GAP_COLOR = (255, 255, 255)
 PIN_FILL = (255, 255, 255)
 PIN_TEXT = (11, 11, 12)
+FONT = Path(__file__).with_name("fonts") / "IBMPlexSans-Medium.woff"
+"""the studio's typeface (SIL Open Font License, fonts/OFL.txt); Pillow's built-in font has no µ"""
+
+
+def _font(size: int) -> ImageFont.FreeTypeFont:
+    return ImageFont.truetype(str(FONT), size)
 
 
 @dataclass(frozen=True)
@@ -36,6 +44,15 @@ class Display:
     lo: float
     hi: float
     gamma: float
+    lut: str = "color"
+    invert: bool = False
+    curve: tuple[tuple[float, float], ...] = IDENTITY_CURVE
+    intensity: float = 1.0
+
+    @property
+    def plain(self) -> bool:
+        """Only a window, gamma and tint, as before tone curves and colour maps existed."""
+        return self.lut == "color" and not self.invert and self.curve == IDENTITY_CURVE and self.intensity == 1.0
 
 
 @dataclass(frozen=True)
@@ -107,16 +124,38 @@ def read_area(ds, level: int, c: int, lbox: tuple[int, int, int, int]) -> np.nda
 
 
 def _rgb(color: str) -> np.ndarray:
-    v = int(color.lstrip("#"), 16)
-    return np.array([(v >> 16) & 255, (v >> 8) & 255, v & 255], np.float32) / 255.0
+    return hex_rgb(color).astype(np.float32)
 
 
 def render_channel(data: np.ndarray, d: Display) -> np.ndarray:
-    """Windowed, gamma-corrected, tinted float RGB of one channel (the viewer's shader, on the CPU)."""
+    """Float RGB of one channel, as the viewer's shader draws it (on the CPU)."""
     t = np.clip((data.astype(np.float32) - d.lo) / max(d.hi - d.lo, 1.0), 0.0, 1.0)
     if d.gamma != 1.0:
         t **= 1.0 / d.gamma
-    return t[..., None] * _rgb(d.color)
+    if d.plain:
+        return t[..., None] * _rgb(d.color)
+    table = channel_lut(d.color, d.lut, d.invert, d.curve, d.intensity).astype(np.float32)
+    pos = t * np.float32(len(table) - 1)
+    i0 = np.minimum(pos.astype(np.int32), len(table) - 2)
+    f = (pos - i0)[..., None]
+    return table[i0] * (1.0 - f) + table[i0 + 1] * f
+
+
+def _label_color(d: Display) -> tuple[int, int, int]:
+    """A channel's name in its colour, or in the brightest colour of its colour map."""
+    rgb = _rgb(d.color) if d.lut == "color" else colormap_values(d.lut, np.array([1.0]))[0]
+    return tuple(int(round(v * 255)) for v in rgb)
+
+
+def compose(layers: list[np.ndarray], blend: str, shape: tuple[int, ...]) -> np.ndarray:
+    """The composite of channel layers: their sum ("add") or their per-colour maximum ("max")."""
+    out = np.zeros(shape, np.float32)
+    for rgb in layers:
+        if blend == "max":
+            np.maximum(out, rgb, out=out)
+        else:
+            out += rgb
+    return out
 
 
 def to_u8(rgb: np.ndarray) -> np.ndarray:
@@ -147,7 +186,7 @@ class _Overlay:
         self.x0, self.y0 = p.level_box[0], p.level_box[1]
         side = max(p.panel_width, p.panel_height)
         self.font_px = max(12, round(side * 0.028))
-        self.font = ImageFont.load_default(size=self.font_px)
+        self.font = _font(self.font_px)
         self.line = max(1, round(side / 700))
 
     def xy(self, x: float, y: float) -> tuple[float, float]:
@@ -178,7 +217,7 @@ class _Overlay:
         cx, cy = self.xy(x, y)
         r = max(7, round(self.font_px * 0.75))
         self.draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=PIN_FILL, outline=(0, 0, 0), width=max(1, r // 6))
-        self.draw.text((cx, cy), label, font=ImageFont.load_default(size=round(r * 1.1)), fill=PIN_TEXT, anchor="mm")
+        self.draw.text((cx, cy), label, font=_font(round(r * 1.1)), fill=PIN_TEXT, anchor="mm")
 
     def scale_bar(self, um_per_px: float, width: int, height: int) -> None:
         length_um = nice_length(0.2 * width * um_per_px)
@@ -192,17 +231,18 @@ class _Overlay:
 
 
 def render_figure(ds, p: Plan, displays: list[Display], *, regions: list[dict], notes: list[dict],
-                  scale_bar: bool, labels: bool, pixel_size: float | None) -> Image.Image:
+                  scale_bar: bool, labels: bool, pixel_size: float | None, blend: str = "add") -> Image.Image:
     shape = (p.panel_height, p.panel_width, 3)
-    composite = np.zeros(shape, np.float32)
+    layers: list[np.ndarray] = []
     channel_px: dict[int, np.ndarray] = {}
     for c, d in enumerate(displays):
         if not d.visible:
             continue
         rgb = render_channel(read_area(ds, p.level, c, p.level_box), d)
-        composite += rgb
+        layers.append(rgb)
         if c in p.panels:
             channel_px[c] = to_u8(rgb)
+    composite = compose(layers, blend, shape)
     canvas = Image.new("RGB", (p.width, p.height), GAP_COLOR)
     px = pixel_size
     for i, panel in enumerate(p.panels):
@@ -214,7 +254,7 @@ def render_figure(ds, p: Plan, displays: list[Display], *, regions: list[dict], 
             ov.pin(n["x"], n["y"], str(k + 1))
         if labels:
             name = "Composite" if panel is None else ds.info.channels[panel].name
-            fill = (255, 255, 255) if panel is None else tuple(int(v * 255) for v in _rgb(displays[panel].color))
+            fill = (255, 255, 255) if panel is None else _label_color(displays[panel])
             ov.text((ov.font_px * 0.8, ov.font_px * 0.6), name, fill)
         if scale_bar and panel is None and px:
             ov.scale_bar(px * 2**p.level, p.panel_width, p.panel_height)
@@ -222,7 +262,7 @@ def render_figure(ds, p: Plan, displays: list[Display], *, regions: list[dict], 
     return canvas
 
 
-def provenance(ds, p: Plan, displays: list[Display], pixel_size: float | None) -> dict:
+def provenance(ds, p: Plan, displays: list[Display], pixel_size: float | None, blend: str = "add") -> dict:
     """What the figure shows, for reproducibility. The file name only: figures are shared, paths are private."""
     px = pixel_size
     return {
@@ -232,7 +272,9 @@ def provenance(ds, p: Plan, displays: list[Display], pixel_size: float | None) -
         "area_px": list(p.box),
         "pyramid_level": p.level,
         "pixel_size_um": px * 2**p.level if px else None,
-        "channels": [{"name": ch.name, "visible": d.visible, "color": d.color, "lo": d.lo, "hi": d.hi, "gamma": d.gamma}
+        "blend": blend,
+        "channels": [{"name": ch.name, "visible": d.visible, "color": d.color, "lo": d.lo, "hi": d.hi, "gamma": d.gamma,
+                      "lut": d.lut, "invert": d.invert, "curve": [list(pt) for pt in d.curve], "intensity": d.intensity}
                      for ch, d in zip(ds.info.channels, displays, strict=True)],
     }
 

@@ -193,7 +193,16 @@ def test_display_settings_persist_outside_the_scan_folder(opened, tmp_path):
     display = [{"visible": c != 3, "color": "#3d7aff", "lo": 100 + c, "hi": 5000, "gamma": 1.2, "touched": c != 0}
                for c in range(4)]
     assert client.put(f"/api/v1/datasets/{ds['id']}/display", json=display).status_code == 200
-    assert client.get(f"/api/v1/datasets/{ds['id']}/project").json()["display"] == display
+    saved = client.get(f"/api/v1/datasets/{ds['id']}/project").json()["display"]
+    assert [{k: s[k] for k in d} for s, d in zip(saved, display, strict=True)] == display
+    assert all((s["lut"], s["invert"], s["curve"], s["intensity"]) == ("color", False, [[0, 0], [1, 1]], 1)
+               for s in saved), "settings saved before colour maps and curves show as before"
+    styled = [{**display[0], "lut": "fire", "invert": True, "curve": [[0, 0], [0.4, 0.7], [1, 1]], "intensity": 0.6},
+              *display[1:]]
+    assert client.put(f"/api/v1/datasets/{ds['id']}/display", json=styled).status_code == 200
+    first = client.get(f"/api/v1/datasets/{ds['id']}/project").json()["display"][0]
+    look = (first["lut"], first["invert"], first["curve"], first["intensity"])
+    assert look == ("fire", True, [[0, 0], [0.4, 0.7], [1, 1]], 0.6)
     assert client.put(f"/api/v1/datasets/{ds['id']}/display", json=display[:2]).status_code == 422
     assert sorted(p.name for p in path.parent.iterdir()) == before, "nothing is written next to the scan"
     assert any((tmp_path / "projects").iterdir())
