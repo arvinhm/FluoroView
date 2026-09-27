@@ -23,6 +23,8 @@ export interface MeasureEntry {
   data: Measurement | null;
   loading: boolean;
   error: string | null;
+  /** the region is being moved or reshaped; the numbers are for where it was */
+  stale: boolean;
 }
 
 export interface Scan {
@@ -145,33 +147,61 @@ export async function createRegion(dsId: string, shape: RegionShape, points: Poi
 /** Local-only change while a region is dragged; `commitRegion` saves it. */
 export function previewRegion(dsId: string, rid: string, points: Point[]): void {
   patchScan(dsId, (s) => ({ regions: s.regions.map((r) => (r.id === rid ? { ...r, points } : r)) }));
-  markMeasuring(dsId, rid);
+  setStale(dsId, rid, true);
 }
 
-export async function commitRegion(dsId: string, rid: string, points: Point[]): Promise<void> {
+/** Put a previewed region back to its saved shape without saving anything. */
+export function revertRegion(dsId: string, rid: string, points: Point[]): void {
+  patchScan(dsId, (s) => ({ regions: s.regions.map((r) => (r.id === rid ? { ...r, points } : r)) }));
+  setStale(dsId, rid, false);
+}
+
+type RegionChange = { points?: Point[]; name?: string };
+
+/** Saves per region: one request in flight; changes made meanwhile are merged and sent next, newest winning. */
+const saving = new Map<string, { next: RegionChange | null }>();
+
+async function saveRegion(dsId: string, rid: string, change: RegionChange): Promise<void> {
+  const key = measureKey(dsId, rid);
+  const queued = saving.get(key);
+  if (queued) {
+    queued.next = { ...queued.next, ...change };
+    return;
+  }
+  const slot: { next: RegionChange | null } = { next: null };
+  saving.set(key, slot);
+  let current: RegionChange | null = change;
+  try {
+    while (current) {
+      const saved = await papi.patchRegion(dsId, rid, current);
+      current = slot.next;
+      slot.next = null;
+      if (!current) {
+        replaceRegion(dsId, saved);
+        measure(dsId, rid);
+      }
+    }
+  } catch (e) {
+    report(e);
+    await loadProject(dsId);
+    setStale(dsId, rid, false);
+  } finally {
+    saving.delete(key);
+  }
+}
+
+export function commitRegion(dsId: string, rid: string, points: Point[]): Promise<void> {
   const region = scanOf(dsId).regions.find((r) => r.id === rid);
-  if (!region) return;
+  if (!region) return Promise.resolve();
   const tidied = tidy(region.shape, points);
   previewRegion(dsId, rid, tidied);
-  try {
-    const saved = await papi.patchRegion(dsId, rid, { points: tidied });
-    replaceRegion(dsId, saved);
-    measure(dsId, rid);
-  } catch (e) {
-    report(e);
-    void loadProject(dsId);
-  }
+  return saveRegion(dsId, rid, { points: tidied });
 }
 
-export async function renameRegion(dsId: string, rid: string, name: string): Promise<void> {
-  if (!name.trim()) return;
-  try {
-    const saved = await papi.patchRegion(dsId, rid, { name: name.trim() });
-    replaceRegion(dsId, saved);
-    measure(dsId, rid);
-  } catch (e) {
-    report(e);
-  }
+export function renameRegion(dsId: string, rid: string, name: string): Promise<void> {
+  if (!name.trim()) return Promise.resolve();
+  patchScan(dsId, (s) => ({ regions: s.regions.map((r) => (r.id === rid ? { ...r, name: name.trim() } : r)) }));
+  return saveRegion(dsId, rid, { name: name.trim() });
 }
 
 export async function deleteRegion(dsId: string, rid: string): Promise<void> {
@@ -194,8 +224,15 @@ export async function deleteRegion(dsId: string, rid: string): Promise<void> {
 
 async function restoreRegion(dsId: string, region: Region, background: boolean): Promise<void> {
   useStudio.getState().setNotice(null);
-  const again = await createRegion(dsId, region.shape, region.points, { name: region.name, color: region.color });
-  if (again && background) await setBackground(dsId, again.id);
+  try {
+    const again = await papi.restoreRegion(dsId, region);
+    patchScan(dsId, (s) => ({ regions: [...s.regions, again] }));
+    select({ kind: "region", id: again.id });
+    measure(dsId, again.id);
+    if (background) await setBackground(dsId, again.id);
+  } catch (e) {
+    report(e);
+  }
 }
 
 export async function setBackground(dsId: string, rid: string | null): Promise<void> {
@@ -228,28 +265,30 @@ function setEntry(key: string, entry: MeasureEntry): void {
   useProject.setState((s) => ({ measures: { ...s.measures, [key]: entry } }));
 }
 
-function markMeasuring(dsId: string, rid: string): void {
+function setStale(dsId: string, rid: string, stale: boolean): void {
   const key = measureKey(dsId, rid);
   const cur = useProject.getState().measures[key];
-  if (cur && !cur.loading) setEntry(key, { ...cur, loading: true });
+  if (cur && cur.stale !== stale) setEntry(key, { ...cur, stale });
 }
 
-/** Fetch the measurement of a region unless numbers for its current state exist or are coming. */
+/**
+ * Fetch the measurement of a region unless the numbers for its saved state exist, are coming, or
+ * failed. Moving a region does not re-measure until it is saved (the saved state changes `modified`).
+ */
 export function measure(dsId: string, rid: string): void {
   const region = scanOf(dsId).regions.find((r) => r.id === rid);
   if (!region) return;
   const key = measureKey(dsId, rid);
   const cur = useProject.getState().measures[key];
-  if (cur && cur.modified === region.modified && cur.data && !cur.loading) return;
-  if (cur && cur.modified === region.modified && cur.loading && queue.length + running > 0) return;
-  setEntry(key, { modified: region.modified, data: cur?.data ?? null, loading: true, error: null });
+  if (cur && cur.modified === region.modified && (cur.loading || cur.data || cur.error)) return;
+  setEntry(key, { modified: region.modified, data: cur?.data ?? null, loading: true, error: null, stale: cur?.stale ?? false });
   queue.push(async () => {
     const latest = scanOf(dsId).regions.find((r) => r.id === rid);
     if (!latest || latest.modified !== region.modified) return;
     try {
       const data = await papi.measurement(dsId, rid);
       if (scanOf(dsId).regions.find((r) => r.id === rid)?.modified === region.modified) {
-        setEntry(key, { modified: region.modified, data, loading: false, error: null });
+        setEntry(key, { modified: region.modified, data, loading: false, error: null, stale: false });
       }
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -263,7 +302,7 @@ export function measure(dsId: string, rid: string): void {
         }, 1500);
         return;
       }
-      setEntry(key, { modified: region.modified, data: null, loading: false, error: (e as Error).message });
+      setEntry(key, { modified: region.modified, data: null, loading: false, error: (e as Error).message, stale: false });
     }
   });
   pump();
@@ -330,15 +369,19 @@ export async function deleteNote(dsId: string, aid: string): Promise<void> {
     if (useProject.getState().selection?.id === aid) select(null);
     useStudio.getState().setNotice({
       text: "Deleted note.",
-      action: {
-        label: "Undo",
-        run: () => {
-          useStudio.getState().setNotice(null);
-          useProject.setState({ noteDraft: [note.x, note.y] });
-          void saveNote(dsId, note.text);
-        },
-      },
+      action: { label: "Undo", run: () => void restoreNote(dsId, note) },
     });
+  } catch (e) {
+    report(e);
+  }
+}
+
+async function restoreNote(dsId: string, note: Annotation): Promise<void> {
+  useStudio.getState().setNotice(null);
+  try {
+    const again = await papi.restoreNote(dsId, note);
+    patchScan(dsId, (s) => ({ notes: [...s.notes, again] }));
+    select({ kind: "note", id: again.id });
   } catch (e) {
     report(e);
   }

@@ -7,7 +7,7 @@
 import type { Point } from "../api/types";
 import {
   cancelNote, commitRegion, createRegion, deleteNote, deleteRegion, EMPTY_SCAN, editNote, previewNote, previewRegion,
-  select, setLine, startNote, useProject,
+  revertRegion, select, setLine, startNote, useProject,
 } from "../state/project";
 import { type Tool, useStudio } from "../state/store";
 import {
@@ -308,7 +308,7 @@ export class ToolController {
       case "handle": {
         const r = this.region(g.id);
         if (r && hasArea(r.shape, r.points)) void commitRegion(this.dsId, g.id, r.points);
-        else if (r) previewRegion(this.dsId, g.id, g.origin);
+        else if (r) revertRegion(this.dsId, g.id, g.origin);
         break;
       }
       case "line-end":

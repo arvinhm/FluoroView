@@ -111,9 +111,11 @@ export function MeasureCard({ ds, anchor, bounds, avoid }: {
           <span className={entry?.error ? "err" : "muted"}>{entry?.error ?? "Measuring full-resolution pixels…"}</span>
         )}
         {isBg && <span className="badge">Background</span>}
-        {entry?.loading && m && <span className="muted mcard-busy">updating</span>}
+        {m && (entry?.loading || entry?.stale) && (
+          <span className="muted mcard-busy">{entry.loading ? "measuring" : "release to measure"}</span>
+        )}
       </div>
-      <div className={`mcard-rows${entry?.loading && m ? " stale" : ""}`}>
+      <div className={`mcard-rows${m && (entry?.loading || entry?.stale) ? " stale" : ""}`}>
         {ds.channels.map((ch, i) => {
           const c = m?.channels[i];
           const d = display?.[i];

@@ -59,6 +59,9 @@ export const project = {
     request<Region>(`/datasets/${id}/regions/${rid}`, send("PATCH", body)),
   deleteRegion: (id: string, rid: string) =>
     request<{ deleted: string; background_region: string | null }>(`/datasets/${id}/regions/${rid}`, send("DELETE")),
+  /** Put back a deleted region with its original id. */
+  restoreRegion: (id: string, region: Region) => request<Region>(`/datasets/${id}/regions/restore`, send("POST", region)),
+  restoreNote: (id: string, note: Annotation) => request<Annotation>(`/datasets/${id}/annotations/restore`, send("POST", note)),
   setBackground: (id: string, rid: string | null) =>
     request<{ background_region: string | null }>(`/datasets/${id}/background`, send("PUT", { region_id: rid })),
   saveDisplay: (id: string, channels: SavedDisplay[]) => request<{ saved: number }>(`/datasets/${id}/display`, send("PUT", channels)),
