@@ -508,6 +508,29 @@ table.stats tr.sel td { color: var(--fv-accent); }
 .palette .row .group { color: var(--fv-text-3); width: 52px; font-size: var(--fv-fs-sm); }
 .palette .row.active { background: var(--fv-accent-weak); color: var(--fv-text-1); }
 .shortcuts { display: grid; grid-template-columns: 1fr auto; row-gap: 7px; padding: 14px; font-size: var(--fv-fs-md); }
+.dialog.export { width: 580px; }
+.export-body { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 18px 14px; padding: 18px 16px 20px; }
+.export-body > .caps { line-height: 24px; }
+.export-cell { display: grid; gap: 8px; min-width: 0; align-content: start; font-size: var(--fv-fs-sm); color: var(--fv-text-1); }
+.export-cell > span { line-height: 24px; }
+.export-cell .seg { justify-self: start; }
+.check-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.export-inline { display: flex; align-items: center; gap: 14px; }
+.check-row {
+  height: 26px; display: inline-flex; align-items: center; gap: 9px; padding: 0 2px; text-align: left;
+  font-size: var(--fv-fs-sm); color: var(--fv-text-2); transition: color var(--fv-fast);
+}
+.check-row:hover, .check-row.on { color: var(--fv-text-1); }
+.check-row[disabled] { color: var(--fv-text-4); }
+.check-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.check-box {
+  width: 14px; height: 14px; flex: none; display: grid; place-items: center; border-radius: 3.5px;
+  border: 1.5px solid var(--fv-line-strong); background: var(--fv-bg);
+  transition: background-color var(--fv-fast), border-color var(--fv-fast), transform var(--fv-fast) var(--fv-ease-out);
+}
+.check-row:active .check-box { transform: scale(0.9); }
+.check-row.on .check-box { background: var(--fv-accent); border-color: var(--fv-accent); }
+.check-box .lucide { width: 11px; height: 11px; stroke-width: 2.5; color: var(--fv-accent-ink); }
 .shortcuts .kbd { margin-left: 0; justify-self: end; }
 .toast {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 60; max-width: 580px; padding: 9px 12px;

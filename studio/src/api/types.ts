@@ -166,6 +166,35 @@ export interface Patch {
   channels: number[][];
 }
 
+export type Box = [number, number, number, number];
+
+export interface FigureRequest {
+  box: Box;
+  display: Omit<SavedDisplay, "touched">[];
+  format: "png" | "tiff";
+  scale_bar: boolean;
+  labels: boolean;
+  regions: boolean;
+  notes: boolean;
+  dpi: number;
+}
+
+export interface RawRequest {
+  box: Box;
+}
+
+export interface ExportPlan {
+  level: number;
+  downsample: number;
+  /** full-resolution area, clipped to the image */
+  box: Box;
+  panels: ("composite" | number)[];
+  panel_width: number;
+  panel_height: number;
+  width: number;
+  height: number;
+}
+
 export type EngineEvent =
   | { type: "hello"; version: string }
   | { type: "build"; id: string; build: BuildInfo };

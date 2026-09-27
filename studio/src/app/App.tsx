@@ -10,6 +10,7 @@ import { Viewer } from "../viewer/Viewer";
 import { loadHistograms } from "./actions";
 import { CommandPalette, ShortcutsDialog } from "./CommandPalette";
 import { handleShortcut } from "./commands";
+import { ExportDialog } from "./ExportDialog";
 import { Inspector } from "./Inspector";
 import { OpenDialog } from "./OpenDialog";
 import { ProfilePanel } from "./ProfilePanel";
@@ -118,6 +119,7 @@ export function App() {
       {dialog === "open" && <OpenDialog />}
       {dialog === "palette" && <CommandPalette />}
       {dialog === "shortcuts" && <ShortcutsDialog />}
+      {dialog === "export" && <ExportDialog />}
       {notice && (
         <div className="toast" role="status">
           <span>{notice.text}</span>

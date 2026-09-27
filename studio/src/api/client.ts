@@ -1,6 +1,6 @@
 import type {
-  Annotation, DatasetInfo, EngineEvent, FsListing, Histogram, Measurement, Patch, Point, Profile, Project, Region,
-  RegionShape, SavedDisplay,
+  Annotation, DatasetInfo, EngineEvent, ExportPlan, FigureRequest, FsListing, Histogram, Measurement, Patch, Point,
+  Profile, Project, RawRequest, Region, RegionShape, SavedDisplay,
 } from "./types";
 
 const TOKEN_KEY = "fluoroview.token";
@@ -44,8 +44,10 @@ function send(method: "POST" | "PATCH" | "PUT" | "DELETE", body?: unknown): Requ
     : { method, body: JSON.stringify(body), headers: { "Content-Type": "application/json" } };
 }
 
-/** File name from a Content-Disposition header, if it gives one. */
+/** File name from a Content-Disposition header (plain or RFC 5987 encoded), if it gives one. */
 function attachmentName(header: string | null, fallback: string): string {
+  const encoded = /filename\*=utf-8''([^;]+)/i.exec(header ?? "")?.[1];
+  if (encoded) return decodeURIComponent(encoded);
   return /filename="([^"]+)"/.exec(header ?? "")?.[1] ?? fallback;
 }
 
@@ -76,6 +78,12 @@ export const project = {
   /** The regions CSV as the engine writes it, with the file name it suggests. */
   regionsCsv: (id: string) => download(`/datasets/${id}/measurements.csv`, "regions.csv"),
   profileCsv: (id: string, line: LineQuery) => download(`/datasets/${id}/profile.csv?${lineQuery(line)}`, "profile.csv"),
+  figurePlan: (id: string, body: FigureRequest) =>
+    request<ExportPlan>(`/datasets/${id}/figure`, send("POST", { ...body, plan_only: true })),
+  figure: (id: string, body: FigureRequest) => download(`/datasets/${id}/figure`, "figure", send("POST", body)),
+  rawPlan: (id: string, body: RawRequest) =>
+    request<ExportPlan>(`/datasets/${id}/export.ome.tif`, send("POST", { ...body, plan_only: true })),
+  raw: (id: string, body: RawRequest) => download(`/datasets/${id}/export.ome.tif`, "area.ome.tif", send("POST", body)),
 };
 
 interface LineQuery {
@@ -89,9 +97,18 @@ function lineQuery(l: LineQuery): string {
   return `x0=${l.x0}&y0=${l.y0}&x1=${l.x1}&y1=${l.y1}`;
 }
 
-async function download(path: string, fallback: string): Promise<{ blob: Blob; name: string }> {
-  const res = await fetch(`/api/v1${path}`, { headers: auth });
-  if (!res.ok) throw new ApiError(res.status, res.status === 409 ? "The image is still loading; try again in a moment." : res.statusText);
+async function download(path: string, fallback: string, init: RequestInit = {}): Promise<{ blob: Blob; name: string }> {
+  const res = await fetch(`/api/v1${path}`, { ...init, headers: { ...auth, ...init.headers } });
+  if (!res.ok) {
+    let detail = res.status === 409 ? "The image is still loading; try again in a moment." : res.statusText;
+    try {
+      const body = await res.json();
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // keep the status text
+    }
+    throw new ApiError(res.status, detail);
+  }
   return { blob: await res.blob(), name: attachmentName(res.headers.get("Content-Disposition"), fallback) };
 }
 

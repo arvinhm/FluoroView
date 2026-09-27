@@ -16,6 +16,8 @@ export interface ViewReadout {
   scale: number;
   level: number;
   cssPxPerImagePx: number;
+  /** visible image area x0, y0, x1, y1 in full-resolution pixels (may extend past the image) */
+  box: [number, number, number, number];
 }
 
 export interface CursorReadout {
@@ -39,7 +41,7 @@ export interface Options {
   loupe: boolean;
 }
 
-export type Dialog = "open" | "palette" | "shortcuts" | null;
+export type Dialog = "open" | "palette" | "shortcuts" | "export" | null;
 export type Accent = "champagne" | "ice" | "white";
 export type Page = "viewer" | "scans";
 export type Tool = "move" | "rectangle" | "ellipse" | "polygon" | "freehand" | "line" | "note";

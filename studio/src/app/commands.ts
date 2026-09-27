@@ -39,6 +39,8 @@ export function buildCommands(): Command[] {
       run: () => s.setPage(s.page === "scans" ? "viewer" : "scans") },
     { id: "export-regions", group: "File", title: "Export region measurements (CSV)", keys: "⌘E", disabled: !regions,
       run: () => id && void exportRegionsCsv(id) },
+    { id: "export-figure", group: "File", title: "Export figure…", keys: "⇧⌘E", disabled: none,
+      run: () => s.setDialog("export") },
     { id: "zoom-in", group: "View", title: "Zoom in", keys: "⌘=", disabled: none, run: () => runViewerCommand("zoom-in") },
     { id: "zoom-out", group: "View", title: "Zoom out", keys: "⌘−", disabled: none, run: () => runViewerCommand("zoom-out") },
     { id: "fit", group: "View", title: "Fit to window", keys: "⌘0", disabled: none, run: () => runViewerCommand("fit") },
@@ -113,7 +115,8 @@ export function handleShortcut(e: KeyboardEvent): void {
       runViewerCommand(cmd);
     } else if (key === "e" && id) {
       e.preventDefault();
-      void exportRegionsCsv(id);
+      if (e.shiftKey) s.setDialog("export");
+      else void exportRegionsCsv(id);
     }
     return;
   }

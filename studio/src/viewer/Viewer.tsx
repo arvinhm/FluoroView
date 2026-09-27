@@ -322,7 +322,10 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
     })) : [];
 
     const cssPerImage = main.cam.scale / vp.dpr;
-    setView({ scale: main.cam.scale, level: plans[0]!.level, cssPxPerImagePx: cssPerImage });
+    const covered = line && g === 0 ? PROFILE_DRAWER_CSS * vp.dpr : 0;
+    const [bx0, by0] = screenToImage(main.cam, main.vp, 0, 0);
+    const [bx1, by1] = screenToImage(main.cam, main.vp, main.vp.width, main.vp.height - covered);
+    setView({ scale: main.cam.scale, level: plans[0]!.level, cssPxPerImagePx: cssPerImage, box: [bx0, by0, bx1, by1] });
     const next: Overlay = {
       minimap,
       bar: ds.pixel_size_um ? scaleBar(ds.pixel_size_um / cssPerImage) : null,
