@@ -23,7 +23,8 @@ export interface TileRange {
 }
 
 export const MIN_SCALE_FACTOR = 0.5;
-export const MAX_SCALE = 64;
+/** 12,800%: deep enough to print each pixel's raw values inside it. */
+export const MAX_SCALE = 128;
 
 export function screenToImage(cam: Camera, vp: Viewport, sx: number, sy: number): [number, number] {
   return [cam.cx + (sx - vp.width / 2) / cam.scale, cam.cy + (sy - vp.height / 2) / cam.scale];

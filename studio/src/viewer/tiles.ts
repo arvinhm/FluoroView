@@ -8,6 +8,8 @@ const MAX_INFLIGHT = 8;
 const GPU_BUDGET_BYTES = 384 * 1024 * 1024;
 const CPU_TILES = 48;
 const FADE_MS = 180;
+/** While the view is moving, its passing frames wait behind the tiles of where it will stop. */
+const PASSING_PRIORITY = 1000;
 
 /** 0 = missing, 1 = partial (pyramid still building), 2 = final */
 type LayerState = 0 | 1 | 2;
@@ -45,6 +47,9 @@ export interface Plan {
   level: number;
   /** a tile is still fading in; keep drawing frames */
   fading: boolean;
+  /** tiles of `level` on screen, and how many of them are loaded and final in every visible channel */
+  total: number;
+  complete: number;
 }
 
 export function tileKey(level: number, ty: number, tx: number): string {
@@ -76,31 +81,37 @@ export class TileManager {
     return this.ds.levels.length - 1;
   }
 
-  /** Draw lists for several views sharing one set of tile requests (nearest to each centre first). */
-  planViews(views: View[], channels: number[], smoothMagnify: boolean): { plans: Plan[]; loading: number } {
+  /**
+   * Draw lists for several views sharing one set of tile requests (nearest to each centre first).
+   * `destination` views are where a moving view will come to rest: their tiles are requested ahead
+   * of the passing frames (and kept loading), so the view arrives at full resolution.
+   */
+  planViews(views: View[], channels: number[], smoothMagnify: boolean, destination: View[] = []):
+    { plans: Plan[]; loading: number } {
     this.frame++;
     const now = performance.now();
     const fadeMs = reducedMotion() ? 0 : FADE_MS;
     const wants = new Map<string, Want>();
-    const plans = views.map((v) => this.planOne(v, channels, smoothMagnify, now, fadeMs, wants));
+    for (const v of destination) this.want(v, channels, wants, 0, 0);
+    const offset = destination.length ? PASSING_PRIORITY : 0;
+    const plans = views.map((v) => this.planOne(v, channels, smoothMagnify, now, fadeMs, wants, offset));
     const list = [...wants.values()];
     this.schedule(list);
     this.evict();
     return { plans, loading: this.inflight.size + list.length };
   }
 
-  private planOne({ cam, vp }: View, channels: number[], smoothMagnify: boolean, now: number, fadeMs: number,
-    wants: Map<string, Want>): Plan {
+  /** Request what a view needs: the coarsest level (always first) and the view's own level. */
+  private want({ cam, vp }: View, channels: number[], wants: Map<string, Want>, offset: number, margin: number): number {
     const top = this.topLevel;
     const level = chooseLevel(cam.scale, this.ds.levels.length);
     const [cxT, cyT] = [cam.cx / 2 ** level / this.T, cam.cy / 2 ** level / this.T];
-
     for (const lvl of level === top ? [top] : [top, level]) {
       const info = this.ds.levels[lvl]!;
-      for (const [ty, tx] of each(visibleTiles(cam, vp, lvl, info.width, info.height, this.T, lvl === level ? 1 : 0))) {
+      for (const [ty, tx] of each(visibleTiles(cam, vp, lvl, info.width, info.height, this.T, lvl === level ? margin : 0))) {
         const t = this.tile(lvl, ty, tx);
         t.used = this.frame;
-        const priority = lvl === top ? -1 : Math.hypot(tx + 0.5 - cxT, ty + 0.5 - cyT);
+        const priority = lvl === top ? -1 : offset + Math.hypot(tx + 0.5 - cxT, ty + 0.5 - cyT);
         for (const c of channels) {
           if ((t.layers[c] === 0 && !t.pending[c]) || t.stale[c]) {
             const key = `${t.key}:${c}`;
@@ -110,17 +121,27 @@ export class TileManager {
         }
       }
     }
+    return level;
+  }
 
+  private planOne(view: View, channels: number[], smoothMagnify: boolean, now: number, fadeMs: number,
+    wants: Map<string, Want>, offset: number): Plan {
+    const { cam, vp } = view;
+    const level = this.want(view, channels, wants, offset, 1);
     const info = this.ds.levels[level]!;
     const under: DrawCall[] = [];
     const over: DrawCall[] = [];
     let fading = false;
+    let total = 0;
+    let complete = 0;
     const texelPx = cam.scale * 2 ** level;
     for (const [ty, tx] of each(visibleTiles(cam, vp, level, info.width, info.height, this.T))) {
       const t = this.tiles.get(tileKey(level, ty, tx));
       const rect = this.worldRect(level, ty, tx);
       const own = (alpha: number): DrawCall => ({ texture: t!.texture!, texSize: [t!.width, t!.height], rect,
         uv: [0, 0, t!.width, t!.height], smooth: texelPx < 1 || smoothMagnify, alpha });
+      total++;
+      if (t && this.complete(t, channels) && channels.every((c) => t.layers[c] === 2)) complete++;
       if (t && this.complete(t, channels)) {
         if (!t.shownAt) t.shownAt = now;
         const alpha = fadeMs ? Math.min(1, (now - t.shownAt) / fadeMs) : 1;
@@ -136,7 +157,7 @@ export class TileManager {
       if (fb) under.push(fb);
       else if (t?.texture && channels.some((c) => t.layers[c]! > 0)) over.push(own(1));
     }
-    return { draws: [...under, ...over], level, fading };
+    return { draws: [...under, ...over], level, fading, total, complete };
   }
 
   /** The nearest coarser tile that has every visible channel, cropped to this tile's area. */

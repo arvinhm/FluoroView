@@ -28,6 +28,7 @@ const MINIMAP_MARGIN_CSS = 12;
 const GRID_FROM_SCALE = 8;
 const GALLERY_MS = 320;
 const CLICK_SLOP_CSS = 3;
+const INERTIA_TAU_MS = 170;
 const SURFACE: [number, number, number] = [12 / 255, 13 / 255, 15 / 255];
 
 type Motion =
@@ -61,10 +62,13 @@ interface Overlay {
   avoid: Anchor[];
   note: { x: number; y: number } | null;
   size: Bounds;
+  /** resolution on screen: pyramid level shown and how many of its tiles are final */
+  res: { level: number; total: number; complete: number };
 }
 
 const EMPTY: Overlay = {
   minimap: null, bar: null, scan: null, labels: [], labelOpacity: 0, card: null, avoid: [], note: null, size: { w: 0, h: 0 },
+  res: { level: 0, total: 0, complete: 0 },
 };
 
 function uniformsFor(ds: DatasetInfo, display: ChannelDisplay[], channels: number[]): ChannelUniforms[] {
@@ -73,6 +77,28 @@ function uniformsFor(ds: DatasetInfo, display: ChannelDisplay[], channels: numbe
     const d = display[i]!;
     return { layer: i, lo: d.lo, hi: d.hi, gamma: d.gamma, color: hexToRgb(d.color), saturation };
   });
+}
+
+function ResolutionBadge({ res, onNative }: { res: Overlay["res"]; onNative: () => void }) {
+  if (res.total > 0 && res.complete < res.total) {
+    const pct = Math.floor((res.complete / res.total) * 100);
+    return (
+      <span className="res refining" title={`Loading full-resolution tiles: ${res.complete} of ${res.total}`}>
+        <span className="res-bar"><span style={{ width: `${pct}%` }} /></span>
+        {pct}%
+      </span>
+    );
+  }
+  if (res.level === 0) {
+    return <span className="res native" title="Every pixel on screen comes from the full-resolution scan">Native</span>;
+  }
+  const f = 2 ** res.level;
+  return (
+    <button className="res" onClick={onNative}
+      title={`Zoomed out: each pixel shown is the exact mean of ${f}×${f} original pixels. Click for native pixels (100%).`}>
+      1 : {f}
+    </button>
+  );
 }
 
 function accentColors(cache: { key: string; accent: string; ink: string } | null) {
@@ -161,7 +187,7 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       }
       case "inertia": {
         camera.current = clampCenter({ ...cam, cx: cam.cx + m.vx * dt, cy: cam.cy + m.vy * dt }, W, H);
-        const decay = Math.exp(-dt / 170);
+        const decay = Math.exp(-dt / INERTIA_TAU_MS);
         m.vx *= decay;
         m.vy *= decay;
         if (Math.hypot(m.vx, m.vy) * cam.scale < 0.015) motion.current = null;
@@ -173,6 +199,25 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       }
     }
     return motion.current !== null;
+  }, [W, H, zoomAtPoint]);
+
+  /** Where the current motion will come to rest, so its tiles can load on the way. */
+  const destination = useCallback((): Camera | null => {
+    const m = motion.current;
+    const cam = camera.current;
+    if (!m || !cam) return null;
+    switch (m.kind) {
+      case "flight":
+        return clampCenter(m.f.at(1), W, H);
+      case "zoom":
+        return zoomAtPoint(cam, m.sx, m.sy, m.target / cam.scale);
+      case "inertia":
+        return clampCenter({ ...cam, cx: cam.cx + m.vx * INERTIA_TAU_MS, cy: cam.cy + m.vy * INERTIA_TAU_MS }, W, H);
+      default: {
+        const unreachable: never = m;
+        throw new Error(`unknown motion ${JSON.stringify(unreachable)}`);
+      }
+    }
   }, [W, H, zoomAtPoint]);
 
   const draw = useCallback((now: number) => {
@@ -204,7 +249,12 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       vp: { width: p.rect.width, height: p.rect.height, dpr: vp.dpr },
     }));
 
-    const { plans } = tm.planViews(views, visible, opts.smooth);
+    const rest = destination();
+    const ahead = rest ? layout.map((p) => ({
+      cam: { ...rest, scale: rest.scale * panelShrink(p.rect, vp.width, vp.height) },
+      vp: { width: p.rect.width, height: p.rect.height, dpr: vp.dpr },
+    })) : [];
+    const { plans } = tm.planViews(views, visible, opts.smooth, ahead);
     r.resize(vp.width, vp.height);
     r.clear(undefined, g > 0 ? SURFACE : [0, 0, 0]);
     const composite = uniformsFor(ds, display, visible);
@@ -254,7 +304,12 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       }
       accent.current = accentColors(accent.current);
       const tc = tools.current;
-      drawOverlay(octx, layout.map((p, i) => ({ rect: p.rect, cam: views[i]!.cam })), {
+      const printed = (c: number) => ({ index: c, color: display[c]!.color });
+      drawOverlay(octx, layout.map((p, i) => ({
+        rect: p.rect, cam: views[i]!.cam, values: p.channel === null ? visible.map(printed) : [printed(p.channel)],
+      })), {
+        valueAt: (x, y, c) => tm.valueAt(x, y, c),
+        imageSize: [W, H],
         regions: scan.regions,
         background: scan.background,
         selected: pj.selection?.kind === "region" ? pj.selection.id : null,
@@ -336,10 +391,11 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       avoid,
       note,
       size: { w: css(vp.width), h: css(vp.height) - (line ? PROFILE_DRAWER_CSS : 0) },
+      res: { level: plans[0]!.level, total: plans[0]!.total, complete: plans[0]!.complete },
     };
     setOverlay((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     if (animating) requestFrameRef.current();
-  }, [W, H, setView, stepMotion]);
+  }, [W, H, setView, stepMotion, destination]);
 
   const requestFrameRef = useRef<() => void>(() => undefined);
   const requestFrame = useCallback(() => {
@@ -744,6 +800,8 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       {overlay.note && !drawing && <NotePopover ds={dataset} at={overlay.note} bounds={overlay.size} />}
       {options.loupe && <Loupe ds={dataset} bounds={overlay.size} />}
       <div className="zoom viewer-ui" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+        <ResolutionBadge res={overlay.res} onNative={() => command("actual")} />
+        <span className="zoom-sep" />
         <button className={`ib${options.gallery ? " on" : ""}`} title="Channel gallery (G)"
           onClick={() => setOption("gallery", !options.gallery)}><LayoutGrid /></button>
         <span className="zoom-sep" />

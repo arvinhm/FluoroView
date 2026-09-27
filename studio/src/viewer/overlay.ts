@@ -12,6 +12,8 @@ import type { Draft } from "./tools";
 export interface OverlayPanel {
   rect: Rect;
   cam: Camera;
+  /** channels whose raw values are printed in each pixel at deep zoom */
+  values: { index: number; color: string }[];
 }
 
 /** Height of the line-profile drawer over the bottom of the viewer, CSS px. */
@@ -65,6 +67,9 @@ export function placeBeside(target: Anchor, w: number, h: number, bounds: Bounds
 }
 
 export interface OverlayScene {
+  /** raw full-resolution value, or null when that tile is not loaded */
+  valueAt: (x: number, y: number, c: number) => number | null;
+  imageSize: [number, number];
   regions: readonly Region[];
   background: string | null;
   selected: string | null;
@@ -91,6 +96,9 @@ const FONT = '"IBM Plex Sans", -apple-system, system-ui, sans-serif';
 const MONO = '"IBM Plex Mono", ui-monospace, monospace';
 /** Regions narrower than this (CSS px) on screen get no name label. */
 const LABEL_MIN_CSS = 44;
+/** Pixels at least this wide (CSS px) show their raw values; one line per channel that fits. */
+export const VALUES_FROM_CSS = 32;
+const VALUE_LINE_CSS = 11.5;
 
 export class PanelView {
   constructor(readonly rect: Rect, readonly cam: Camera) {}
@@ -340,6 +348,46 @@ function drawNotes(ctx: CanvasRenderingContext2D, v: PanelView, s: OverlayScene)
   ctx.textAlign = "start";
 }
 
+/** Raw values written inside each pixel, one line per channel in its colour, over a dark halo. */
+function drawPixelValues(ctx: CanvasRenderingContext2D, v: PanelView, s: OverlayScene,
+  channels: OverlayPanel["values"]): void {
+  const d = s.dpr;
+  const cellCss = v.cam.scale / d;
+  if (!channels.length || cellCss < VALUES_FROM_CSS) return;
+  const lines = Math.min(channels.length, Math.floor((cellCss - 6) / VALUE_LINE_CSS));
+  if (lines < 1) return;
+  const shown = channels.slice(0, lines);
+  const [bx0, by0, bx1, by1] = v.bounds();
+  const [w, h] = s.imageSize;
+  const x0 = Math.max(0, Math.floor(bx0));
+  const y0 = Math.max(0, Math.floor(by0));
+  const x1 = Math.min(w - 1, Math.floor(bx1));
+  const y1 = Math.min(h - 1, Math.floor(by1));
+  const lineH = VALUE_LINE_CSS * d;
+  ctx.font = `500 ${Math.min(11, 7 + cellCss / 16) * d}px ${MONO}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 3 * d;
+  ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const cx = v.x(x + 0.5);
+      const cy = v.y(y + 0.5);
+      shown.forEach((ch, i) => {
+        const value = s.valueAt(x, y, ch.index);
+        if (value === null) return;
+        const ty = cy + (i - (shown.length - 1) / 2) * lineH;
+        const text = String(value);
+        ctx.strokeText(text, cx, ty);
+        ctx.fillStyle = ch.color;
+        ctx.fillText(text, cx, ty);
+      });
+    }
+  }
+  ctx.textAlign = "start";
+}
+
 export function drawOverlay(ctx: CanvasRenderingContext2D, panels: readonly OverlayPanel[], s: OverlayScene): void {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   for (const p of panels) {
@@ -348,6 +396,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, panels: readonly Over
     ctx.beginPath();
     ctx.rect(p.rect.x, p.rect.y, p.rect.width, p.rect.height);
     ctx.clip();
+    drawPixelValues(ctx, v, s, p.values);
     drawRegions(ctx, v, s);
     if (s.line) drawLine(ctx, v, s.line, s);
     if (s.marker) {

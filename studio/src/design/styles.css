@@ -426,6 +426,19 @@ table.stats tr.sel td { color: var(--fv-accent); }
   border-radius: var(--fv-r-1); transition: background-color var(--fv-fast);
 }
 .zoom-value:hover { background: var(--fv-surface-3); }
+.res {
+  height: 24px; min-width: 64px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 9px;
+  font: 600 9.5px / 1 var(--fv-font-ui); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap;
+  color: var(--fv-text-3); border-radius: var(--fv-r-1); transition: color var(--fv-base), background-color var(--fv-fast);
+  animation: fv-fade var(--fv-base) var(--fv-ease-out);
+}
+button.res { font-family: var(--fv-font-num); letter-spacing: 0.02em; text-transform: none; font-size: var(--fv-fs-sm); font-weight: 500; }
+button.res:hover { color: var(--fv-text-1); background: var(--fv-surface-3); }
+.res.native { color: var(--fv-accent); }
+.res.native::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--fv-accent); box-shadow: 0 0 0 3px var(--fv-accent-weak); }
+.res.refining { font-family: var(--fv-font-num); letter-spacing: 0; color: var(--fv-text-2); }
+.res-bar { width: 28px; height: 2px; border-radius: 1px; background: var(--fv-surface-4); overflow: hidden; }
+.res-bar span { display: block; height: 100%; background: var(--fv-accent); transition: width var(--fv-base) var(--fv-ease-out); }
 .scan-curtain { position: absolute; left: 0; top: 0; background: var(--fv-canvas); pointer-events: none; will-change: transform, height; }
 .scanline { position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--fv-accent); }
 .scanline::before {
