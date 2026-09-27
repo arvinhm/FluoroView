@@ -125,6 +125,103 @@ def new_region(req: RegionIn, index: int) -> dict:
     }
 
 
+def imagej_angle(dx: float, dy: float) -> float:
+    """Direction of (dx, dy) in image coordinates (y down) as ImageJ reports it: degrees 0–180, y up."""
+    return math.degrees(math.atan2(-dy, dx)) % 180.0
+
+
+def _box(points) -> tuple[float, float, float, float]:
+    (xa, ya), (xb, yb) = points
+    return min(xa, xb), min(ya, yb), max(xa, xb), max(ya, yb)
+
+
+def perimeter(shape: str, points) -> float:
+    """Length of the outline: exact for rectangles and polygons, Ramanujan's approximation for ellipses."""
+    if shape in ("rectangle", "ellipse"):
+        x0, y0, x1, y1 = _box(points)
+        if shape == "rectangle":
+            return 2.0 * ((x1 - x0) + (y1 - y0))
+        a, b = (x1 - x0) / 2.0, (y1 - y0) / 2.0
+        return math.pi * (3.0 * (a + b) - math.sqrt((3.0 * a + b) * (a + 3.0 * b)))
+    pts = np.asarray(points, dtype=np.float64)
+    return float(np.hypot(*(np.roll(pts, -1, axis=0) - pts).T).sum())
+
+
+def geometric_area(shape: str, points) -> float:
+    if shape in ("rectangle", "ellipse"):
+        x0, y0, x1, y1 = _box(points)
+        return (x1 - x0) * (y1 - y0) * (1.0 if shape == "rectangle" else math.pi / 4.0)
+    pts = np.asarray(points, dtype=np.float64)
+    x, y = pts[:, 0], pts[:, 1]
+    return float(abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))) / 2.0)
+
+
+def convex_hull(pts: np.ndarray) -> np.ndarray:
+    """Vertices of the convex hull, counter-clockwise (Andrew's monotone chain)."""
+    p = np.unique(np.asarray(pts, dtype=np.float64), axis=0)
+    if len(p) < 3:
+        return p
+
+    def turns_left(a, b, q) -> bool:
+        return (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]) > 0
+
+    def half(seq: np.ndarray) -> list:
+        out: list = []
+        for q in seq:
+            while len(out) >= 2 and not turns_left(out[-2], out[-1], q):
+                out.pop()
+            out.append(q)
+        return out
+
+    lower, upper = half(p), half(p[::-1])
+    return np.array(lower[:-1] + upper[:-1])
+
+
+def solidity(shape: str, points) -> float:
+    """Area over the area of the convex hull (1 for convex shapes)."""
+    if shape in ("rectangle", "ellipse"):
+        return 1.0
+    hull = convex_hull(np.asarray(points, dtype=np.float64))
+    hull_area = geometric_area("polygon", hull) if len(hull) >= 3 else 0.0
+    return geometric_area(shape, points) / hull_area if hull_area > 0 else 1.0
+
+
+def feret(shape: str, points) -> tuple[float, float, float]:
+    """Maximum caliper diameter, its angle (ImageJ convention) and the minimum caliper width."""
+    if shape in ("rectangle", "ellipse"):
+        x0, y0, x1, y1 = _box(points)
+        w, h = x1 - x0, y1 - y0
+        if shape == "ellipse":
+            return (w, 0.0, h) if w >= h else (h, 90.0, w)
+        return math.hypot(w, h), imagej_angle(w, -h), min(w, h)
+    hull = convex_hull(np.asarray(points, dtype=np.float64))
+    if len(hull) < 2:
+        return 0.0, 0.0, 0.0
+    n, chunk = len(hull), 256
+    best, pair = 0.0, (hull[0], hull[0])
+    for i in range(0, n, chunk):
+        diff = hull[i:i + chunk, None, :] - hull[None, :, :]
+        d = np.hypot(diff[..., 0], diff[..., 1])
+        k = int(np.argmax(d))
+        if d.flat[k] > best:
+            a, b = divmod(k, n)
+            best, pair = float(d.flat[k]), (hull[i + a], hull[b])
+    (ax, ay), (bx, by) = pair
+    if bx < ax:
+        ax, ay, bx, by = bx, by, ax, ay
+    if n < 3:
+        return best, imagej_angle(bx - ax, by - ay), 0.0
+    edges = np.roll(hull, -1, axis=0) - hull
+    lengths = np.hypot(edges[:, 0], edges[:, 1])
+    width = math.inf
+    for i in range(0, n, chunk):
+        e = edges[i:i + chunk]
+        rel = hull[None, :, :] - hull[i:i + chunk, None, :]
+        spans = np.abs(e[:, 0, None] * rel[..., 1] - e[:, 1, None] * rel[..., 0]).max(axis=1) / lengths[i:i + chunk]
+        width = min(width, float(spans.min()))
+    return best, imagej_angle(bx - ax, by - ay), width
+
+
 def bounds(shape: str, points, width: int, height: int) -> tuple[int, int, int, int] | None:
     """Integer pixel box [x0, x1) x [y0, y1) that holds every included pixel, clipped to the image."""
     pts = np.asarray(points, dtype=np.float64)
