@@ -315,6 +315,15 @@ export function measure(dsId: string, rid: string): void {
   pump();
 }
 
+/** Forget a scan's measurements (their µm values change with Set Scale); they are re-requested when shown. */
+export function clearMeasurements(dsId: string): void {
+  useProject.setState((s) => ({
+    measures: Object.fromEntries(Object.entries(s.measures).filter(([k]) => !k.startsWith(`${dsId}/`))),
+  }));
+  const line = useProject.getState().line;
+  if (line?.dsId === dsId) setLine(dsId, line);
+}
+
 export function measureAll(dsId: string): void {
   for (const r of scanOf(dsId).regions) measure(dsId, r.id);
 }

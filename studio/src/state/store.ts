@@ -44,7 +44,7 @@ export interface Options {
   loupe: boolean;
 }
 
-export type Dialog = "open" | "palette" | "shortcuts" | "export" | "save-session" | null;
+export type Dialog = "open" | "palette" | "shortcuts" | "export" | "save-session" | "set-scale" | null;
 
 /** A session being opened onto an image that already has regions or notes. */
 export interface SessionPrompt {

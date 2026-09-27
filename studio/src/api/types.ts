@@ -36,7 +36,10 @@ export interface DatasetInfo {
   height: number;
   dtype: string;
   channels: ChannelInfo[];
+  /** µm per pixel in use: the user's calibration (Set Scale) if set, else the file's */
   pixel_size_um: number | null;
+  file_pixel_size_um: number | null;
+  pixel_size_source: "user" | "file" | null;
   saturation: number | null;
   layout: string;
   vendor: string;

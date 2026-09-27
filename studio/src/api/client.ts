@@ -65,6 +65,9 @@ export const project = {
   setBackground: (id: string, rid: string | null) =>
     request<{ background_region: string | null }>(`/datasets/${id}/background`, send("PUT", { region_id: rid })),
   saveDisplay: (id: string, channels: SavedDisplay[]) => request<{ saved: number }>(`/datasets/${id}/display`, send("PUT", channels)),
+  /** Set Scale: µm per pixel, or null to go back to the file's pixel size. */
+  setCalibration: (id: string, pixelSizeUm: number | null) =>
+    request<{ pixel_size_um: number | null }>(`/datasets/${id}/calibration`, send("PUT", { pixel_size_um: pixelSizeUm })),
   measurement: (id: string, rid: string, signal?: AbortSignal) =>
     request<Measurement>(`/datasets/${id}/regions/${rid}/measurement`, { signal }),
   createNote: (id: string, body: { x: number; y: number; text: string; author: string | null; region_id?: string | null }) =>

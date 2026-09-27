@@ -19,6 +19,7 @@ import { ProjectPanel } from "./ProjectPanel";
 import { SaveSessionDialog } from "./SaveSessionDialog";
 import { ScanGallery } from "./ScanGallery";
 import { SessionPrompt } from "./SessionPrompt";
+import { SetScaleDialog } from "./SetScaleDialog";
 import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
 
@@ -106,6 +107,7 @@ export function App() {
       {dialog === "shortcuts" && <ShortcutsDialog />}
       {dialog === "export" && <ExportDialog />}
       {dialog === "save-session" && <SaveSessionDialog />}
+      {dialog === "set-scale" && <SetScaleDialog />}
       <SessionPrompt />
       {notice && (
         <div className="toast" role="status">

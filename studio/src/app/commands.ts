@@ -60,6 +60,7 @@ export function buildCommands(): Command[] {
     })),
     { id: "auto", group: "Image", title: "Auto contrast, all channels", keys: "A", disabled: none,
       run: () => id && s.autoContrast(id) },
+    { id: "set-scale", group: "Image", title: "Set scale…", disabled: none, run: () => s.setDialog("set-scale") },
   ];
   ds?.channels.slice(0, 9).forEach((ch, i) => {
     commands.push({
