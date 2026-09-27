@@ -12,46 +12,55 @@ from typing import Literal
 
 import numba as nb
 import numpy as np
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, FiniteFloat
 
 from .projects import now_iso
 
 Shape = Literal["rectangle", "ellipse", "polygon", "freehand"]
+Point = tuple[FiniteFloat, FiniteFloat]
 REGION_COLOR = "#ffffff"
+COLOR = r"^#[0-9a-fA-F]{6}$"
+ITEM_ID = r"^[0-9a-f]{12}$"
 
 
 class RegionIn(BaseModel):
     shape: Shape
-    points: list[tuple[float, float]] = Field(min_length=2, max_length=20000)
+    points: list[Point] = Field(min_length=2, max_length=20000)
     name: str | None = Field(default=None, max_length=200)
-    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    color: str | None = Field(default=None, pattern=COLOR)
     author: str | None = Field(default=None, max_length=200)
-
-    @field_validator("points")
-    @classmethod
-    def finite(cls, pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        if not all(math.isfinite(x) and math.isfinite(y) for x, y in pts):
-            raise ValueError("points must be finite numbers")
-        return pts
 
 
 class RegionPatch(BaseModel):
     name: str | None = Field(default=None, max_length=200)
-    points: list[tuple[float, float]] | None = Field(default=None, min_length=2, max_length=20000)
-    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    points: list[Point] | None = Field(default=None, min_length=2, max_length=20000)
+    color: str | None = Field(default=None, pattern=COLOR)
+
+
+class RegionRestore(BaseModel):
+    """A region exactly as it was (same id), to undo a deletion or load a saved session."""
+
+    id: str = Field(pattern=ITEM_ID)
+    name: str = Field(min_length=1, max_length=200)
+    shape: Shape
+    points: list[Point] = Field(min_length=2, max_length=20000)
+    color: str = Field(pattern=COLOR)
+    created: str = Field(max_length=40)
+    modified: str = Field(max_length=40)
+    author: str | None = Field(default=None, max_length=200)
 
 
 class AnnotationIn(BaseModel):
-    x: float
-    y: float
+    x: FiniteFloat
+    y: FiniteFloat
     text: str = Field(min_length=1, max_length=5000)
     author: str | None = Field(default=None, max_length=200)
     region_id: str | None = None
 
 
 class AnnotationPatch(BaseModel):
-    x: float | None = None
-    y: float | None = None
+    x: FiniteFloat | None = None
+    y: FiniteFloat | None = None
     text: str | None = Field(default=None, min_length=1, max_length=5000)
     region_id: str | None = None
 
@@ -61,9 +70,26 @@ class ReplyIn(BaseModel):
     author: str | None = Field(default=None, max_length=200)
 
 
+class ReplyRestore(ReplyIn):
+    id: str = Field(pattern=ITEM_ID)
+    created: str = Field(max_length=40)
+
+
+class AnnotationRestore(BaseModel):
+    """A note exactly as it was, with its author and replies."""
+
+    id: str = Field(pattern=ITEM_ID)
+    x: FiniteFloat
+    y: FiniteFloat
+    text: str = Field(min_length=1, max_length=5000)
+    author: str | None = Field(default=None, max_length=200)
+    region_id: str | None = Field(default=None, pattern=ITEM_ID)
+    created: str = Field(max_length=40)
+    modified: str = Field(max_length=40)
+    replies: list[ReplyRestore] = Field(default_factory=list, max_length=1000)
+
+
 def new_annotation(req: AnnotationIn) -> dict:
-    if not (math.isfinite(req.x) and math.isfinite(req.y)):
-        raise ValueError("position must be finite")
     stamp = now_iso()
     return {"id": uuid.uuid4().hex[:12], "x": req.x, "y": req.y, "text": req.text.strip(), "author": req.author,
             "region_id": req.region_id, "created": stamp, "modified": stamp, "replies": []}

@@ -11,7 +11,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, FiniteFloat
 from starlette.background import BackgroundTask
 
 from ..datasets import Dataset, NotReady, Registry
@@ -20,10 +20,13 @@ from ..measure import measure_region, rows_for_scan, to_csv
 from ..profile import line_profile, profile_csv
 from ..projects import ProjectStore, now_iso
 from ..regions import (
+    COLOR,
     AnnotationIn,
     AnnotationPatch,
+    AnnotationRestore,
     RegionIn,
     RegionPatch,
+    RegionRestore,
     ReplyIn,
     new_annotation,
     new_region,
@@ -34,10 +37,10 @@ from ..regions import (
 
 class DisplayChannel(BaseModel):
     visible: bool
-    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}$")
-    lo: float
-    hi: float
-    gamma: float = Field(gt=0, le=10)
+    color: str = Field(pattern=COLOR)
+    lo: FiniteFloat
+    hi: FiniteFloat
+    gamma: FiniteFloat = Field(gt=0, le=10)
     touched: bool = True
     """False when the window is still the automatic one, so the studio may refine it."""
 
@@ -46,7 +49,7 @@ class BackgroundIn(BaseModel):
     region_id: str | None
 
 
-Box = tuple[float, float, float, float]
+Box = tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat]
 
 
 class FigureIn(BaseModel):
@@ -181,6 +184,25 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
 
         return projects.update(*where(ds), change)
 
+    @router.post("/regions/restore")
+    def restore_region(ds_id: str, req: RegionRestore) -> dict:
+        """Put back a region with its original id, so notes linked to it stay linked."""
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            if any(r["id"] == req.id for r in state["regions"]):
+                raise HTTPException(409, "a region with this id already exists")
+            try:
+                validate_shape(req.shape, req.points)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
+            region = req.model_dump()
+            region["points"] = [[float(x), float(y)] for x, y in req.points]
+            state["regions"].append(region)
+            return region
+
+        return projects.update(*where(ds), change)
+
     @router.put("/background")
     def set_background(ds_id: str, req: BackgroundIn) -> dict:
         ds = dataset(ds_id)
@@ -226,10 +248,7 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
         def change(state: dict) -> dict:
             if req.region_id is not None:
                 find(state, req.region_id)
-            try:
-                note = new_annotation(req)
-            except ValueError as exc:
-                raise HTTPException(422, str(exc)) from None
+            note = new_annotation(req)
             state["annotations"].append(note)
             return note
 
@@ -267,6 +286,20 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
 
         return projects.update(*where(ds), change)
 
+    @router.post("/annotations/restore")
+    def restore_annotation(ds_id: str, req: AnnotationRestore) -> dict:
+        """Put back a note exactly as it was, with its author and replies."""
+        ds = dataset(ds_id)
+
+        def change(state: dict) -> dict:
+            if any(a["id"] == req.id for a in state["annotations"]):
+                raise HTTPException(409, "a note with this id already exists")
+            note = req.model_dump()
+            state["annotations"].append(note)
+            return note
+
+        return projects.update(*where(ds), change)
+
     @router.post("/annotations/{aid}/replies")
     def reply(ds_id: str, aid: str, req: ReplyIn) -> dict:
         ds = dataset(ds_id)
@@ -282,6 +315,8 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
     def profile_of(ds: Dataset, x0: float, y0: float, x1: float, y1: float, max_samples: int) -> dict:
         try:
             return line_profile(ds, x0, y0, x1, y1, max_samples)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
         except NotReady:
             raise HTTPException(409, "the image is still loading; try again in a moment") from None
 

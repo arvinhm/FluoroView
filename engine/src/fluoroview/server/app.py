@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import math
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, Response
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -29,6 +32,17 @@ _NOT_BUILT = """<!doctype html><meta charset="utf-8"><title>FluoroView</title>
 <body style="background:#0b0c0e;color:#e6e7e9;font:13px -apple-system,system-ui,sans-serif;padding:32px">
 <p>The FluoroView studio has not been built.</p>
 <pre style="color:#a2a5ac">cd studio &amp;&amp; npm install &amp;&amp; npm run build</pre></body>"""
+
+
+def _json_safe(value):
+    """NaN and Infinity are not JSON; show them as text so an error about them can still be sent."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 class OpenRequest(BaseModel):
@@ -57,6 +71,10 @@ def create_app(settings: Settings) -> FastAPI:
     app.state.events = events
     app.state.settings = settings
     app.add_middleware(LocalAccessMiddleware, token=settings.token, allowed_hosts=settings.allowed_hosts)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_failed(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
     api = APIRouter(prefix="/api/v1")
 

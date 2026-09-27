@@ -62,6 +62,6 @@ class ProjectStore:
             state["updated"] = now_iso()
             path = self._file(folder)
             tmp = path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(data, indent=1))
+            tmp.write_text(json.dumps(data, indent=1, allow_nan=False))
             os.replace(tmp, path)
             return result
