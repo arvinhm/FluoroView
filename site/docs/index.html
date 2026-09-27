@@ -48,9 +48,16 @@
 
           <h2 id="channels">Channels and display</h2>
           <p>
-            Each channel has its exact histogram over the whole scan, a display range and a gamma. The display never
-            changes the data: statistics and exports always use the raw values.
+            Each channel has its exact histogram over the whole scan. The display never changes the data: statistics
+            and exports always use the raw values.
           </p>
+          <ul>
+            <li><strong>Levels.</strong> Drag the black, midtone and white handles on the histogram, or type Min, Max and γ.</li>
+            <li><strong>Colour.</strong> The swatch beside the channel name offers fluorescence colours, any colour, the colour maps Grays, Fire, Ice, Viridis, Magma and Inferno, and Invert.</li>
+            <li><strong>Adjust.</strong> Brightness and Contrast move and narrow the display window, as in ImageJ; Intensity lowers the channel's output level; Curves shapes its tone curve: click to add a point, drag to shape, double-click to remove.</li>
+            <li><strong>Add or Max.</strong> Beside Auto contrast: channels are summed, or each pixel shows its brightest channel.</li>
+          </ul>
+          <p>Display settings are saved with the scan and in sessions, and exported figures use exactly the same mapping.</p>
           <ul>
             <li><kbd>1</kbd>–<kbd>9</kbd> show or hide a channel; <kbd>⇧</kbd><kbd>1</kbd>–<kbd>9</kbd> show only that channel.</li>
             <li><kbd>C</kbd> highlights clipped pixels; <kbd>⇧</kbd><kbd>L</kbd> draws histograms on a log scale.</li>
