@@ -1,11 +1,22 @@
+# Python
 __pycache__/
-*.pyc
-.DS_Store
+*.py[cod]
+.venv/
 *.egg-info/
+.pytest_cache/
+.ruff_cache/
 dist/
 build/
-.fluoroview_versions/
-example/
-.pytest_cache/
+
+# Node
 node_modules/
+studio/dist/
+
+# Studio build bundled into the engine package
+engine/src/fluoroview/_studio/
+
+# OS
+.DS_Store
+
+# Local working notes
 PROJECT_MEMORY.md

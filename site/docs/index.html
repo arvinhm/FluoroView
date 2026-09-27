@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Docs · FluoroView</title>
+    <meta name="description" content="How to use FluoroView 4: channels, regions, measurements, Cell Counter, line profiles, sessions, figures, shortcuts and CSV columns." />
+    <meta name="theme-color" content="#070708" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <!-- @header -->
+    <main class="wrap">
+      <header class="page-h">
+        <p class="eyebrow">Docs</p>
+        <h1>Using FluoroView</h1>
+        <p class="lede">Everything the studio does, how it measures, and what each exported column means.</p>
+      </header>
+
+      <div class="doc">
+        <nav class="doc-index" aria-label="On this page">
+          <a href="#quick-start">Quick start</a>
+          <a href="#channels">Channels and display</a>
+          <a href="#regions">Regions</a>
+          <a href="#measurements">Measurements</a>
+          <a href="#operations">Region operations</a>
+          <a href="#exchange">ImageJ and QuPath</a>
+          <a href="#counter">Cell Counter</a>
+          <a href="#profile">Line profile</a>
+          <a href="#scale">Scale</a>
+          <a href="#notes">Notes</a>
+          <a href="#sessions">Sessions</a>
+          <a href="#figures">Figures</a>
+          <a href="#shortcuts">Keyboard shortcuts</a>
+          <a href="#csv">CSV reference</a>
+        </nav>
+
+        <div class="prose">
+          <h2 id="quick-start">Quick start</h2>
+          <p>
+            Open a scan with <strong>File › Open…</strong> (<kbd>⌘</kbd><kbd>O</kbd>), or start FluoroView with its path.
+            Turn channels on and off with <kbd>1</kbd>–<kbd>9</kbd>; <kbd>A</kbd> sets every channel's display range
+            from its histogram. Press <kbd>R</kbd> and drag to draw a rectangle: its measurements appear beside it.
+            <kbd>⌘</kbd><kbd>E</kbd> exports every region's measurements as CSV, and <kbd>⌘</kbd><kbd>S</kbd> saves the
+            whole session.
+          </p>
+
+          <h2 id="channels">Channels and display</h2>
+          <p>
+            Each channel has its exact histogram over the whole scan, a display range and a gamma. The display never
+            changes the data: statistics and exports always use the raw values.
+          </p>
+          <ul>
+            <li><kbd>1</kbd>–<kbd>9</kbd> show or hide a channel; <kbd>⇧</kbd><kbd>1</kbd>–<kbd>9</kbd> show only that channel.</li>
+            <li><kbd>C</kbd> highlights clipped pixels; <kbd>⇧</kbd><kbd>L</kbd> draws histograms on a log scale.</li>
+            <li><kbd>G</kbd> opens the channel gallery: each visible channel beside the composite, at the same position and zoom.</li>
+            <li><kbd>Z</kbd> shows the pixel loupe; <kbd>M</kbd> the minimap; <kbd>⇧</kbd><kbd>G</kbd> a pixel grid from 800%.</li>
+          </ul>
+          <p>
+            The badge at the bottom right reads <strong>Native</strong> when the screen shows the scan's own pixels.
+            From 3,200%, each pixel prints its raw value for the visible channels; the view goes up to 12,800%.
+          </p>
+
+          <h2 id="regions">Regions</h2>
+          <table>
+            <thead><tr><th>Tool</th><th>How</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>R</kbd> Rectangle</td><td>Drag. <kbd>⇧</kbd> keeps it square, <kbd>⌥</kbd> draws from the centre.</td></tr>
+              <tr><td><kbd>E</kbd> Ellipse</td><td>Drag. <kbd>⇧</kbd> keeps it round, <kbd>⌥</kbd> draws from the centre.</td></tr>
+              <tr><td><kbd>P</kbd> Polygon</td><td>Click each corner; <kbd>Enter</kbd> or a double-click closes it, <kbd>⌫</kbd> removes the last point.</td></tr>
+              <tr><td><kbd>F</kbd> Freehand</td><td>Drag around the area; releasing closes it.</td></tr>
+            </tbody>
+          </table>
+          <p>
+            Drawing tools return to <kbd>V</kbd> Move after each shape. In Move, drag a region to move it and its
+            handles to reshape it; the arrow keys nudge it by one pixel (<kbd>⇧</kbd>: ten). Double-click a region to
+            zoom to it; <kbd>⌫</kbd> deletes it, with Undo in the notice. Space-drag or middle-drag pans while drawing.
+          </p>
+          <p class="note">
+            A pixel belongs to a region when its centre lies inside it. Rectangles are half-open, so neighbouring
+            regions never share a pixel; polygons follow the even-odd rule.
+          </p>
+
+          <h2 id="measurements">Measurements</h2>
+          <p>
+            The card beside the selected region shows its area, shape and each visible channel's mean and SD, computed
+            on the raw full-resolution pixels; hover a channel for the rest. <strong>Use as background</strong> makes a
+            region the background: its mean is subtracted in the CSV's <code>mean_minus_background</code> column.
+          </p>
+          <ul>
+            <li>Perimeter is exact for rectangles and polygons (every outline, holes included) and uses Ramanujan's approximation for ellipses.</li>
+            <li>The fitted ellipse comes from the pixels' second moments, scaled to their area, as in ImageJ's Fit Ellipse.</li>
+            <li>Angles run from 0 to 180° with y pointing up, as in ImageJ.</li>
+            <li>Circularity is 4π·area / perimeter², roundness 4·area / (π·major²), solidity area / convex hull area.</li>
+            <li>Skewness and kurtosis are population moments; kurtosis is excess kurtosis (0 for a normal distribution). Ties for the mode go to the lowest value.</li>
+            <li><code>sum</code> is ImageJ's RawIntDen; <code>int_den</code> is area × mean, in µm² when the scale is known.</li>
+          </ul>
+
+          <h2 id="operations">Region operations</h2>
+          <p>
+            Select several regions with <kbd>⇧</kbd>-click in the image or <kbd>⇧</kbd>/<kbd>⌘</kbd>-click in the Regions
+            list; <kbd>⌘</kbd><kbd>A</kbd> selects all. The <strong>Region</strong> menu, the command palette and the bar
+            above the list then offer:
+          </p>
+          <table>
+            <thead><tr><th>Operation</th><th>Result</th></tr></thead>
+            <tbody>
+              <tr><td>Union</td><td>Pixels in any of the selected regions.</td></tr>
+              <tr><td>Intersect</td><td>Pixels in all of them.</td></tr>
+              <tr><td>Exclusive or</td><td>Pixels in an odd number of them.</td></tr>
+              <tr><td>Subtract</td><td>The first region selected, minus the others.</td></tr>
+              <tr><td>Enlarge or shrink…</td><td>By µm or px. Rectangles and ellipses keep their shape; other shapes grow with rounded corners.</td></tr>
+              <tr><td>Convex hull</td><td>The smallest convex shape around the region.</td></tr>
+              <tr><td>Fit ellipse</td><td>The ellipse with the region's area, centroid and orientation.</td></tr>
+              <tr><td>Specify…</td><td>A rectangle or ellipse from exact x, y, width and height, in px or µm.</td></tr>
+            </tbody>
+          </table>
+          <p>
+            Each result is a new region named after its sources, such as “Tissue − Lumen”; the originals are kept.
+            Results can have holes and several parts, and move as a whole.
+          </p>
+
+          <h2 id="exchange">ImageJ and QuPath</h2>
+          <p>
+            <strong>Region › Import regions (ImageJ, QuPath)…</strong>, or <strong>Import</strong> in the Regions tab,
+            reads an ImageJ <code>.roi</code> or <code>RoiSet.zip</code>, or a QuPath GeoJSON file. Its regions are
+            added to the scan's regions and selected. <strong>Export ImageJ RoiSet (.zip)</strong> and
+            <strong>Export QuPath GeoJSON</strong> in the same menu write every region.
+          </p>
+          <table>
+            <thead><tr><th>FluoroView</th><th>ImageJ</th><th>QuPath</th></tr></thead>
+            <tbody>
+              <tr><td>Rectangle</td><td>Rectangle ROI</td><td>Polygon</td></tr>
+              <tr><td>Ellipse</td><td>Oval ROI</td><td>Polygon of the same area</td></tr>
+              <tr><td>Polygon, freehand</td><td>Polygon, freehand ROI, sub-pixel</td><td>Polygon</td></tr>
+              <tr><td>Holes and several parts</td><td>Composite ROI</td><td>Polygon with holes, MultiPolygon</td></tr>
+            </tbody>
+          </table>
+          <p>
+            Rotated rectangles and ImageJ ellipses arrive as polygons, and curved composite outlines are followed
+            closely. Lines, points, text and QuPath detections are not regions: an import leaves them out and says
+            how many.
+          </p>
+
+          <h2 id="counter">Cell Counter</h2>
+          <p>
+            Press <kbd>K</kbd> and click cells to count them into the current category; the first click creates
+            “Type 1”. <kbd>⌥</kbd>-click removes the nearest point, and <kbd>Esc</kbd> ends counting. Categories are
+            listed under <strong>Counts</strong> in the Regions tab: click one to make it current, double-click its name
+            to rename it, or change its colour. <strong>Points CSV</strong> lists every point;
+            <strong>Counts CSV</strong> gives counts and densities for each category in each region.
+          </p>
+
+          <h2 id="profile">Line profile</h2>
+          <p>
+            Press <kbd>L</kbd> and drag a line (<kbd>⇧</kbd> snaps to 45°). The drawer below the image plots every
+            channel along it, with up to 2,048 samples read from the finest zoom level that provides them. Hover the
+            chart to see the position on the image, and export the values as CSV.
+          </p>
+
+          <h2 id="scale">Scale</h2>
+          <p>
+            FluoroView uses the pixel size recorded in the file. To set it yourself, draw a line along a scale bar,
+            choose <strong>Image › Set scale…</strong> and enter the bar's length. The scale is then used in every µm
+            column, scale bar, profile, figure and session; <strong>Remove scale</strong> returns to the file's value.
+          </p>
+
+          <h2 id="notes">Notes</h2>
+          <p>
+            Press <kbd>N</kbd> and click to pin a note to a place in the scan; others can reply to it. Notes are listed
+            in the Regions tab and saved with the session.
+          </p>
+
+          <h2 id="sessions">Sessions</h2>
+          <p>
+            <kbd>⌘</kbd><kbd>S</kbd> saves a <code>.fv</code> file: the regions, notes, counts, display settings,
+            scale, view, line profile and export settings, with a measurements CSV and a thumbnail. Open it with
+            <strong>File › Open…</strong>: FluoroView finds the image at its last known path or next to the
+            <code>.fv</code>, or asks you for it, and checks it against a content fingerprint. If the image already has
+            work, you choose to <strong>Replace</strong> it (your current work is backed up first) or
+            <strong>Merge</strong>.
+          </p>
+
+          <h2 id="figures">Figures</h2>
+          <p>
+            <kbd>⇧</kbd><kbd>⌘</kbd><kbd>E</kbd> exports the selected region's box or the current view as the composite
+            plus one labelled panel per visible channel, side by side, with one scale bar. Scale bar, channel names,
+            region outlines and note pins can each be burned in. Formats are PNG, 8-bit RGB TIFF at the DPI you choose,
+            and the raw 16-bit area as OME-TIFF. Figures are full resolution up to 8,000 px on the long side; larger
+            areas are reduced by exact 2×2 averaging.
+          </p>
+
+          <h2 id="shortcuts">Keyboard shortcuts</h2>
+          <table>
+            <thead><tr><th>Keys</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr><td><kbd>⌘</kbd><kbd>O</kbd></td><td>Open an image or session</td></tr>
+              <tr><td><kbd>⌘</kbd><kbd>S</kbd></td><td>Save the session</td></tr>
+              <tr><td><kbd>⌘</kbd><kbd>E</kbd> · <kbd>⇧</kbd><kbd>⌘</kbd><kbd>E</kbd></td><td>Export region measurements · export a figure</td></tr>
+              <tr><td><kbd>⌘</kbd><kbd>=</kbd> · <kbd>⌘</kbd><kbd>−</kbd></td><td>Zoom in · zoom out</td></tr>
+              <tr><td><kbd>⌘</kbd><kbd>0</kbd> · <kbd>⌘</kbd><kbd>1</kbd></td><td>Fit to window · actual pixels (100%)</td></tr>
+              <tr><td><kbd>V</kbd> <kbd>R</kbd> <kbd>E</kbd> <kbd>P</kbd> <kbd>F</kbd></td><td>Move, rectangle, ellipse, polygon, freehand</td></tr>
+              <tr><td><kbd>L</kbd> <kbd>K</kbd> <kbd>N</kbd></td><td>Line profile, Cell Counter, note</td></tr>
+              <tr><td><kbd>1</kbd>–<kbd>9</kbd> · <kbd>⇧</kbd><kbd>1</kbd>–<kbd>9</kbd></td><td>Show or hide a channel · show only that channel</td></tr>
+              <tr><td><kbd>A</kbd></td><td>Auto contrast, all channels</td></tr>
+              <tr><td><kbd>G</kbd> · <kbd>M</kbd> · <kbd>Z</kbd></td><td>Channel gallery · minimap · pixel loupe</td></tr>
+              <tr><td><kbd>C</kbd> · <kbd>⇧</kbd><kbd>L</kbd></td><td>Highlight clipped pixels · log-scaled histograms</td></tr>
+              <tr><td><kbd>S</kbd> · <kbd>⇧</kbd><kbd>G</kbd></td><td>Smooth magnification · pixel grid from 800%</td></tr>
+              <tr><td><kbd>⌘</kbd><kbd>A</kbd> · <kbd>⇧</kbd>-click</td><td>Select all regions · add a region to the selection</td></tr>
+              <tr><td><kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd></td><td>Nudge the selected region (<kbd>⇧</kbd>: 10 px)</td></tr>
+              <tr><td><kbd>⌫</kbd> · <kbd>Esc</kbd></td><td>Delete the selection · cancel drawing or deselect</td></tr>
+              <tr><td><kbd>⌘</kbd><kbd>K</kbd> · <kbd>?</kbd></td><td>Command palette · all shortcuts</td></tr>
+            </tbody>
+          </table>
+
+          <h2 id="csv">CSV reference</h2>
+          <h3>Regions (<kbd>⌘</kbd><kbd>E</kbd>)</h3>
+          <p>
+            One row per region and channel. New columns are only ever added at the end, so scripts that read the
+            file by position keep working.
+          </p>
+          <table>
+            <thead><tr><th>Group</th><th>Columns</th></tr></thead>
+            <tbody>
+              <tr><td>Region</td><td><code>file</code> <code>region_id</code> <code>region</code> <code>shape</code> <code>is_background</code></td></tr>
+              <tr><td>Size and place</td><td><code>area_px</code> <code>area_um2</code> <code>centroid_x_px</code> <code>centroid_y_px</code> <code>centroid_x_um</code> <code>centroid_y_um</code> <code>bbox_x_px</code> <code>bbox_y_px</code> <code>bbox_w_px</code> <code>bbox_h_px</code></td></tr>
+              <tr><td>Shape</td><td><code>perimeter_px</code> <code>perimeter_um</code> <code>ellipse_major_px</code> <code>ellipse_minor_px</code> <code>ellipse_angle_deg</code> <code>circularity</code> <code>aspect_ratio</code> <code>roundness</code> <code>solidity</code> <code>feret_px</code> <code>feret_um</code> <code>feret_angle_deg</code> <code>min_feret_px</code> <code>min_feret_um</code></td></tr>
+              <tr><td>Channel</td><td><code>channel</code> <code>n_pixels</code> <code>mean</code> <code>sd</code> <code>median</code> <code>mode</code> <code>min</code> <code>max</code> <code>sum</code> <code>int_den</code> <code>skewness</code> <code>kurtosis</code> <code>n_clipped</code> <code>background_mean</code> <code>mean_minus_background</code></td></tr>
+              <tr><td>Provenance</td><td><code>pixel_size_um</code> <code>fluoroview_version</code> <code>measured_at</code></td></tr>
+            </tbody>
+          </table>
+          <h3>Points</h3>
+          <p>
+            <code>file</code> <code>point_id</code> <code>counter</code> <code>x_px</code> <code>y_px</code>
+            <code>x_um</code> <code>y_um</code> <code>regions</code> <code>fluoroview_version</code>. The
+            <code>regions</code> column names every region that holds the point, separated by semicolons.
+          </p>
+          <h3>Counts</h3>
+          <p>
+            <code>file</code> <code>counter</code> <code>region_id</code> <code>region</code> <code>count</code>
+            <code>area_px</code> <code>area_um2</code> <code>density_per_mm2</code> <code>pixel_size_um</code>
+            <code>fluoroview_version</code>. One row per category and region, then one per category over the whole
+            image.
+          </p>
+          <h3>Line profile</h3>
+          <p>
+            <code>sample</code> <code>x_px</code> <code>y_px</code> <code>distance_px</code> <code>distance_um</code>,
+            one column of raw values per channel, then <code>pyramid_level</code> <code>pixel_size_um</code>
+            <code>fluoroview_version</code>.
+          </p>
+        </div>
+      </div>
+    </main>
+    <!-- @footer -->
+  </body>
+</html>

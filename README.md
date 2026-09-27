@@ -1,253 +1,116 @@
-<p align="center">
-  <img src="figures/FluroView.jpg" alt="FluoroView Logo" width="600">
-</p>
+# FluoroView 4
 
-# FluoroView v2 — Multiplex Fluorescence Microscopy Viewer & Analysis Platform
+Viewer and analysis engine for multiplex fluorescence whole-slide scans. A local Python engine reads
+images where they are; the studio, a browser UI served by the engine, draws raw 16-bit pixels on the
+GPU, so what you see at any zoom is the data in the file.
 
-[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD_3--Clause-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://www.python.org)
-[![Tests](https://github.com/arvinhm/FluoroView/actions/workflows/python-app.yml/badge.svg)](https://github.com/arvinhm/FluoroView/actions)
+> **Status:** FluoroView 4.0 is the current release. It replaces the 3.x apps with a local engine and a
+> browser studio built for full-resolution viewing and measurement. Cell segmentation, per-cell
+> quantification, phenotyping, spatial statistics, H&E → spatial transcriptomics and the AI assistant of
+> FluoroView 3.5 are not in 4.0 yet; they remain available in tag `v3.5.1`. The JOSS paper in `paper.md`
+> describes FluoroView 2.0 (tag `v2.0.0`).
 
-A powerful, cross-platform desktop application for viewing, annotating, segmenting, and analyzing multiplexed fluorescence microscopy images. Built in Python with **CustomTkinter** — no browser, no server, no containers required.
+## Viewing
 
----
+- Opens BioTek Gen5 (Cytation, Lionheart), OME-TIFF, ImageJ and multi-page TIFF files in place.
+  Nothing is uploaded, copied or converted before the image is shown.
+- Uncompressed scans show full resolution immediately. One sequential pass over the file builds the
+  zoom levels (2×2 area mean) and exact 65,536-bin histograms in the background, and the image fills
+  in while it runs.
+- Channel names, excitation/emission, pixel size, objective and the camera's saturation level are read
+  from the file. Bright-field and phase channels are recognised and start hidden.
+- Per-channel window, gamma and colour are applied on the GPU to the raw values. Magnified views show
+  exact pixels, with a pixel grid from 800%.
+- Auto contrast uses exact whole-image percentiles and ignores saturated pixels; each channel shows its
+  clipped fraction, and clipped pixels can be highlighted.
+- The status bar shows the raw value of every visible channel under the cursor, in pixels and µm. From
+  3,200% every pixel prints its value; the view zooms to 12,800%. A channel gallery, minimap and pixel
+  loupe are one key away.
 
-## Figure 1: Software Architecture & Workflow
+## Measuring
 
-<p align="center">
-  <img src="figures/Overview.png" alt="Figure 1: FluoroView Architecture" width="900">
-</p>
+- Rectangle, ellipse, polygon and freehand regions, measured on the raw full-resolution pixels: area,
+  perimeter, bounding box, fitted ellipse, circularity, aspect ratio, roundness, solidity and Feret
+  diameters, and per channel the mean, SD, median, mode, min, max, sum, integrated density, skewness,
+  kurtosis and clipped pixels, with ImageJ's conventions and an optional background region.
+- Region operations: union, intersection, XOR and subtraction, enlarge or shrink by µm or px, convex
+  hull, fitted ellipse and exact coordinates; regions can have holes and several parts.
+- Cell Counter with categories, line profiles of every channel, Set Scale, and notes with replies.
+- Exports: regions, counts, points and profiles as CSV; figures (composite and per-channel panels with
+  scale bar) as PNG or TIFF, or the raw 16-bit area as OME-TIFF.
+- ImageJ `.roi` and `RoiSet.zip` and QuPath GeoJSON regions, in and out.
+- Sessions: one `.fv` file keeps regions, notes, counts, display settings, scale and view, and reopens
+  onto the same image, checked by a content fingerprint.
 
-**Figure 1.** FluoroView software architecture and data-flow diagram. The application comprises six subpackages: **core/** (memory-mapped channel data, ROIs, annotations, tile-based rendering engine), **ui/** (CustomTkinter interface with per-channel controls), **analysis/** (vectorized per-cell quantification and threshold-based phenotyping), **segmentation/** (Cellpose and DeepCell backends), **io/** (multi-format loading, session files, export), and **ai/** (multi-provider chat interface). Arrows indicate data flow between subpackages; external dependencies are shown at bottom.
+## Measured
 
----
+A 3.87 GB BioTek Cytation scan (27,643 × 17,482 px, 4 channels, 16-bit, uncompressed), stored on an
+external USB SSD (exFAT) and opened on a MacBook Pro with an Apple M2 and 16 GB of memory:
 
-## Figure 2: Main Viewer Interface
+| Step | Time |
+| --- | --- |
+| Open and read metadata | 25–35 ms |
+| Full-resolution tile straight from the source | ≈50 ms for a new 512-row band, then from memory |
+| Zoom pyramid and exact histograms (one read of the file) | 8.4–8.6 s |
+| Tile from the cache, any zoom level | 0.1–0.9 ms median |
 
-<p align="center">
-  <img src="figures/Figure_1.png" alt="Figure 2: FluoroView Viewer" width="900">
-</p>
+The cache for that scan uses 1.39 GB on the internal disk. The same scan in FluoroView 3.5 was
+decoded completely in the browser and then shown at a quarter of its resolution.
+`engine/bench/bench_open.py` reproduces these measurements on any scan.
 
-**Figure 2.** FluoroView main viewer interface displaying a 5-channel multiplex fluorescence tissue image (5625 x 8500 px, merged from separate single-channel TIFFs). Key annotated elements: **Toolbar** with ROI drawing (Rect, Circle, Free), segmentation, and phenotyping (P±) tools; **Samples** list with multi-file channel merging; **AI Chat** panel with OpenAI provider connection; **Minimap** for viewport navigation; per-channel **Windowing** controls (min, max, brightness, gamma) with live histograms; physical **Scale bar** (100 μm, auto-detected from OME-TIFF metadata); and **Live analysis** panel showing Mean Intensity / DAPI ratios per channel. The tile-cached rendering engine achieves 69 FPS for 4-channel compositing using precomputed LUT-based contrast/gamma lookup tables and a 256-tile LRU cache.
+## Install and run
 
----
-
-## Figure 3: ROI Tools, Annotations & Publication-Quality Export
-
-<p align="center">
-  <img src="figures/Figure_2.png" alt="Figure 3: ROI and Annotations" width="900">
-</p>
-
-**Figure 3.** Interactive ROI tools, author-tracked annotations, and publication-quality export. **Top-left:** Two freehand ROIs (ROI-1, ROI-2) drawn on the tissue with linked author-tracked annotations ("Arvin's comment") and threaded conversation. **Top-right:** ROI-specific analysis showing per-channel intensity bar chart (Mean Intensity / DAPI with SEM error bars) with ROI-3 selected from the dropdown. **Bottom:** ROI export folder containing per-channel masked TIFF images (DAPI, ECM, Membrane, NM, PanC) with 50 μm embedded scale bars, merged composite, intensity statistics CSV (`ROI-1-stats.csv`), and publication-ready analysis graph (`ROI-1-analysis.png`).
-
----
-
-## Figure 4: Cell Segmentation
-
-<p align="center">
-  <img src="figures/Figure_4.png" alt="Figure 4: Cell Segmentation" width="900">
-</p>
-
-**Figure 4.** Cell segmentation using multiple models. **Left:** Automated Cellpose segmentation overlay showing detected cell boundaries on a multiplex tissue image. **Center:** Segmentation menu offering TIFF mask import, whole-image Cellpose, ROI-only Cellpose, and a submenu with five model presets (cyto3, nuclei, cyto2, cyto, tissuenet_cp3) for different tissue types. **Right:** High-magnification view of segmentation boundaries (yellow outlines) overlaid on the composite image, showing individual cell morphology and accurate boundary detection.
-
----
-
-## Figure 5: Single-Cell Analysis & Cell Phenotyping
-
-<p align="center">
-  <img src="figures/Figure_5.png" alt="Figure 5: Analysis and Phenotyping" width="900">
-</p>
-
-**Figure 5.** Single-cell analysis and threshold-based cell phenotyping (n = 13,017 cells, 5 markers). **Panel A:** Scatter plot showing PanC vs Membrane expression colored by Membrane intensity, revealing marker co-expression patterns. **Panel B:** Hierarchically clustered cell-by-marker heatmap (500 cells × 5 markers, ward linkage) showing distinct expression clusters. **Panel C:** PanC expression frequency histogram showing bimodal distribution. **Panel D:** Spatial map rendering actual cell mask shapes (not centroid dots) colored by Membrane intensity, preserving tissue architecture. **Bottom row:** Threshold-based cell phenotyping with combinatorial marker annotation — spatial phenotype map showing cells colored by phenotype (e.g., Membrane+ ECM− PanC+ NM−) with legend, and a sortable count table listing 15 distinct cell populations with counts and percentages.
-
----
-
-## Quick Start
+Requirements: Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), Node.js 20 or newer (to build the studio).
 
 ```bash
-git clone https://github.com/arvinhm/FluoroView.git
-cd FluoroView
-
-pip install -r fluoroview/requirements.txt
-
-python run_fluoroview.py
+git clone https://github.com/arvinhm/FluoroView.git     # add --branch v4.0.0 for exactly this release
+cd FluoroView/studio && npm ci && npm run build      # builds the UI into the engine package
+cd ../engine && uv sync
+uv run fluoroview /path/to/scan.tif
 ```
 
-### Try with Example Data
+`fluoroview` prints a local address containing a one-time access token and opens it in the browser.
+The engine listens on 127.0.0.1 only and rejects requests without the token or with a foreign Host
+header. Options: `--port`, `--no-browser`, `--cache-dir`, `--cache-limit-gb` (default 20; the least
+recently used caches are removed first).
 
-The repository includes downsampled example images for immediate testing:
+## How it works
+
+- `engine/` (Python): TIFF-family readers; a one-pass pyramid builder (a reader thread, one compute
+  thread per channel, compiled histogram and downsampling kernels); a cache of raw 512 × 512 chunks
+  in OME-Zarr v0.4 layout under `~/Library/Caches/FluoroView`; a FastAPI server for tiles,
+  histograms, pixel values, folder listing and build progress over WebSocket, and for regions,
+  measurements, sessions and exports.
+- `site/`: the fluoroview.com website (static, Vite).
+- `studio/` (TypeScript, React): a WebGL2 renderer that keeps each tile as a 16-bit integer texture
+  array (one layer per channel), chooses the pyramid level in device pixels, loads the coarsest level
+  first and shows it until finer tiles arrive.
+
+## Development
 
 ```bash
-python run_fluoroview.py
+cd engine && uv run pytest && uv run ruff check src tests bench
+cd studio && npm test && npx tsc --noEmit
+cd engine && uv run python bench/bench_open.py /path/to/scan.tif
 ```
 
-1. Click **File** → select all 5 channel TIFs from `example_data/`
-2. Select all 5 in the list → right-click → **Merge Selected as Channels**
-3. Click **Seg** → **Import mask (TIFF)** → select `example_data/BEMS340264_Scene-002_cell_mask.tif`
-4. Click **Cells** → **Current View** → four-panel analysis opens
-5. Click **P±** → adjust thresholds → see phenotype distributions
-
----
-
-## Installation
-
-### Prerequisites
-
-| Requirement | Version | Notes |
-|---|---|---|
-| Python | 3.10+ | macOS: `brew install python@3.11` |
-| Tkinter | built-in | Verify: `python -c "import tkinter"` |
-
-### Install dependencies
+For live UI work, run the engine with a fixed token and the Vite dev server:
 
 ```bash
-pip install -r fluoroview/requirements.txt
+cd engine && FLUOROVIEW_TOKEN=dev uv run fluoroview --port 7070 --no-browser
+cd studio && npm run dev        # then open http://localhost:5173/#token=dev
 ```
 
-Or install as a package:
+## Earlier versions
 
-```bash
-pip install .
-```
-
-### Optional: Cellpose segmentation
-
-```bash
-pip install cellpose
-```
-
-### Optional: DeepCell Mesmer
-
-```bash
-pip install tensorflow deepcell
-```
-
----
-
-## How to Use
-
-### Loading Images
-
-1. Click **Folder** to open a directory of TIF files, or **File** to pick individual files.
-2. Multi-channel TIFs and folders of single-channel TIFs are both supported.
-3. To merge separate files as channels: select multiple files in the list (Cmd+Click / Ctrl+Click), right-click, and choose **Merge Selected as Channels**.
-
-### Viewing
-
-| Action | How |
-|---|---|
-| Pan | Left-click drag (or right-click drag) |
-| Zoom | Scroll wheel / trackpad pinch |
-| Fit to window | **Fit** button |
-
-### Drawing ROIs
-
-Click **Rect**, **Circle**, or **Free** in the toolbar, then draw on the image. Toggle visibility with **Eye**, clear all with **X**.
-
-### Annotations
-
-Click **Pin** in the Annotations panel, then click on the image to place a note. Each note records author name, timestamp, and machine fingerprint. Double-click to view details. Use **Link** to associate with an ROI.
-
-### Segmentation & Analysis
-
-1. Click **Seg** → choose **Import mask (TIFF)**, **Cellpose: whole image**, or **Cellpose: ROI(s) only**
-2. Click **Cells** → choose scope (**ROI** / **Current View** / **Entire Slide**)
-3. Four-panel analysis opens with scatter, heatmap, histogram, and spatial map
-4. Click **P±** for cell phenotyping with threshold-based marker gating
-
-### Saving & Exporting
-
-| Button | What it does |
-|---|---|
-| **Save** | Export full-resolution composite (TIFF or PNG) |
-| **ROIs** | Save cropped ROI images (merged + per-channel) with scale bars |
-| **CSV** | Export per-ROI per-channel intensity statistics |
-| **Save Session** / **Load Session** | Save/restore entire viewer state |
-
----
-
-## Project Structure
-
-```
-FluoroView/
-├── run_fluoroview.py              Launch script
-├── pyproject.toml                 Package configuration (pip install .)
-├── paper.md                       JOSS paper
-├── paper.bib                      Bibliography
-├── CITATION.cff                   Citation metadata
-├── LICENSE                        BSD 3-Clause
-├── example_data/                  Downsampled test images + segmentation mask
-├── tests/                         Pytest test suite (24 tests)
-├── figures/                       Paper and README figures
-│
-└── fluoroview/
-    ├── __init__.py                Package root (v2.0.0)
-    ├── __main__.py                python -m fluoroview entry point
-    ├── app.py                     Main application window
-    ├── constants.py               Colors, theme, LUT presets
-    ├── requirements.txt           pip dependencies
-    ├── core/                      Channel data, ROIs, annotations, tile engine
-    ├── ui/                        CustomTkinter interface, popups
-    ├── analysis/                  Quantification, phenotyping, spatial queries
-    ├── segmentation/              Cellpose, DeepCell, mask import, overlay
-    ├── io/                        Multi-format loading, session I/O, export
-    ├── ai/                        Multi-provider chat, version control
-    └── icons/                     Glass-style icon generator
-```
-
----
-
-## Running Tests
-
-```bash
-pip install pytest
-pytest tests/ -v
-```
-
----
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|---|---|
-| `Cmd+S` / `Ctrl+S` | Save session |
-| `Cmd+O` / `Ctrl+O` | Load session |
-| `Cmd+Z` / `Ctrl+Z` | Undo last ROI |
-| Scroll | Zoom in / out |
-| Right-click drag | Pan |
-
----
-
-## Troubleshooting
-
-**"No module named tkinter"** — `brew install python-tk@3.11`
-
-**"numpy.dtype size changed"** — `pip install --upgrade numpy scikit-image scikit-learn scipy`
-
-**DeepCell segmentation fails** — ensure TensorFlow is installed. On Apple Silicon: `pip install tensorflow-macos tensorflow-metal`.
-
----
+- FluoroView 2.0: Python desktop application (CustomTkinter); tag `v2.0.0`, described in `paper.md`.
+- FluoroView 3.5: web application and Python desktop application, with segmentation, phenotyping,
+  spatial statistics and H&E → spatial transcriptomics; tag `v3.5.1`.
 
 ## Citation
 
-If you use FluoroView in your research, please cite:
-
-```bibtex
-@article{hajmirzaian2026fluoroview,
-  title={FluoroView: An Open-Source Desktop Application for Interactive Multiplex
-         Fluorescence Microscopy Visualization, Annotation, and Single-Cell Phenotyping},
-  author={Haj-Mirzaian, Arvin and Heidari, Pedram},
-  journal={Journal of Open Source Software},
-  year={2026}
-}
-```
-
----
+If you use FluoroView in your research, please cite the JOSS paper (see `CITATION.cff`).
 
 ## License
 
-BSD 3-Clause License. See [LICENSE](LICENSE) for details.
-
----
-
-*FluoroView v2.0 — 42 Python modules, ~8,400 lines of code, 24 automated tests.*
+BSD 3-Clause. See [LICENSE](LICENSE).

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Install · FluoroView</title>
+    <meta name="description" content="Install FluoroView 4: build the studio once, start the local engine, and open a scan." />
+    <meta name="theme-color" content="#070708" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <!-- @header -->
+    <main class="wrap">
+      <header class="page-h">
+        <p class="eyebrow">Install</p>
+        <h1>Install FluoroView</h1>
+        <p class="lede">
+          FluoroView 4.0 runs as a local engine that serves the studio to your browser. Setting it up takes four
+          commands.
+        </p>
+      </header>
+
+      <div class="prose">
+        <h2>Requirements</h2>
+        <ul>
+          <li><strong>Git</strong>, to get the source.</li>
+          <li><strong>Python 3.11 or newer</strong> with <a href="https://docs.astral.sh/uv/" rel="noopener">uv</a>, for the engine.</li>
+          <li><strong>Node.js 20 or newer</strong>, to build the studio once.</li>
+          <li><strong>A browser with WebGL 2</strong>: current Chrome, Edge, Firefox or Safari.</li>
+        </ul>
+
+        <ol class="steps">
+          <li>
+            <h3>Get the source</h3>
+            <p>Add <code>--branch v4.0.0</code> to get exactly this release rather than the latest.</p>
+            <pre data-copy><code>git clone https://github.com/arvinhm/FluoroView.git</code></pre>
+          </li>
+          <li>
+            <h3>Build the studio</h3>
+            <p>This builds the browser interface into the engine package. Repeat it after each update.</p>
+            <pre data-copy><code>cd FluoroView/studio &amp;&amp; npm ci &amp;&amp; npm run build</code></pre>
+          </li>
+          <li>
+            <h3>Install the engine</h3>
+            <pre data-copy><code>cd ../engine &amp;&amp; uv sync</code></pre>
+          </li>
+          <li>
+            <h3>Open a scan</h3>
+            <p>
+              The studio opens in your browser. The first time a scan is opened, FluoroView reads it once to build
+              its zoom levels; later opens reuse them.
+            </p>
+            <pre data-copy><code>uv run fluoroview /path/to/scan.tif</code></pre>
+          </li>
+        </ol>
+
+        <h2>Try the example data</h2>
+        <p>
+          The repository includes a five-channel example scan in <code>example_data</code>. Start FluoroView without
+          a file, choose <strong>File › Open…</strong>, select the five channel files together and press
+          <strong>Open 5 files as channels</strong>.
+        </p>
+        <pre data-copy><code>uv run fluoroview</code></pre>
+
+        <h2>Options</h2>
+        <table>
+          <thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td><code>IMAGE</code></td><td>A scan to open at start-up (optional).</td></tr>
+            <tr><td><code>--port N</code></td><td>Port to listen on. By default a free port is chosen.</td></tr>
+            <tr><td><code>--no-browser</code></td><td>Do not open a browser window; open the printed address yourself.</td></tr>
+            <tr><td><code>--cache-dir PATH</code></td><td>Where zoom levels are kept. <code>fluoroview --help</code> shows the default.</td></tr>
+            <tr><td><code>--cache-limit-gb N</code></td><td>Largest size of that cache, in GB (default 20).</td></tr>
+            <tr><td><code>--host ADDRESS</code></td><td>Interface to listen on (default <code>127.0.0.1</code>).</td></tr>
+          </tbody>
+        </table>
+        <p class="note">
+          Keep the default host. The engine can open any file this computer can read for whoever holds its token,
+          so it is meant to listen only on your own machine.
+        </p>
+
+        <h2>Update</h2>
+        <p>From the <code>FluoroView</code> folder:</p>
+        <pre data-copy><code>git pull
+cd studio &amp;&amp; npm ci &amp;&amp; npm run build
+cd ../engine &amp;&amp; uv sync</code></pre>
+
+        <h2>Status</h2>
+        <p>
+          FluoroView 4.0 is developed on macOS; its engine tests also run on Ubuntu, with Python 3.11 and 3.12.
+          Session files (.fv) record their format version.
+        </p>
+        <p>
+          Cell segmentation, phenotyping, spatial statistics and H&amp;E → spatial transcriptomics from FluoroView
+          3.5 are not in 4.0 yet. For them, use <code>git clone --branch v3.5.1</code>.
+        </p>
+      </div>
+    </main>
+    <!-- @footer -->
+  </body>
+</html>

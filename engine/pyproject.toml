@@ -1,0 +1,45 @@
+[project]
+name = "fluoroview"
+version = "4.0.0"
+description = "Exact, fast viewer and analysis engine for multiplex fluorescence microscopy"
+license = { text = "BSD-3-Clause" }
+requires-python = ">=3.11"
+authors = [{ name = "Arvin Haj-Mirzaian" }]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "numpy>=2.0",
+  "tifffile>=2025.1.10",
+  "imagecodecs>=2024.9.22",
+  "numcodecs>=0.13",
+  "zarr>=3.0.1",
+  "platformdirs>=4.2",
+  "numba>=0.61",
+  "pillow>=11",
+  "shapely>=2.0",
+  "roifile>=2024.1",
+]
+
+[project.scripts]
+fluoroview = "fluoroview.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3", "httpx>=0.27", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fluoroview"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "NPY"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
