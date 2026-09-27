@@ -7,14 +7,17 @@ import type {
 
 const TOKEN_KEY = "fluoroview.token";
 
-/** The engine prints `/#token=…`; keep it for this tab only and remove it from the address bar. */
+/**
+ * The engine opens `/#token=…`. The token is remembered for this address, in every tab and after restarts
+ * (the engine keeps its token between launches), and removed from the address bar.
+ */
 function readToken(): string {
   const match = /(?:^|[#&])token=([^&]+)/.exec(window.location.hash);
   if (match?.[1]) {
-    sessionStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]));
+    localStorage.setItem(TOKEN_KEY, decodeURIComponent(match[1]));
     history.replaceState(null, "", window.location.pathname + window.location.search);
   }
-  return sessionStorage.getItem(TOKEN_KEY) ?? "";
+  return localStorage.getItem(TOKEN_KEY) ?? "";
 }
 
 const token = readToken();

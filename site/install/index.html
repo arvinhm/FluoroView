@@ -33,7 +33,7 @@
         <ol class="steps">
           <li>
             <h3>Get the source</h3>
-            <p>Add <code>--branch v4.0.0</code> to get exactly this release rather than the latest.</p>
+            <p>Add <code>--branch v4.0.1</code> to get exactly this release rather than the latest.</p>
             <pre data-copy><code>git clone https://github.com/arvinhm/FluoroView.git</code></pre>
           </li>
           <li>
@@ -49,7 +49,8 @@
             <h3>Open a scan</h3>
             <p>
               The studio opens in your browser. The first time a scan is opened, FluoroView reads it once to build
-              its zoom levels; later opens reuse them.
+              its zoom levels; later opens reuse them. The studio remembers FluoroView's access key, so bookmarks,
+              new tabs and restarts open straight into it.
             </p>
             <pre data-copy><code>uv run fluoroview /path/to/scan.tif</code></pre>
           </li>
@@ -77,7 +78,9 @@
         </table>
         <p class="note">
           Keep the default host. The engine can open any file this computer can read for whoever holds its token,
-          so it is meant to listen only on your own machine.
+          so it is meant to listen only on your own machine. The token is kept in FluoroView's data folder (on macOS
+          <code>~/Library/Application Support/FluoroView/token</code>), readable only by your account; delete the
+          file to issue a new one.
         </p>
 
         <h2>Update</h2>

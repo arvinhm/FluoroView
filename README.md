@@ -63,15 +63,18 @@ decoded completely in the browser and then shown at a quarter of its resolution.
 Requirements: Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), Node.js 20 or newer (to build the studio).
 
 ```bash
-git clone https://github.com/arvinhm/FluoroView.git     # add --branch v4.0.0 for exactly this release
+git clone https://github.com/arvinhm/FluoroView.git     # add --branch v4.0.1 for exactly this release
 cd FluoroView/studio && npm ci && npm run build      # builds the UI into the engine package
 cd ../engine && uv sync
 uv run fluoroview /path/to/scan.tif
 ```
 
-`fluoroview` prints a local address containing a one-time access token and opens it in the browser.
-The engine listens on 127.0.0.1 only and rejects requests without the token or with a foreign Host
-header. Options: `--port`, `--no-browser`, `--cache-dir`, `--cache-limit-gb` (default 20; the least
+`fluoroview` prints a local address containing its access token and opens it in the browser. The
+engine listens on 127.0.0.1 only and rejects requests without the token or with a foreign Host header.
+The token is kept between launches in FluoroView's data folder (on macOS
+`~/Library/Application Support/FluoroView/token`, readable only by your account), and the studio
+remembers it, so bookmarks, new tabs and restarts open straight into the studio. Delete that file to
+issue a new token; `FLUOROVIEW_TOKEN` overrides it. Options: `--port`, `--no-browser`, `--cache-dir`, `--cache-limit-gb` (default 20; the least
 recently used caches are removed first).
 
 ## How it works
