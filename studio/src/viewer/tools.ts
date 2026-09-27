@@ -6,8 +6,8 @@
 
 import type { Point } from "../api/types";
 import {
-  cancelNote, commitRegion, createRegion, deleteNote, deleteRegion, EMPTY_SCAN, editNote, previewNote, previewRegion,
-  revertRegion, select, setLine, startNote, useProject,
+  addPoint, cancelNote, commitRegion, createRegion, deleteNote, deleteRegion, EMPTY_SCAN, editNote, previewNote,
+  previewRegion, removePoint, revertRegion, select, setLine, startNote, useProject,
 } from "../state/project";
 import { type Tool, useStudio } from "../state/store";
 import {
@@ -45,6 +45,7 @@ export type Hover =
   | null;
 
 const HANDLE_CSS = 6;
+const POINT_CSS = 7;
 const EDGE_CSS = 5;
 const PIN_CSS = 9;
 const CLOSE_CSS = 8;
@@ -137,6 +138,16 @@ export class ToolController {
         startNote(pt);
         this.finish();
         return true;
+      case "count": {
+        if (p.alt) {
+          const pts = this.scan().points;
+          const i = nearest(pts.map((q): Point => [q.x, q.y]), pt, this.tol(p, POINT_CSS));
+          if (i >= 0) void removePoint(this.dsId, pts[i]!.id);
+        } else {
+          void addPoint(this.dsId, p.x, p.y);
+        }
+        return true;
+      }
       default: {
         const unreachable: never = tool;
         throw new Error(`unknown tool ${unreachable}`);

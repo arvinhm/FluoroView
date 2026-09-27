@@ -438,6 +438,16 @@ table.stats tr.sel td { color: var(--fv-accent); }
   color: var(--fv-text-2); border: var(--fv-hair) solid var(--fv-line-strong); border-radius: var(--fv-r-1);
 }
 .note-row .note-num { width: 16px; height: 16px; font-size: 9px; }
+.counter-row { cursor: default; }
+.counter-row:hover { background: var(--fv-surface-2); color: var(--fv-text-1); }
+.counter-row .name { cursor: text; }
+.counter-color {
+  width: 13px; height: 13px; flex: none; padding: 0; border: 0; border-radius: 3.5px; background: none; cursor: pointer;
+  -webkit-appearance: none; appearance: none;
+}
+.counter-color::-webkit-color-swatch-wrapper { padding: 0; }
+.counter-color::-webkit-color-swatch { border: 0; border-radius: 3.5px; }
+.ib.danger, .ib.danger:hover { color: var(--fv-err); background: color-mix(in srgb, var(--fv-err) 14%, transparent); }
 .zoom .ib { width: 26px; height: 24px; color: var(--fv-text-2); }
 .zoom-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--fv-line-strong); }
 .zoom-value {

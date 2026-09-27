@@ -8,6 +8,7 @@ import { focusViewer } from "../viewer/commands";
 import { regionBox } from "../viewer/geometry";
 import { SHAPE_ICON } from "../viewer/MeasureCard";
 import { exportRegionsCsv } from "./actions";
+import { CountsSection } from "./CountsSection";
 
 const NOTE_FOCUS_PX = 240;
 
@@ -95,6 +96,8 @@ export function RegionsTab({ ds }: { ds: DatasetInfo }) {
           )}
         </>
       )}
+
+      <CountsSection ds={ds} />
 
       <div className="sec-h"><span className="caps">Notes</span></div>
       {scan.notes.length === 0 ? (

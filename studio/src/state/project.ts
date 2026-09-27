@@ -5,7 +5,9 @@
 
 import { create } from "zustand";
 import { ApiError, project as papi } from "../api/client";
-import type { Annotation, Measurement, Point, Profile, Project, Region, RegionShape } from "../api/types";
+import type {
+  Annotation, Counter, CountPoint, Measurement, Point, Profile, Project, Region, RegionShape,
+} from "../api/types";
 import { useStudio } from "./store";
 
 export interface Line {
@@ -31,6 +33,8 @@ export interface Scan {
   regions: Region[];
   notes: Annotation[];
   background: string | null;
+  counters: Counter[];
+  points: CountPoint[];
 }
 
 interface ProjectState {
@@ -45,9 +49,12 @@ interface ProjectState {
   /** sample under the chart cursor, mirrored as a dot on the line */
   profileHover: number | null;
   noteDraft: Point | null;
+  /** Cell Counter category new points go into */
+  activeCounter: string | null;
 }
 
-export const EMPTY_SCAN: Scan = { regions: [], notes: [], background: null };
+export const EMPTY_SCAN: Scan = { regions: [], notes: [], background: null, counters: [], points: [] };
+const COUNTER_COLORS = ["#ff5c8a", "#4dd4ff", "#ffd24d", "#7cff6b", "#b18cff", "#ff9f40", "#ffffff", "#ff4d4d"];
 const MEASURE_CONCURRENCY = 2;
 const AUTHOR_KEY = "fluoroview.author";
 
@@ -61,6 +68,7 @@ export const useProject = create<ProjectState>(() => ({
   profileLoading: false,
   profileHover: null,
   noteDraft: null,
+  activeCounter: null,
 }));
 
 export function useScan(dsId: string | null): Scan {
@@ -114,10 +122,15 @@ export function ensureProject(dsId: string): void {
   void loadProject(dsId);
 }
 
+function scanFrom(p: Project): Scan {
+  return { regions: p.regions, notes: p.annotations, background: p.background_region, counters: p.counters ?? [],
+    points: p.points ?? [] };
+}
+
 export async function loadProject(dsId: string): Promise<void> {
   try {
     const p = await papi.get(dsId);
-    patchScan(dsId, () => ({ regions: p.regions, notes: p.annotations, background: p.background_region }));
+    patchScan(dsId, () => scanFrom(p));
     if (p.display) useStudio.getState().applySavedDisplay(dsId, p.display);
   } catch (e) {
     report(e);
@@ -126,7 +139,7 @@ export async function loadProject(dsId: string): Promise<void> {
 
 /** Take a scan's whole project state from the engine (after restoring a session). */
 export function setScanState(dsId: string, p: Project): void {
-  patchScan(dsId, () => ({ regions: p.regions, notes: p.annotations, background: p.background_region }));
+  patchScan(dsId, () => scanFrom(p));
   if (p.display) useStudio.getState().applySavedDisplay(dsId, p.display);
   select(null);
 }
@@ -399,6 +412,91 @@ async function restoreNote(dsId: string, note: Annotation): Promise<void> {
     patchScan(dsId, (s) => ({ notes: [...s.notes, again] }));
     select({ kind: "note", id: again.id });
   } catch (e) {
+    report(e);
+  }
+}
+
+// ---- cell counter ------------------------------------------------------------------------------
+
+export function setActiveCounter(id: string | null): void {
+  useProject.setState({ activeCounter: id });
+}
+
+export async function addCounter(dsId: string, name?: string): Promise<Counter | null> {
+  const existing = scanOf(dsId).counters;
+  try {
+    const counter = await papi.createCounter(dsId, {
+      name: name ?? `Type ${existing.length + 1}`, color: COUNTER_COLORS[existing.length % COUNTER_COLORS.length]!,
+    });
+    patchScan(dsId, (s) => ({ counters: [...s.counters, counter] }));
+    setActiveCounter(counter.id);
+    return counter;
+  } catch (e) {
+    report(e);
+    return null;
+  }
+}
+
+export async function editCounter(dsId: string, cid: string, change: { name?: string; color?: string }): Promise<void> {
+  patchScan(dsId, (s) => ({ counters: s.counters.map((c) => (c.id === cid ? { ...c, ...change } : c)) }));
+  try {
+    await papi.patchCounter(dsId, cid, change);
+  } catch (e) {
+    report(e);
+    void loadProject(dsId);
+  }
+}
+
+export async function deleteCounter(dsId: string, cid: string): Promise<void> {
+  try {
+    await papi.deleteCounter(dsId, cid);
+    patchScan(dsId, (s) => ({ counters: s.counters.filter((c) => c.id !== cid), points: s.points.filter((p) => p.counter !== cid) }));
+    if (useProject.getState().activeCounter === cid) setActiveCounter(scanOf(dsId).counters[0]?.id ?? null);
+  } catch (e) {
+    report(e);
+  }
+}
+
+let creatingCounter: Promise<Counter | null> | null = null;
+
+/** The category new points go into, creating "Type 1" on first use (once, however fast the clicks). */
+async function currentCounter(dsId: string): Promise<string | null> {
+  const { counters } = scanOf(dsId);
+  const active = useProject.getState().activeCounter;
+  if (active && counters.some((c) => c.id === active)) return active;
+  if (counters[0]) {
+    setActiveCounter(counters[0].id);
+    return counters[0].id;
+  }
+  creatingCounter ??= addCounter(dsId).finally(() => {
+    creatingCounter = null;
+  });
+  return (await creatingCounter)?.id ?? null;
+}
+
+/** Count a cell: shown at once, confirmed by the engine. */
+export async function addPoint(dsId: string, x: number, y: number): Promise<void> {
+  const counter = await currentCounter(dsId);
+  if (!counter) return;
+  const temp: CountPoint = { id: `pending-${Math.random().toString(36).slice(2)}`, x, y, counter };
+  patchScan(dsId, (s) => ({ points: [...s.points, temp] }));
+  try {
+    const saved = await papi.createPoint(dsId, { x, y, counter });
+    patchScan(dsId, (s) => ({ points: s.points.map((p) => (p.id === temp.id ? saved : p)) }));
+  } catch (e) {
+    patchScan(dsId, (s) => ({ points: s.points.filter((p) => p.id !== temp.id) }));
+    report(e);
+  }
+}
+
+export async function removePoint(dsId: string, pid: string): Promise<void> {
+  const point = scanOf(dsId).points.find((p) => p.id === pid);
+  if (!point || pid.startsWith("pending-")) return;
+  patchScan(dsId, (s) => ({ points: s.points.filter((p) => p.id !== pid) }));
+  try {
+    await papi.deletePoint(dsId, pid);
+  } catch (e) {
+    patchScan(dsId, (s) => ({ points: [...s.points, point] }));
     report(e);
   }
 }

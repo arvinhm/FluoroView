@@ -80,7 +80,7 @@ function storedRecent(): RecentItem[] {
     return [];
   }
 }
-export type Tool = "move" | "rectangle" | "ellipse" | "polygon" | "freehand" | "line" | "note";
+export type Tool = "move" | "rectangle" | "ellipse" | "polygon" | "freehand" | "line" | "note" | "count";
 
 export interface Notice {
   text: string;

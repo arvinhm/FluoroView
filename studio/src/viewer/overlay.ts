@@ -3,7 +3,7 @@
  * the same animation frame, once per gallery panel. Everything is in device pixels.
  */
 
-import type { Annotation, Point, Region, RegionShape } from "../api/types";
+import type { Annotation, CountPoint, Point, Region, RegionShape } from "../api/types";
 import { type Camera, formatLength } from "./camera";
 import type { Rect } from "./gallery";
 import { bbox, type Box, handles, regionBox } from "./geometry";
@@ -71,6 +71,9 @@ export interface OverlayScene {
   valueAt: (x: number, y: number, c: number) => number | null;
   imageSize: [number, number];
   regions: readonly Region[];
+  /** Cell Counter points, and the colour of each category */
+  points: readonly CountPoint[];
+  counterColors: ReadonlyMap<string, string>;
   background: string | null;
   selected: string | null;
   hover: string | null;
@@ -332,6 +335,23 @@ function pin(ctx: CanvasRenderingContext2D, x: number, y: number, label: string,
   ctx.fillText(label, x, y + 0.5 * d);
 }
 
+function drawCountPoints(ctx: CanvasRenderingContext2D, v: PanelView, s: OverlayScene): void {
+  if (!s.points.length) return;
+  const d = s.dpr;
+  const [x0, y0, x1, y1] = v.bounds();
+  const r = 3.5 * d;
+  ctx.lineWidth = 1.25 * d;
+  ctx.strokeStyle = HALO;
+  for (const p of s.points) {
+    if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
+    ctx.beginPath();
+    ctx.arc(v.x(p.x), v.y(p.y), r, 0, 2 * Math.PI);
+    ctx.fillStyle = s.counterColors.get(p.counter) ?? TEXT;
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
 function drawNotes(ctx: CanvasRenderingContext2D, v: PanelView, s: OverlayScene): void {
   const d = s.dpr;
   const { rect } = v;
@@ -409,6 +429,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, panels: readonly Over
       ctx.stroke();
     }
     if (s.draft) drawDraft(ctx, v, s.draft, s);
+    drawCountPoints(ctx, v, s);
     drawNotes(ctx, v, s);
     ctx.restore();
   }

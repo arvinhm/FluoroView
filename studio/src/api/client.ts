@@ -1,5 +1,6 @@
 import type {
-  Annotation, DatasetInfo, EngineEvent, ExportPlan, FigureRequest, FsListing, Histogram, Measurement, Patch, Point,
+  Annotation, Counter, CountPoint, DatasetInfo, EngineEvent, ExportPlan, FigureRequest, FsListing, Histogram,
+  Measurement, Patch, Point,
   Profile, Project, RawRequest, Region, RegionShape, SavedDisplay, SessionApplied, SessionInfo, SessionSaveRequest,
 } from "./types";
 
@@ -81,6 +82,17 @@ export const project = {
     request<Profile>(`/datasets/${id}/profile?${lineQuery(line)}`, { signal }),
   patch: (id: string, x: number, y: number, r: number, signal?: AbortSignal) =>
     request<Patch>(`/datasets/${id}/patch?x=${x}&y=${y}&r=${r}`, { signal }),
+  createCounter: (id: string, body: { name: string; color: string }) =>
+    request<Counter>(`/datasets/${id}/counters`, send("POST", body)),
+  patchCounter: (id: string, cid: string, body: { name?: string; color?: string }) =>
+    request<Counter>(`/datasets/${id}/counters/${cid}`, send("PATCH", body)),
+  deleteCounter: (id: string, cid: string) =>
+    request<{ deleted: string; points_deleted: number }>(`/datasets/${id}/counters/${cid}`, send("DELETE")),
+  createPoint: (id: string, body: { x: number; y: number; counter: string }) =>
+    request<CountPoint>(`/datasets/${id}/points`, send("POST", body)),
+  deletePoint: (id: string, pid: string) => request<{ deleted: string }>(`/datasets/${id}/points/${pid}`, send("DELETE")),
+  pointsCsv: (id: string) => download(`/datasets/${id}/points.csv`, "points.csv"),
+  countsCsv: (id: string) => download(`/datasets/${id}/counts.csv`, "counts.csv"),
   /** The regions CSV as the engine writes it, with the file name it suggests. */
   regionsCsv: (id: string) => download(`/datasets/${id}/measurements.csv`, "regions.csv"),
   profileCsv: (id: string, line: LineQuery) => download(`/datasets/${id}/profile.csv?${lineQuery(line)}`, "profile.csv"),

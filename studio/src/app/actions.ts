@@ -30,6 +30,16 @@ export function exportProfileCsv(id: string, line: Line): Promise<void> {
   return download(() => project.profileCsv(id, line));
 }
 
+/** Cell Counter: one row per counted point. */
+export function exportPointsCsv(id: string): Promise<void> {
+  return download(() => project.pointsCsv(id));
+}
+
+/** Cell Counter: counts and densities per category and region, and over the whole image. */
+export function exportCountsCsv(id: string): Promise<void> {
+  return download(() => project.countsCsv(id));
+}
+
 export async function loadHistograms(id: string): Promise<void> {
   const s = useStudio.getState();
   const ds = s.datasets[id];

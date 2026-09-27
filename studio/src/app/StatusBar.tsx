@@ -8,6 +8,7 @@ const HINTS: Record<Tool, string | null> = {
   polygon: "Click to add points · Enter or double-click closes · ⌫ removes the last point",
   freehand: "Drag around the area · release to close",
   line: "Drag to draw a line · ⇧ snaps to 45°",
+  count: "Click to count · ⌥-click removes · Esc ends counting",
   note: "Click to pin a note",
 };
 

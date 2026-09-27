@@ -1,5 +1,5 @@
 import {
-  Circle, Lasso, type LucideIcon, MessageSquarePlus, MousePointer2, Pentagon, ScanSearch, Spline, Square,
+  Circle, Lasso, type LucideIcon, MessageSquarePlus, MousePointer2, Pentagon, ScanSearch, Spline, Square, Tally5,
 } from "lucide-react";
 import { type Tool, useStudio } from "../state/store";
 
@@ -10,6 +10,7 @@ export const TOOLS: [Tool, string, string, LucideIcon][] = [
   ["polygon", "Polygon", "P", Pentagon],
   ["freehand", "Freehand", "F", Lasso],
   ["line", "Line profile", "L", Spline],
+  ["count", "Count cells", "K", Tally5],
   ["note", "Note", "N", MessageSquarePlus],
 ];
 

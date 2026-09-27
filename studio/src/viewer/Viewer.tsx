@@ -311,6 +311,8 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
         valueAt: (x, y, c) => tm.valueAt(x, y, c),
         imageSize: [W, H],
         regions: scan.regions,
+        points: scan.points,
+        counterColors: new Map(scan.counters.map((c) => [c.id, c.color])),
         background: scan.background,
         selected: pj.selection?.kind === "region" ? pj.selection.id : null,
         hover: tc?.hover?.kind === "region" ? tc.hover.id : null,

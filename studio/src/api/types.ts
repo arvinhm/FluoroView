@@ -121,11 +121,27 @@ export interface SavedDisplay {
   touched: boolean;
 }
 
+/** A Cell Counter category, such as CD8+. */
+export interface Counter {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export interface CountPoint {
+  id: string;
+  x: number;
+  y: number;
+  counter: string;
+}
+
 export interface Project {
   regions: Region[];
   annotations: Annotation[];
   background_region: string | null;
   display: SavedDisplay[] | null;
+  counters: Counter[];
+  points: CountPoint[];
 }
 
 export interface ChannelStats {
