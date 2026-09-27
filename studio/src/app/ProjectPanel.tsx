@@ -1,10 +1,10 @@
-import { Eye, EyeOff, FolderOpen, Image, LayoutGrid, Layers } from "lucide-react";
+import { Bookmark, Eye, EyeOff, FolderOpen, Image, LayoutGrid, Layers } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { DatasetInfo, FsEntry, FsListing } from "../api/types";
 import { fmtBytes } from "../lib/format";
 import { useActive, useStudio } from "../state/store";
-import { openImage } from "./actions";
+import { openImage, openSession } from "./actions";
 
 export function dotClass(entry: FsEntry | null, open: DatasetInfo | undefined): string {
   if (open) {
@@ -50,7 +50,8 @@ export function ProjectPanel() {
 
   const byPath = new Map(Object.values(datasets).filter((d) => d.files.length === 0).map((d) => [d.path, d]));
   const combined = Object.values(datasets).filter((d) => d.files.length > 1 && d.folder === listing?.path);
-  const files = listing?.entries.filter((e) => !e.dir) ?? [];
+  const files = listing?.entries.filter((e) => !e.dir && !e.session) ?? [];
+  const sessions = listing?.entries.filter((e) => e.session) ?? [];
   const allVisible = display?.every((d) => d.visible) ?? false;
 
   return (
@@ -87,6 +88,14 @@ export function ProjectPanel() {
               </button>
             );
           })}
+          {sessions.length > 0 && <div className="sub-h caps">Sessions</div>}
+          {sessions.map((f) => (
+            <button key={f.path} className="row" title={f.path} onClick={() => void openSession(f.path)}>
+              <Bookmark />
+              <span className="name">{f.name.replace(/\.fv$/i, "")}</span>
+              <span className="aux">{f.size !== null ? fmtBytes(f.size) : ""}</span>
+            </button>
+          ))}
         </div>
       </div>
       <div className="sec">

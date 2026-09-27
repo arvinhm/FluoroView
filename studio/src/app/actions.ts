@@ -43,12 +43,20 @@ export async function loadHistograms(id: string): Promise<void> {
   );
 }
 
+function remember(ds: DatasetInfo): void {
+  useStudio.getState().addRecent({
+    kind: ds.files.length ? "channels" : "image", paths: ds.files.length ? ds.files : [ds.path], name: ds.name,
+    folder: ds.folder, width: ds.width, height: ds.height, channels: ds.channels.length,
+  });
+}
+
 async function openWith(request: () => Promise<DatasetInfo>): Promise<boolean> {
   const s = useStudio.getState();
   try {
     const ds = await request();
     s.upsertDataset(ds);
     s.setActive(ds.id);
+    remember(ds);
     void loadHistograms(ds.id);
     return true;
   } catch (e) {
@@ -62,6 +70,7 @@ export async function openImage(path: string): Promise<boolean> {
   const existing = Object.values(s.datasets).find((d) => d.files.length === 0 && d.path === path);
   if (existing) {
     s.setActive(existing.id);
+    remember(existing);
     return true;
   }
   return openWith(() => api.open(path));
@@ -73,6 +82,7 @@ export async function openChannels(paths: string[]): Promise<boolean> {
   const existing = Object.values(s.datasets).find((d) => d.files.join("\n") === paths.join("\n"));
   if (existing) {
     s.setActive(existing.id);
+    remember(existing);
     return true;
   }
   return openWith(() => api.openChannels(paths));
@@ -132,6 +142,11 @@ export async function openSession(path: string): Promise<boolean> {
     s.setNotice(`Could not open the session: ${message(e)}`);
     return false;
   }
+  const { image } = info.manifest;
+  s.addRecent({
+    kind: "session", paths: [path], name: path.split("/").pop() ?? path, folder: path.slice(0, path.lastIndexOf("/")),
+    width: image.width, height: image.height, channels: image.channels.length,
+  });
   const paths = info.image_paths;
   if (!paths) {
     s.setPendingSession({ path, names: info.manifest.image.names });

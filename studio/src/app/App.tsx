@@ -11,6 +11,7 @@ import { loadHistograms } from "./actions";
 import { CommandPalette, ShortcutsDialog } from "./CommandPalette";
 import { handleShortcut } from "./commands";
 import { ExportDialog } from "./ExportDialog";
+import { Home } from "./Home";
 import { Inspector } from "./Inspector";
 import { OpenDialog } from "./OpenDialog";
 import { ProfilePanel } from "./ProfilePanel";
@@ -20,23 +21,6 @@ import { ScanGallery } from "./ScanGallery";
 import { SessionPrompt } from "./SessionPrompt";
 import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
-
-function Welcome() {
-  const setDialog = useStudio((s) => s.setDialog);
-  return (
-    <div className="welcome">
-      <div className="welcome-box">
-        <h2>Open a scan</h2>
-        <p>
-          FluoroView reads the file where it is. Uncompressed scans show full resolution at once; the zoom levels and
-          exact histograms are built in one pass in the background.
-        </p>
-        <button className="btn primary" onClick={() => setDialog("open")}>Open image…</button>
-        <span className="kbd" style={{ marginLeft: 8 }}>⌘O</span>
-      </div>
-    </div>
-  );
-}
 
 export function App() {
   const ds = useActive();
@@ -73,8 +57,6 @@ export function App() {
         if (last) {
           s.setActive(last.id);
           list.forEach((d) => void loadHistograms(d.id));
-        } else {
-          s.setDialog("open");
         }
       })
       .catch((e: Error) => s.setNotice(e.message));
@@ -112,12 +94,13 @@ export function App() {
       <ProjectPanel />
       <main className={`canvas-area${ds && lineOnScan ? " has-drawer" : ""}`}
         style={{ "--fv-drawer": `${PROFILE_DRAWER_CSS}px` } as CSSProperties}>
-        {ds ? <Viewer key={ds.id} dataset={ds} /> : <Welcome />}
+        {ds && <Viewer key={ds.id} dataset={ds} />}
         {ds && lineOnScan && <ProfilePanel ds={ds} />}
         {ds && page === "scans" && <ScanGallery />}
       </main>
       <Inspector />
       <StatusBar />
+      {(page === "home" || !ds) && <Home />}
       {dialog === "open" && <OpenDialog />}
       {dialog === "palette" && <CommandPalette />}
       {dialog === "shortcuts" && <ShortcutsDialog />}

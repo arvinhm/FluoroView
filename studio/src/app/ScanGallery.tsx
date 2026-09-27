@@ -66,7 +66,7 @@ export function ScanGallery() {
   }, [folder]);
 
   const byPath = new Map(Object.values(datasets).filter((d) => d.files.length === 0).map((d) => [d.path, d]));
-  const files = listing?.entries.filter((e) => !e.dir) ?? [];
+  const files = listing?.entries.filter((e) => !e.dir && !e.session) ?? [];
 
   return (
     <div className="scans">

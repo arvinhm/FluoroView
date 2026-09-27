@@ -1,4 +1,4 @@
-import { ArrowUp, Folder, HardDrive, House, Layers, X } from "lucide-react";
+import { ArrowUp, Bookmark, Folder, HardDrive, House, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { DatasetInfo, FsListing } from "../api/types";
@@ -64,7 +64,7 @@ function SaveBody({ ds }: { ds: DatasetInfo }) {
         ))}
         {sessions.map((e) => (
           <button key={e.path} className={`row${e.name === file ? " sel" : ""}`} title={e.path} onClick={() => setName(e.name)}>
-            <Layers />
+            <Bookmark />
             <span className="name" style={{ color: "var(--fv-text-1)" }}>{e.name}</span>
             {e.size !== null && <span className="aux">{fmtBytes(e.size)}</span>}
           </button>

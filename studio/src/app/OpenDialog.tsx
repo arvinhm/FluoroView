@@ -1,4 +1,4 @@
-import { ArrowUp, Folder, HardDrive, House, Image, Layers, X } from "lucide-react";
+import { ArrowUp, Bookmark, Folder, HardDrive, House, Image, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { FsListing } from "../api/types";
@@ -72,7 +72,7 @@ export function OpenDialog() {
         </div>
         {pending && (
           <div className="banner">
-            <Layers />
+            <Bookmark />
             <span>
               <b>{pending.path.split("/").pop()}</b> belongs to <b>{pending.names.join(", ")}</b>, which was not found at
               its saved location or next to the session. Open it here and the session is restored onto it.
@@ -98,7 +98,7 @@ export function OpenDialog() {
           {files.map((e, i) => (
             <button key={e.path} className={`row${selected.includes(e.path) ? " sel" : ""}`} title={e.path}
               onClick={(ev) => select(i, ev)} onDoubleClick={() => void open([e.path])}>
-              {e.session ? <Layers /> : <Image />}
+              {e.session ? <Bookmark /> : <Image />}
               <span className="name" style={{ color: "var(--fv-text-1)" }}>{e.name}</span>
               {e.session && <span className="aux">session</span>}
               {e.cached && <span className="aux" title="Zoom pyramid already cached">cached</span>}

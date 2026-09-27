@@ -37,6 +37,7 @@ export function buildCommands(): Command[] {
     { id: "open", group: "File", title: "Open image or session…", keys: "⌘O", run: () => s.setDialog("open") },
     { id: "save-session", group: "File", title: "Save session…", keys: "⌘S", disabled: none,
       run: () => s.setDialog("save-session") },
+    { id: "home", group: "File", title: "Home", checked: s.page === "home", run: () => s.setPage("home") },
     { id: "scans", group: "File", title: "Scan gallery", checked: s.page === "scans", disabled: none,
       run: () => s.setPage(s.page === "scans" ? "viewer" : "scans") },
     { id: "export-regions", group: "File", title: "Export region measurements (CSV)", keys: "⌘E", disabled: !regions,
@@ -90,7 +91,7 @@ export function handleShortcut(e: KeyboardEvent): void {
   const key = e.key.toLowerCase();
   if (e.key === "Escape") {
     if (s.dialog) s.setDialog(null);
-    else if (s.page === "scans") s.setPage("viewer");
+    else if (s.page !== "viewer" && s.activeId) s.setPage("viewer");
     else if (activeTools.current?.key(e)) e.preventDefault();
     return;
   }

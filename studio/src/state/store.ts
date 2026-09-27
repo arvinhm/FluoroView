@@ -54,7 +54,32 @@ export interface SessionPrompt {
   incoming: { regions: number; notes: number };
 }
 export type Accent = "champagne" | "ice" | "white";
-export type Page = "viewer" | "scans";
+export type Page = "home" | "viewer" | "scans";
+
+/** A scan or session opened before, for the home screen. */
+export interface RecentItem {
+  kind: "image" | "channels" | "session";
+  /** the image file, the combined channel files, or the .fv */
+  paths: string[];
+  name: string;
+  folder: string;
+  openedAt: number;
+  width?: number;
+  height?: number;
+  channels?: number;
+}
+
+const RECENT_KEY = "fluoroview.recent";
+const RECENT_MAX = 12;
+
+function storedRecent(): RecentItem[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as unknown;
+    return Array.isArray(v) ? (v as RecentItem[]).filter((r) => Array.isArray(r?.paths) && r.paths.length > 0) : [];
+  } catch {
+    return [];
+  }
+}
 export type Tool = "move" | "rectangle" | "ellipse" | "polygon" | "freehand" | "line" | "note";
 
 export interface Notice {
@@ -91,6 +116,7 @@ interface StudioState {
   sessionPrompt: SessionPrompt | null;
   /** a restored view for a dataset's viewer to show, as its first view or by flying there */
   pendingView: { dsId: string; cx: number; cy: number; zoom: number } | null;
+  recent: RecentItem[];
 
   upsertDataset: (ds: DatasetInfo) => void;
   setActive: (id: string) => void;
@@ -112,6 +138,7 @@ interface StudioState {
   setPendingSession: (p: StudioState["pendingSession"]) => void;
   setSessionPrompt: (p: SessionPrompt | null) => void;
   setPendingView: (v: StudioState["pendingView"]) => void;
+  addRecent: (item: Omit<RecentItem, "openedAt">) => void;
 }
 
 /** Transmitted-light channels start hidden when there is fluorescence: summed with it they wash the image out. */
@@ -137,12 +164,13 @@ export const useStudio = create<StudioState>((set, get) => ({
   tool: "move",
   dialog: null,
   accent: storedAccent(),
-  page: "viewer",
+  page: "home",
   connected: false,
   notice: null,
   pendingSession: null,
   sessionPrompt: null,
   pendingView: null,
+  recent: storedRecent(),
 
   upsertDataset: (ds) =>
     set((s) => ({
@@ -252,6 +280,13 @@ export const useStudio = create<StudioState>((set, get) => ({
   setPendingSession: (pendingSession) => set({ pendingSession }),
   setSessionPrompt: (sessionPrompt) => set({ sessionPrompt }),
   setPendingView: (pendingView) => set({ pendingView }),
+  addRecent: (item) =>
+    set((s) => {
+      const same = (r: RecentItem) => r.kind === item.kind && r.paths.join("\n") === item.paths.join("\n");
+      const recent = [{ ...item, openedAt: Date.now() }, ...s.recent.filter((r) => !same(r))].slice(0, RECENT_MAX);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+      return { recent };
+    }),
 }));
 
 export function useActive(): DatasetInfo | null {

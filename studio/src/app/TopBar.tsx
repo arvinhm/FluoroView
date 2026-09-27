@@ -8,6 +8,8 @@ import { buildCommands, type CommandGroup, MENU_GROUPS } from "./commands";
 export function TopBar() {
   const ds = useActive();
   const setDialog = useStudio((s) => s.setDialog);
+  const page = useStudio((s) => s.page);
+  const setPage = useStudio((s) => s.setPage);
   useStudio((s) => s.options);
   useStudio((s) => s.tool);
   useStudio((s) => (s.activeId ? s.display[s.activeId] : undefined));
@@ -34,7 +36,9 @@ export function TopBar() {
 
   return (
     <header className="bar">
-      <span className="mark">FluoroView<sup>4</sup></span>
+      <button className="mark" title="Home" onClick={() => setPage(page === "home" && ds ? "viewer" : "home")}>
+        FluoroView<sup>4</sup>
+      </button>
       <div ref={wrap} style={{ display: "flex" }}>
         {MENU_GROUPS.map((group) => (
           <div key={group} className="menu-wrap">
