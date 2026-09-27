@@ -3,7 +3,7 @@ import type { DatasetInfo, SessionInfo, SessionSaveRequest } from "../api/types"
 import { pickFile, saveBlob } from "../lib/dom";
 import { fmtBytes } from "../lib/format";
 import { importRegions, type Line, setLine, setScanState, useProject } from "../state/project";
-import { useStudio } from "../state/store";
+import { toSaved, useStudio } from "../state/store";
 
 /** Export dialog choices, remembered in the browser and carried in session files. */
 export const EXPORT_SETTINGS_KEY = "fluoroview.export";
@@ -124,7 +124,7 @@ export function sessionName(ds: DatasetInfo): string {
 function studioState(id: string): Omit<SessionSaveRequest, "path" | "overwrite"> {
   const s = useStudio.getState();
   const ds = s.datasets[id]!;
-  const display = (s.display[id] ?? []).map(({ visible, color, lo, hi, gamma, touched }) => ({ visible, color, lo, hi, gamma, touched }));
+  const display = (s.display[id] ?? []).map(toSaved);
   const v = s.activeId === id ? s.view : null;
   const o = s.options;
   const line = useProject.getState().line;
@@ -138,7 +138,7 @@ function studioState(id: string): Omit<SessionSaveRequest, "path" | "overwrite">
     display,
     view: v ? { cx: v.cx, cy: v.cy, zoom: v.cssPxPerImagePx, gallery: o.gallery }
       : { cx: ds.width / 2, cy: ds.height / 2, zoom: 1, gallery: o.gallery },
-    viewer: { grid: o.grid, smooth: o.smooth, clip: o.clip, minimap: o.minimap, hist_log: o.histLog },
+    viewer: { grid: o.grid, smooth: o.smooth, clip: o.clip, minimap: o.minimap, hist_log: o.histLog, blend: o.blend },
     profile_line: line?.dsId === id ? { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1 } : null,
     export: exported,
   };
@@ -215,6 +215,7 @@ export async function applySession(id: string, path: string, mode: "replace" | "
       s.setOption("clip", r.viewer.clip);
       s.setOption("minimap", r.viewer.minimap);
       s.setOption("histLog", r.viewer.hist_log);
+      s.setOption("blend", r.viewer.blend ?? "add");
     }
     if (r.view) {
       s.setOption("gallery", r.view.gallery);

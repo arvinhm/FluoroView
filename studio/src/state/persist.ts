@@ -1,5 +1,5 @@
 import { project } from "../api/client";
-import { useStudio } from "./store";
+import { toSaved, useStudio } from "./store";
 
 const SAVE_DELAY_MS = 800;
 
@@ -17,7 +17,7 @@ export function persistDisplays(): () => void {
         timers.delete(id);
         const list = useStudio.getState().display[id];
         if (!list) return;
-        project.saveDisplay(id, list.map(({ visible, color, lo, hi, gamma, touched }) => ({ visible, color, lo, hi, gamma, touched })))
+        project.saveDisplay(id, list.map(toSaved))
           .catch((e: Error) => useStudio.getState().setNotice(`Could not save the display settings: ${e.message}`));
       }, SAVE_DELAY_MS));
     }

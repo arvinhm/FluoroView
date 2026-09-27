@@ -3,7 +3,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { DatasetInfo, Point } from "../api/types";
 import { isTyping } from "../lib/dom";
-import { fmtZoom, hexToRgb } from "../lib/format";
+import { fmtZoom } from "../lib/format";
+import { lutFor } from "../lib/lut";
 import { approach, ease, reducedMotion, tween } from "../motion/motion";
 import { EMPTY_SCAN, ensureProject, useProject } from "../state/project";
 import { type ChannelDisplay, type Options, useStudio } from "../state/store";
@@ -75,7 +76,8 @@ function uniformsFor(ds: DatasetInfo, display: ChannelDisplay[], channels: numbe
   const saturation = ds.saturation ?? (ds.dtype.endsWith("u1") ? 255 : 65535);
   return channels.map((i) => {
     const d = display[i]!;
-    return { layer: i, lo: d.lo, hi: d.hi, gamma: d.gamma, color: hexToRgb(d.color), saturation };
+    const { key, table } = lutFor(d);
+    return { layer: i, lo: d.lo, hi: d.hi, gamma: d.gamma, lut: table, lutKey: key, saturation };
   });
 }
 
@@ -262,7 +264,8 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       const p = layout[i]!;
       const view = views[i]!;
       if (g > 0) r.clear(p.rect);
-      r.setChannels(p.channel === null ? composite : uniformsFor(ds, display, [p.channel]));
+      if (p.channel === null) r.setChannels(composite, opts.blend);
+      else r.setChannels(uniformsFor(ds, display, [p.channel]));
       const grid = opts.grid && view.cam.scale >= GRID_FROM_SCALE
         ? Math.min(1, (view.cam.scale - GRID_FROM_SCALE) / 8 + 0.35) : 0;
       r.begin(p.rect, view.cam, { clip: opts.clip, grid });
@@ -279,7 +282,7 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       const mh = Math.round((m * H) / W);
       const region = { x: vp.width - m - MINIMAP_MARGIN_CSS * vp.dpr, y: MINIMAP_MARGIN_CSS * vp.dpr, width: Math.round(m), height: mh };
       r.clear(region);
-      r.setChannels(composite);
+      r.setChannels(composite, opts.blend);
       r.begin(region, { cx: W / 2, cy: H / 2, scale: m / W }, { clip: false, grid: 0 });
       for (const d of tm.overview(visible)) r.draw(d);
       r.end();

@@ -19,8 +19,10 @@ GPU, so what you see at any zoom is the data in the file.
   in while it runs.
 - Channel names, excitation/emission, pixel size, objective and the camera's saturation level are read
   from the file. Bright-field and phase channels are recognised and start hidden.
-- Per-channel window, gamma and colour are applied on the GPU to the raw values. Magnified views show
-  exact pixels, with a pixel grid from 800%.
+- Per-channel display, applied on the GPU to the raw values: black, midtone and white points on the
+  histogram (Levels), Brightness and Contrast, a tone curve (Curves), any colour or a colour map (Grays,
+  Fire, Ice, Viridis, Magma, Inferno), Invert and an output intensity; channels combine by Add or Max.
+  Exported figures use the same mapping. Magnified views show exact pixels, with a pixel grid from 800%.
 - Auto contrast uses exact whole-image percentiles and ignores saturated pixels; each channel shows its
   clipped fraction, and clipped pixels can be highlighted.
 - The status bar shows the raw value of every visible channel under the cursor, in pixels and µm. From
@@ -63,7 +65,7 @@ decoded completely in the browser and then shown at a quarter of its resolution.
 Requirements: Python 3.11 or newer, [uv](https://docs.astral.sh/uv/), Node.js 20 or newer (to build the studio).
 
 ```bash
-git clone https://github.com/arvinhm/FluoroView.git     # add --branch v4.0.1 for exactly this release
+git clone https://github.com/arvinhm/FluoroView.git     # add --branch v4.1.0 for exactly this release
 cd FluoroView/studio && npm ci && npm run build      # builds the UI into the engine package
 cd ../engine && uv sync
 uv run fluoroview /path/to/scan.tif
@@ -100,7 +102,7 @@ cd engine && uv run python bench/bench_open.py /path/to/scan.tif
 For live UI work, run the engine with a fixed token and the Vite dev server:
 
 ```bash
-cd engine && FLUOROVIEW_TOKEN=dev uv run fluoroview --port 7070 --no-browser
+cd engine && FLUOROVIEW_TOKEN=dev uv run fluoroview --port 7071 --no-browser
 cd studio && npm run dev        # then open http://localhost:5173/#token=dev
 ```
 

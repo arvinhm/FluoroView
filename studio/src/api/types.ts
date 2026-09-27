@@ -1,3 +1,5 @@
+import type { Blend, CurvePoint, Lut } from "../lib/lut";
+
 export interface ChannelInfo {
   index: number;
   name: string;
@@ -135,6 +137,11 @@ export interface Annotation {
 export interface SavedDisplay {
   visible: boolean;
   color: string;
+  /** absent in settings saved before colour maps and curves existed */
+  lut?: Lut;
+  invert?: boolean;
+  curve?: readonly CurvePoint[];
+  intensity?: number;
   lo: number;
   hi: number;
   gamma: number;
@@ -230,6 +237,7 @@ export type Box = [number, number, number, number];
 export interface FigureRequest {
   box: Box;
   display: Omit<SavedDisplay, "touched">[];
+  blend: Blend;
   format: "png" | "tiff";
   scale_bar: boolean;
   labels: boolean;
@@ -268,6 +276,8 @@ export interface SessionViewer {
   clip: boolean;
   minimap: boolean;
   hist_log: boolean;
+  /** absent in sessions saved before blend modes existed */
+  blend?: Blend;
 }
 
 export interface SessionLine {

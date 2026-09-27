@@ -21,7 +21,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..counting import counts_csv, points_csv
 from ..datasets import Dataset, NotReady, Registry
-from ..display import DisplayChannel
+from ..display import Blend, DisplayChannel
 from ..figure import Display, Plan, clip_box, encode_png, encode_tiff, plan, provenance, render_figure, write_ome
 from ..interop import InteropError, geojson_text, read_regions, roiset_bytes
 from ..measure import measure_region, rows_for_scan, to_csv
@@ -80,6 +80,8 @@ class FigureIn(BaseModel):
     """full-resolution pixels x0, y0, x1, y1"""
     display: list[DisplayChannel]
     format: Literal["png", "tiff"] = "png"
+    blend: Blend = "add"
+    """how visible channels combine in the composite: summed, or their maximum"""
     scale_bar: bool = True
     labels: bool = True
     regions: bool = True
@@ -642,7 +644,8 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
         ds = dataset(ds_id)
         if len(req.display) != len(ds.info.channels):
             raise HTTPException(422, f"expected {len(ds.info.channels)} channels, got {len(req.display)}")
-        displays = [Display(d.visible, d.color, d.lo, d.hi, d.gamma) for d in req.display]
+        displays = [Display(d.visible, d.color, d.lo, d.hi, d.gamma, d.lut, d.invert,
+                            tuple((float(x), float(y)) for x, y in d.curve), d.intensity) for d in req.display]
         visible = tuple(i for i, d in enumerate(displays) if d.visible)
         if not visible:
             raise HTTPException(422, "no channel is visible")
@@ -654,10 +657,10 @@ def project_router(registry: Registry, projects: ProjectStore, exports_dir: Path
         try:
             img = render_figure(ds, p, displays, regions=state["regions"] if req.regions else [],
                                 notes=state["annotations"] if req.notes else [], scale_bar=req.scale_bar,
-                                labels=req.labels, pixel_size=px)
+                                labels=req.labels, pixel_size=px, blend=req.blend)
         except NotReady:
             raise HTTPException(409, "the image is still loading; try again in a moment") from None
-        meta = provenance(ds, p, displays, px)
+        meta = provenance(ds, p, displays, px, req.blend)
         if req.format == "png":
             body, ext, media = encode_png(img, req.dpi, meta), "png", "image/png"
         else:

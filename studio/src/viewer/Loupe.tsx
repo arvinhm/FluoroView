@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { project as papi } from "../api/client";
 import type { DatasetInfo, Patch } from "../api/types";
-import { fmtInt, hexToRgb } from "../lib/format";
+import { fmtInt } from "../lib/format";
+import { type Blend, lookup, lutFor } from "../lib/lut";
 import { type ChannelDisplay, useStudio } from "../state/store";
 import type { Bounds } from "./overlay";
 
@@ -10,18 +11,24 @@ const CELL = 12;
 const OFFSET = 22;
 const MARGIN = 8;
 
-/** Same windowing, gamma and additive tint as the image shader, for one pixel. */
-export function compositeColor(values: readonly number[], display: readonly ChannelDisplay[]): [number, number, number] {
+/** The image shader's colour for one pixel: window, gamma, the channel's colour table, then the blend. */
+export function compositeColor(values: readonly number[], display: readonly ChannelDisplay[], blend: Blend): [number, number, number] {
   let r = 0;
   let g = 0;
   let b = 0;
   display.forEach((d, c) => {
     if (!d.visible) return;
     const t = Math.min(1, Math.max(0, ((values[c] ?? 0) - d.lo) / Math.max(d.hi - d.lo, 1))) ** (1 / d.gamma);
-    const [cr, cg, cb] = hexToRgb(d.color);
-    r += cr * t;
-    g += cg * t;
-    b += cb * t;
+    const [cr, cg, cb] = lookup(lutFor(d).table, t);
+    if (blend === "max") {
+      r = Math.max(r, cr);
+      g = Math.max(g, cg);
+      b = Math.max(b, cb);
+    } else {
+      r += cr;
+      g += cg;
+      b += cb;
+    }
   });
   return [Math.round(Math.min(1, r) * 255), Math.round(Math.min(1, g) * 255), Math.round(Math.min(1, b) * 255)];
 }
@@ -29,6 +36,7 @@ export function compositeColor(values: readonly number[], display: readonly Chan
 export function Loupe({ ds, bounds }: { ds: DatasetInfo; bounds: Bounds }) {
   const cursor = useStudio((s) => s.cursor);
   const display = useStudio((s) => s.display[ds.id]);
+  const blend = useStudio((s) => s.options.blend);
   const [patch, setPatch] = useState<(Patch & { cx: number; cy: number }) | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -67,7 +75,7 @@ export function Loupe({ ds, bounds }: { ds: DatasetInfo; bounds: Bounds }) {
     for (let row = 0; row < n; row++) {
       for (let col = 0; col < n; col++) {
         const k = row * n + col;
-        const [r, g, b] = compositeColor(patch.channels.map((ch) => ch[k]!), display);
+        const [r, g, b] = compositeColor(patch.channels.map((ch) => ch[k]!), display, blend);
         ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
         ctx.fillRect(col * CELL, row * CELL, CELL, CELL);
       }
@@ -86,7 +94,7 @@ export function Loupe({ ds, bounds }: { ds: DatasetInfo; bounds: Bounds }) {
     ctx.strokeStyle = accent;
     ctx.lineWidth = 1.5;
     ctx.strokeRect((patch.cx - patch.x0) * CELL + 0.75, (patch.cy - patch.y0) * CELL + 0.75, CELL - 1.5, CELL - 1.5);
-  }, [patch, display]);
+  }, [patch, display, blend]);
 
   useEffect(() => {
     const el = boxRef.current;

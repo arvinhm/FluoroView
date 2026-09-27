@@ -1,12 +1,16 @@
+import { type Blend, LUT_SIZE } from "../lib/lut";
 import type { Camera } from "./camera";
 import { FRAGMENT, MAX_CHANNELS, VERTEX } from "./shaders";
 
 export interface ChannelUniforms {
+  /** texture layer of the channel; also its row in the colour table */
   layer: number;
   lo: number;
   hi: number;
   gamma: number;
-  color: [number, number, number];
+  /** RGB for LUT_SIZE values after the window and gamma (lib/lut.ts) */
+  lut: Float32Array;
+  lutKey: string;
   saturation: number;
 }
 
@@ -31,8 +35,8 @@ export interface Region {
 }
 
 const UNIFORMS = [
-  "uRect", "uUV", "uCenter", "uScale", "uViewport", "uTex", "uTexSize", "uCount", "uLayer", "uWindow",
-  "uInvGamma", "uColor", "uSaturation", "uSmooth", "uClip", "uGrid", "uAlpha",
+  "uRect", "uUV", "uCenter", "uScale", "uViewport", "uTex", "uLut", "uTexSize", "uCount", "uLayer", "uWindow",
+  "uInvGamma", "uSaturation", "uMax", "uSmooth", "uClip", "uGrid", "uAlpha",
 ] as const;
 
 type UniformName = (typeof UNIFORMS)[number];
@@ -52,6 +56,10 @@ export class Renderer {
   private readonly program: WebGLProgram;
   private readonly vao: WebGLVertexArrayObject;
   private readonly loc: Record<UniformName, WebGLUniformLocation | null>;
+  private readonly lut: WebGLTexture;
+  /** which look each row of the colour table holds */
+  private readonly lutRows: (string | null)[] = new Array<string | null>(MAX_CHANNELS).fill(null);
+  private readonly lutRow = new Float32Array(LUT_SIZE * 4);
   private canvasHeight = 1;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -89,7 +97,36 @@ export class Renderer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.useProgram(program);
     gl.uniform1i(this.loc.uTex, 0);
+    gl.uniform1i(this.loc.uLut, 1);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+
+    this.lut = gl.createTexture()!;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.lut);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, LUT_SIZE, MAX_CHANNELS, 0, gl.RGBA, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  /** Upload a channel's colour table into its row, only when its look changed. */
+  private setLutRow(row: number, key: string, rgb: Float32Array): void {
+    if (this.lutRows[row] === key) return;
+    const gl = this.gl;
+    const data = this.lutRow;
+    for (let i = 0; i < LUT_SIZE; i++) {
+      data[4 * i] = rgb[3 * i]!;
+      data[4 * i + 1] = rgb[3 * i + 1]!;
+      data[4 * i + 2] = rgb[3 * i + 2]!;
+      data[4 * i + 3] = 1;
+    }
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.lut);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, LUT_SIZE, 1, gl.RGBA, gl.FLOAT, data);
+    gl.activeTexture(gl.TEXTURE0);
+    this.lutRows[row] = key;
   }
 
   resize(width: number, height: number): void {
@@ -112,13 +149,12 @@ export class Renderer {
     gl.disable(gl.SCISSOR_TEST);
   }
 
-  setChannels(channels: ChannelUniforms[]): void {
+  setChannels(channels: ChannelUniforms[], blend: Blend = "add"): void {
     const gl = this.gl;
     const n = Math.min(channels.length, MAX_CHANNELS);
     const layer = new Int32Array(MAX_CHANNELS);
     const win = new Float32Array(2 * MAX_CHANNELS);
     const invGamma = new Float32Array(MAX_CHANNELS).fill(1);
-    const color = new Float32Array(3 * MAX_CHANNELS);
     const sat = new Float32Array(MAX_CHANNELS).fill(1e9);
     for (let i = 0; i < n; i++) {
       const ch = channels[i]!;
@@ -126,16 +162,16 @@ export class Renderer {
       win[2 * i] = ch.lo;
       win[2 * i + 1] = ch.hi;
       invGamma[i] = 1 / Math.max(ch.gamma, 0.01);
-      color.set(ch.color, 3 * i);
       sat[i] = ch.saturation;
+      if (ch.layer < MAX_CHANNELS) this.setLutRow(ch.layer, ch.lutKey, ch.lut);
     }
     gl.useProgram(this.program);
     gl.uniform1i(this.loc.uCount, n);
     gl.uniform1iv(this.loc.uLayer, layer);
     gl.uniform2fv(this.loc.uWindow, win);
     gl.uniform1fv(this.loc.uInvGamma, invGamma);
-    gl.uniform3fv(this.loc.uColor, color);
     gl.uniform1fv(this.loc.uSaturation, sat);
+    gl.uniform1i(this.loc.uMax, blend === "max" ? 1 : 0);
   }
 
   /** Start drawing into `region` of the canvas with `camera` (scale in device px per world px). */

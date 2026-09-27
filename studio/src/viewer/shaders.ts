@@ -1,3 +1,5 @@
+import { LUT_SIZE } from "../lib/lut";
+
 export const MAX_CHANNELS = 16;
 
 export const VERTEX = `#version 300 es
@@ -17,22 +19,26 @@ void main() {
   vWorld = world;
 }`;
 
-/* Raw integer samples are windowed per channel (lo..hi -> 0..1), gamma-corrected, tinted and
-   summed. Integer textures cannot be filtered by the GPU, so smooth sampling is a manual
-   4-tap bilinear filter; magnified views default to nearest so each pixel is exact. */
+/* Raw integer samples are windowed per channel (lo..hi -> 0..1) and gamma-corrected, then coloured
+   through the channel's row of uLut (tone curve, invert, tint or colour map and intensity; see
+   lib/lut.ts) and summed or maxed. Integer textures cannot be filtered by the GPU, so smooth
+   sampling is a manual 4-tap bilinear filter; magnified views default to nearest so each pixel is exact. */
 export const FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp usampler2DArray;
+precision highp sampler2D;
 #define MAXC ${MAX_CHANNELS}
+#define LUT_SIZE ${LUT_SIZE}
 uniform usampler2DArray uTex;
+uniform sampler2D uLut;
 uniform ivec2 uTexSize;
 uniform int uCount;
 uniform int uLayer[MAXC];
 uniform vec2 uWindow[MAXC];
 uniform float uInvGamma[MAXC];
-uniform vec3 uColor[MAXC];
 uniform float uSaturation[MAXC];
+uniform bool uMax;
 uniform bool uSmooth;
 uniform bool uClip;
 uniform float uGrid;
@@ -67,7 +73,9 @@ void main() {
     if (k >= uCount) break;
     float v = sampleLayer(uLayer[k]);
     float t = clamp((v - uWindow[k].x) / max(uWindow[k].y - uWindow[k].x, 1.0), 0.0, 1.0);
-    acc += uColor[k] * pow(t, uInvGamma[k]);
+    float u = (pow(t, uInvGamma[k]) * float(LUT_SIZE - 1) + 0.5) / float(LUT_SIZE);
+    vec3 c = texture(uLut, vec2(u, (float(uLayer[k]) + 0.5) / float(MAXC))).rgb;
+    acc = uMax ? max(acc, c) : acc + c;
     clipped = clipped || (uClip && v >= uSaturation[k]);
   }
   vec3 col = clipped ? vec3(1.0, 0.0, 0.0) : min(acc, vec3(1.0));

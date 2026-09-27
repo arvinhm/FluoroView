@@ -243,6 +243,66 @@ button.row:hover { background: var(--fv-surface-2); color: var(--fv-text-1); }
 }
 .lut { position: relative; height: 4px; margin: 3px 0 8px; border-radius: 1px; overflow: hidden; }
 .fields { display: grid; grid-template-columns: 1fr 1fr 64px; gap: 5px; }
+
+/* channel colour, colour maps, adjustments */
+.ch-color {
+  flex: none; width: 28px; height: 12px; padding: 0; border-radius: 3px; cursor: pointer;
+  border: var(--fv-hair) solid var(--fv-line-strong); transition: border-color var(--fv-fast);
+}
+.ch-color:hover, .ch-color[aria-expanded="true"] { border-color: var(--fv-text-2); }
+.color-pop {
+  position: fixed; z-index: 60; display: grid; gap: 9px; padding: 12px; background: var(--fv-surface-2);
+  border: var(--fv-hair) solid var(--fv-line-strong); border-radius: 6px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  animation: fv-pop var(--fv-fast) var(--fv-ease-out);
+}
+.color-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 5px; }
+.color-cell {
+  position: relative; aspect-ratio: 1; padding: 0; border-radius: 4px; cursor: pointer;
+  border: var(--fv-hair) solid rgba(255, 255, 255, 0.14);
+}
+.color-cell.on { box-shadow: 0 0 0 1.5px var(--fv-surface-2), 0 0 0 2.5px var(--fv-accent); }
+.color-cell.custom {
+  overflow: hidden;
+  background: conic-gradient(from 90deg, #ff3a3a, #ffe03a, #2cff5a, #00d8ff, #3d6bff, #ff3af0, #ff3a3a);
+}
+.color-cell.custom input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+.map-list { display: grid; gap: 2px; }
+.map-row {
+  display: grid; grid-template-columns: 70px 1fr; align-items: center; gap: 10px; height: 22px; padding: 0 6px;
+  border-radius: 3px; font-size: var(--fv-fs-sm); color: var(--fv-text-2); text-align: left;
+}
+.map-row:hover { background: var(--fv-surface-3); color: var(--fv-text-1); }
+.map-row.on { background: var(--fv-accent-weak); color: var(--fv-text-1); }
+.map-ramp { height: 8px; border-radius: 2px; }
+.adjust-toggle {
+  display: inline-flex; align-items: center; gap: 4px; height: 18px; margin-top: 7px; padding: 0 4px 0 0;
+  font-size: var(--fv-fs-sm); color: var(--fv-text-3); transition: color var(--fv-fast);
+}
+.adjust-toggle:hover, .adjust-toggle.on { color: var(--fv-text-1); }
+.adjust-toggle .lucide { width: 12px; height: 12px; transition: transform var(--fv-fast) var(--fv-ease-out); }
+.adjust-toggle.on .lucide { transform: rotate(90deg); }
+.adjust-dot { width: 5px; height: 5px; margin-left: 2px; border-radius: 50%; background: var(--fv-accent); }
+.adjust { display: grid; gap: 7px; margin-top: 6px; animation: fv-fade var(--fv-base) var(--fv-ease-out); }
+.slider-row { display: grid; grid-template-columns: 62px 1fr 40px; align-items: center; gap: 8px; font-size: var(--fv-fs-sm); color: var(--fv-text-3); }
+.slider-row .val { font: 400 var(--fv-fs-sm) var(--fv-font-num); font-variant-numeric: tabular-nums; color: var(--fv-text-1); text-align: right; }
+.slider-row input[type="range"] { width: 100%; height: 16px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; }
+.slider-row input[type="range"]::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: var(--fv-line-strong); }
+.slider-row input[type="range"]::-webkit-slider-thumb {
+  width: 11px; height: 11px; margin-top: -4.5px; border: 0; border-radius: 50%; background: var(--fv-text-1);
+  box-shadow: 0 0 0 3px var(--fv-bg); -webkit-appearance: none; appearance: none;
+}
+.slider-row input[type="range"]::-moz-range-track { height: 2px; border-radius: 1px; background: var(--fv-line-strong); }
+.slider-row input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--fv-text-1); }
+.slider-row input[type="range"]:focus-visible::-webkit-slider-thumb { background: var(--fv-accent); }
+.curve { display: grid; gap: 5px; margin-top: 2px; }
+.curve-h { display: flex; align-items: center; justify-content: space-between; height: 20px; }
+.curve-box {
+  position: relative; height: 132px; background: var(--fv-bg); border: var(--fv-hair) solid var(--fv-line);
+  border-radius: var(--fv-r-1); cursor: crosshair; touch-action: none;
+}
+.curve-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.curve-read { font: 400 var(--fv-fs-xs) var(--fv-font-num); color: var(--fv-text-3); }
+.toolrow-end { margin-left: auto; }
 .field {
   min-width: 0; height: var(--fv-field); display: flex; align-items: center; gap: 6px; padding: 0 7px;
   background: var(--fv-bg); border: var(--fv-hair) solid var(--fv-line); border-radius: var(--fv-r-1);
