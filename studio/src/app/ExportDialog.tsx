@@ -7,11 +7,10 @@ import { fmtInt } from "../lib/format";
 import { useProject } from "../state/project";
 import { useActive, useStudio } from "../state/store";
 import { regionBox } from "../viewer/geometry";
+import { EXPORT_SETTINGS_KEY } from "./actions";
 import { Checkbox } from "./Checkbox";
 import { NumberField } from "./NumberField";
 import { Segmented } from "./Segmented";
-
-const SETTINGS_KEY = "fluoroview.export";
 
 interface Settings {
   scaleBar: boolean;
@@ -28,7 +27,7 @@ const DEFAULTS: Settings = { scaleBar: true, labels: true, regions: true, notes:
 
 function stored(): Settings {
   try {
-    return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<Settings>) };
+    return { ...DEFAULTS, ...(JSON.parse(localStorage.getItem(EXPORT_SETTINGS_KEY) ?? "{}") as Partial<Settings>) };
   } catch {
     return DEFAULTS;
   }
@@ -65,7 +64,7 @@ function ExportBody({ ds }: { ds: DatasetInfo }) {
     notes: settings.notes, dpi: settings.dpi,
   } : null), [box?.join(), display, settings]);
 
-  useEffect(() => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)), [settings]);
+  useEffect(() => localStorage.setItem(EXPORT_SETTINGS_KEY, JSON.stringify(settings)), [settings]);
 
   useEffect(() => {
     if (!body) return;

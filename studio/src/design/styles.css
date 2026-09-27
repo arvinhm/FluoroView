@@ -522,6 +522,17 @@ button.res:hover { color: var(--fv-text-1); background: var(--fv-surface-3); }
 .palette .row.active { background: var(--fv-accent-weak); color: var(--fv-text-1); }
 .shortcuts { display: grid; grid-template-columns: 1fr auto; row-gap: 7px; padding: 14px; font-size: var(--fv-fs-md); }
 .dialog.export { width: 580px; }
+.dialog.prompt { width: 460px; }
+.prompt-body { margin: 14px 16px 0; font-size: var(--fv-fs-md); line-height: 19px; color: var(--fv-text-1); }
+.prompt-body.muted { margin-bottom: 16px; color: var(--fv-text-3); font-size: var(--fv-fs-sm); line-height: 17px; }
+.banner {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; font-size: var(--fv-fs-sm); line-height: 17px;
+  color: var(--fv-text-2); background: var(--fv-accent-weak); border-bottom: 1px solid var(--fv-line);
+}
+.banner .lucide { width: 15px; height: 15px; margin-top: 1px; color: var(--fv-accent); }
+.banner b { color: var(--fv-text-1); font-weight: 500; }
+.save-f .input { flex: 0 0 220px; }
+.save-f span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .export-body { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 18px 14px; padding: 18px 16px 20px; }
 .export-body > .caps { line-height: 24px; }
 .export-cell { display: grid; gap: 8px; min-width: 0; align-content: start; font-size: var(--fv-fs-sm); color: var(--fv-text-1); }

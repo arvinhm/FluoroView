@@ -34,7 +34,9 @@ export function buildCommands(): Command[] {
   const selection = useProject.getState().selection;
 
   const commands: Command[] = [
-    { id: "open", group: "File", title: "Open image…", keys: "⌘O", run: () => s.setDialog("open") },
+    { id: "open", group: "File", title: "Open image or session…", keys: "⌘O", run: () => s.setDialog("open") },
+    { id: "save-session", group: "File", title: "Save session…", keys: "⌘S", disabled: none,
+      run: () => s.setDialog("save-session") },
     { id: "scans", group: "File", title: "Scan gallery", checked: s.page === "scans", disabled: none,
       run: () => s.setPage(s.page === "scans" ? "viewer" : "scans") },
     { id: "export-regions", group: "File", title: "Export region measurements (CSV)", keys: "⌘E", disabled: !regions,
@@ -117,6 +119,9 @@ export function handleShortcut(e: KeyboardEvent): void {
       e.preventDefault();
       if (e.shiftKey) s.setDialog("export");
       else void exportRegionsCsv(id);
+    } else if (key === "s") {
+      e.preventDefault();
+      if (id) s.setDialog("save-session");
     }
     return;
   }

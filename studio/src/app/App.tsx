@@ -15,7 +15,9 @@ import { Inspector } from "./Inspector";
 import { OpenDialog } from "./OpenDialog";
 import { ProfilePanel } from "./ProfilePanel";
 import { ProjectPanel } from "./ProjectPanel";
+import { SaveSessionDialog } from "./SaveSessionDialog";
 import { ScanGallery } from "./ScanGallery";
+import { SessionPrompt } from "./SessionPrompt";
 import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
 
@@ -120,6 +122,8 @@ export function App() {
       {dialog === "palette" && <CommandPalette />}
       {dialog === "shortcuts" && <ShortcutsDialog />}
       {dialog === "export" && <ExportDialog />}
+      {dialog === "save-session" && <SaveSessionDialog />}
+      <SessionPrompt />
       {notice && (
         <div className="toast" role="status">
           <span>{notice.text}</span>

@@ -65,6 +65,8 @@ export interface FsEntry {
   size: number | null;
   mtime: number;
   cached?: boolean;
+  /** a FluoroView session (.fv) */
+  session?: boolean;
 }
 
 export interface FsListing {
@@ -193,6 +195,64 @@ export interface ExportPlan {
   panel_height: number;
   width: number;
   height: number;
+}
+
+export interface SessionView {
+  cx: number;
+  cy: number;
+  /** CSS pixels per full-resolution pixel */
+  zoom: number;
+  gallery: boolean;
+}
+
+export interface SessionViewer {
+  grid: boolean;
+  smooth: boolean;
+  clip: boolean;
+  minimap: boolean;
+  hist_log: boolean;
+}
+
+export interface SessionLine {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+export interface SessionSaveRequest {
+  path: string;
+  overwrite: boolean;
+  display: SavedDisplay[];
+  view: SessionView;
+  viewer: SessionViewer;
+  profile_line: SessionLine | null;
+  export: Record<string, unknown> | null;
+}
+
+export interface SessionInfo {
+  manifest: {
+    format: string;
+    version: number;
+    software: string;
+    created: string;
+    image: { names: string[]; paths: string[]; width: number; height: number; channels: string[]; fingerprint: string };
+  };
+  regions: number;
+  notes: number;
+  /** where the image files are, or null when they were not found */
+  image_paths: string[] | null;
+}
+
+export interface SessionApplied {
+  project: Project;
+  view: SessionView | null;
+  viewer: SessionViewer | null;
+  profile_line: SessionLine | null;
+  export: Record<string, unknown> | null;
+  fingerprint_ok: boolean;
+  channels_match: boolean;
+  backup: string | null;
 }
 
 export type EngineEvent =

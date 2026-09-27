@@ -380,7 +380,8 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
     const covered = line && g === 0 ? PROFILE_DRAWER_CSS * vp.dpr : 0;
     const [bx0, by0] = screenToImage(main.cam, main.vp, 0, 0);
     const [bx1, by1] = screenToImage(main.cam, main.vp, main.vp.width, main.vp.height - covered);
-    setView({ scale: main.cam.scale, level: plans[0]!.level, cssPxPerImagePx: cssPerImage, box: [bx0, by0, bx1, by1] });
+    setView({ scale: main.cam.scale, level: plans[0]!.level, cssPxPerImagePx: cssPerImage, cx: cam.cx, cy: cam.cy,
+      box: [bx0, by0, bx1, by1] });
     const next: Overlay = {
       minimap,
       bar: ds.pixel_size_um ? scaleBar(ds.pixel_size_um / cssPerImage) : null,
@@ -434,7 +435,16 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
       const dpr = window.devicePixelRatio || 1;
       const rect = host.getBoundingClientRect();
       viewport.current = { width: Math.max(1, Math.round(rect.width * dpr)), height: Math.max(1, Math.round(rect.height * dpr)), dpr };
-      if (!camera.current) camera.current = fit(W, H, viewport.current);
+      if (!camera.current) {
+        const saved = useStudio.getState().pendingView;
+        if (saved?.dsId === dataset.id) {
+          useStudio.getState().setPendingView(null);
+          camera.current = clampCenter({ cx: saved.cx, cy: saved.cy,
+            scale: clampScale(saved.zoom * dpr, W, H, viewport.current) }, W, H);
+        } else {
+          camera.current = fit(W, H, viewport.current);
+        }
+      }
       requestFrame();
     });
     observer.observe(host);
@@ -492,6 +502,12 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
   focusRef.current = focusBox;
 
   useEffect(() => onViewerFocus(focusBox), [focusBox]);
+  useEffect(() => useStudio.subscribe((s) => {
+    const v = s.pendingView;
+    if (!v || v.dsId !== dataset.id || !camera.current) return;
+    s.setPendingView(null);
+    fly({ cx: v.cx, cy: v.cy, scale: v.zoom * viewport.current.dpr });
+  }), [dataset.id, fly]);
 
   useEffect(() => {
     const tc = new ToolController(dataset.id, () => requestFrameRef.current(), (box) => focusRef.current(box));

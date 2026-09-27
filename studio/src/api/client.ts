@@ -1,6 +1,6 @@
 import type {
   Annotation, DatasetInfo, EngineEvent, ExportPlan, FigureRequest, FsListing, Histogram, Measurement, Patch, Point,
-  Profile, Project, RawRequest, Region, RegionShape, SavedDisplay,
+  Profile, Project, RawRequest, Region, RegionShape, SavedDisplay, SessionApplied, SessionInfo, SessionSaveRequest,
 } from "./types";
 
 const TOKEN_KEY = "fluoroview.token";
@@ -87,6 +87,14 @@ export const project = {
   rawPlan: (id: string, body: RawRequest) =>
     request<ExportPlan>(`/datasets/${id}/export.ome.tif`, send("POST", { ...body, plan_only: true })),
   raw: (id: string, body: RawRequest) => download(`/datasets/${id}/export.ome.tif`, "area.ome.tif", send("POST", body)),
+};
+
+export const sessions = {
+  save: (id: string, body: SessionSaveRequest) =>
+    request<{ path: string; bytes: number }>(`/datasets/${id}/session`, send("POST", body)),
+  inspect: (path: string) => request<SessionInfo>("/sessions/inspect", send("POST", { path })),
+  apply: (id: string, path: string, mode: "replace" | "merge") =>
+    request<SessionApplied>(`/datasets/${id}/session/apply`, send("POST", { path, mode })),
 };
 
 interface LineQuery {

@@ -5,7 +5,7 @@
 
 import { create } from "zustand";
 import { ApiError, project as papi } from "../api/client";
-import type { Annotation, Measurement, Point, Profile, Region, RegionShape } from "../api/types";
+import type { Annotation, Measurement, Point, Profile, Project, Region, RegionShape } from "../api/types";
 import { useStudio } from "./store";
 
 export interface Line {
@@ -122,6 +122,13 @@ export async function loadProject(dsId: string): Promise<void> {
   } catch (e) {
     report(e);
   }
+}
+
+/** Take a scan's whole project state from the engine (after restoring a session). */
+export function setScanState(dsId: string, p: Project): void {
+  patchScan(dsId, () => ({ regions: p.regions, notes: p.annotations, background: p.background_region }));
+  if (p.display) useStudio.getState().applySavedDisplay(dsId, p.display);
+  select(null);
 }
 
 // ---- regions -----------------------------------------------------------------------------------

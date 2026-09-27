@@ -16,6 +16,9 @@ export interface ViewReadout {
   scale: number;
   level: number;
   cssPxPerImagePx: number;
+  /** view centre in full-resolution pixels */
+  cx: number;
+  cy: number;
   /** visible image area x0, y0, x1, y1 in full-resolution pixels (may extend past the image) */
   box: [number, number, number, number];
 }
@@ -41,7 +44,15 @@ export interface Options {
   loupe: boolean;
 }
 
-export type Dialog = "open" | "palette" | "shortcuts" | "export" | null;
+export type Dialog = "open" | "palette" | "shortcuts" | "export" | "save-session" | null;
+
+/** A session being opened onto an image that already has regions or notes. */
+export interface SessionPrompt {
+  path: string;
+  dsId: string;
+  existing: { regions: number; notes: number };
+  incoming: { regions: number; notes: number };
+}
 export type Accent = "champagne" | "ice" | "white";
 export type Page = "viewer" | "scans";
 export type Tool = "move" | "rectangle" | "ellipse" | "polygon" | "freehand" | "line" | "note";
@@ -75,6 +86,11 @@ interface StudioState {
   page: Page;
   connected: boolean;
   notice: Notice | null;
+  /** a session whose image was not found: the user is choosing it in the open dialog */
+  pendingSession: { path: string; names: string[] } | null;
+  sessionPrompt: SessionPrompt | null;
+  /** a restored view for a dataset's viewer to show, as its first view or by flying there */
+  pendingView: { dsId: string; cx: number; cy: number; zoom: number } | null;
 
   upsertDataset: (ds: DatasetInfo) => void;
   setActive: (id: string) => void;
@@ -93,6 +109,9 @@ interface StudioState {
   setPage: (p: Page) => void;
   setConnected: (v: boolean) => void;
   setNotice: (n: string | Notice | null) => void;
+  setPendingSession: (p: StudioState["pendingSession"]) => void;
+  setSessionPrompt: (p: SessionPrompt | null) => void;
+  setPendingView: (v: StudioState["pendingView"]) => void;
 }
 
 /** Transmitted-light channels start hidden when there is fluorescence: summed with it they wash the image out. */
@@ -121,6 +140,9 @@ export const useStudio = create<StudioState>((set, get) => ({
   page: "viewer",
   connected: false,
   notice: null,
+  pendingSession: null,
+  sessionPrompt: null,
+  pendingView: null,
 
   upsertDataset: (ds) =>
     set((s) => ({
@@ -227,6 +249,9 @@ export const useStudio = create<StudioState>((set, get) => ({
   setPage: (page) => set({ page }),
   setConnected: (connected) => set({ connected }),
   setNotice: (notice) => set({ notice: typeof notice === "string" ? { text: notice } : notice }),
+  setPendingSession: (pendingSession) => set({ pendingSession }),
+  setSessionPrompt: (sessionPrompt) => set({ sessionPrompt }),
+  setPendingView: (pendingView) => set({ pendingView }),
 }));
 
 export function useActive(): DatasetInfo | null {
