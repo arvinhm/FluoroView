@@ -1,16 +1,20 @@
 import { Download } from "lucide-react";
 import { useEffect } from "react";
-import type { DatasetInfo } from "../api/types";
+import type { DatasetInfo, RegionCombine } from "../api/types";
 import { fmtArea, fmtInt } from "../lib/format";
-import { measureAll, measureKey, select, useProject, useScan } from "../state/project";
+import {
+  measureAll, measureKey, regionOp, select, selectedRegions, toggleRegion, useProject, useScan,
+} from "../state/project";
 import { useStudio } from "../state/store";
 import { focusViewer } from "../viewer/commands";
 import { regionBox } from "../viewer/geometry";
 import { SHAPE_ICON } from "../viewer/MeasureCard";
 import { exportRegionsCsv } from "./actions";
+import { COMBINE } from "./commands";
 import { CountsSection } from "./CountsSection";
 
 const NOTE_FOCUS_PX = 240;
+const SHORT: Record<RegionCombine, string> = { union: "Union", intersect: "Intersect", xor: "XOR", subtract: "Subtract" };
 
 export function RegionsTab({ ds }: { ds: DatasetInfo }) {
   const scan = useScan(ds.id);
@@ -20,6 +24,8 @@ export function RegionsTab({ ds }: { ds: DatasetInfo }) {
 
   useEffect(() => measureAll(ds.id), [ds.id, scan.regions]);
 
+  const picked = selectedRegions(selection);
+  const firstName = scan.regions.find((r) => r.id === picked[0])?.name ?? "The first region";
   const visible = ds.channels.flatMap((_, i) => (display?.[i]?.visible ? [i] : []));
   const bg = scan.background ? measures[measureKey(ds.id, scan.background)]?.data ?? null : null;
 
@@ -48,8 +54,13 @@ export function RegionsTab({ ds }: { ds: DatasetInfo }) {
               const Icon = SHAPE_ICON[r.shape];
               const m = measures[measureKey(ds.id, r.id)];
               return (
-                <button key={r.id} className={`row${selection?.id === r.id ? " sel" : ""}`}
-                  onClick={() => {
+                <button key={r.id} className={`row${picked.includes(r.id) ? " sel" : ""}`}
+                  title="⇧ or ⌘-click to select several regions"
+                  onClick={(e) => {
+                    if (e.shiftKey || e.metaKey || e.ctrlKey) {
+                      toggleRegion(r.id);
+                      return;
+                    }
                     select({ kind: "region", id: r.id });
                     focusViewer(regionBox(r));
                   }}>
@@ -61,6 +72,17 @@ export function RegionsTab({ ds }: { ds: DatasetInfo }) {
               );
             })}
           </div>
+          {picked.length >= 2 && (
+            <div className="ops-bar">
+              <span className="muted">{picked.length} selected</span>
+              {COMBINE.map(([op, , hint]) => (
+                <button key={op} className="btn" title={op === "subtract" ? `${firstName} minus the others` : hint}
+                  onClick={() => void regionOp(ds.id, { op, ids: picked })}>
+                  {SHORT[op]}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="sec-h"><span className="caps">{bg ? "Mean − background" : "Mean intensity"}</span></div>
           {visible.length === 0 ? (
             <div className="empty-note">No channels are visible.</div>
@@ -79,7 +101,7 @@ export function RegionsTab({ ds }: { ds: DatasetInfo }) {
                   {scan.regions.map((r) => {
                     const m = measures[measureKey(ds.id, r.id)]?.data;
                     return (
-                      <tr key={r.id} className={selection?.id === r.id ? "sel" : undefined}>
+                      <tr key={r.id} className={picked.includes(r.id) ? "sel" : undefined}>
                         <td>{r.name}</td>
                         {visible.map((c) => {
                           const mean = m?.channels[c]?.mean ?? null;

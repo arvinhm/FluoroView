@@ -10,6 +10,7 @@ import { Viewer } from "../viewer/Viewer";
 import { loadHistograms } from "./actions";
 import { CommandPalette, ShortcutsDialog } from "./CommandPalette";
 import { handleShortcut } from "./commands";
+import { EnlargeDialog } from "./EnlargeDialog";
 import { ExportDialog } from "./ExportDialog";
 import { Home } from "./Home";
 import { Inspector } from "./Inspector";
@@ -20,6 +21,7 @@ import { SaveSessionDialog } from "./SaveSessionDialog";
 import { ScanGallery } from "./ScanGallery";
 import { SessionPrompt } from "./SessionPrompt";
 import { SetScaleDialog } from "./SetScaleDialog";
+import { SpecifyDialog } from "./SpecifyDialog";
 import { StatusBar } from "./StatusBar";
 import { TopBar } from "./TopBar";
 
@@ -108,6 +110,8 @@ export function App() {
       {dialog === "export" && <ExportDialog />}
       {dialog === "save-session" && <SaveSessionDialog />}
       {dialog === "set-scale" && <SetScaleDialog />}
+      {dialog === "enlarge" && <EnlargeDialog />}
+      {dialog === "specify" && <SpecifyDialog />}
       <SessionPrompt />
       {notice && (
         <div className="toast" role="status">

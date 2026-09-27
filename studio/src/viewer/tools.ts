@@ -7,7 +7,7 @@
 import type { Point } from "../api/types";
 import {
   addPoint, cancelNote, commitRegion, createRegion, deleteNote, deleteRegion, EMPTY_SCAN, editNote, previewNote,
-  previewRegion, removePoint, revertRegion, select, setLine, startNote, useProject,
+  previewRegion, removePoint, revertRegion, select, setLine, startNote, toggleRegion, useProject,
 } from "../state/project";
 import { type Tool, useStudio } from "../state/store";
 import {
@@ -32,7 +32,7 @@ export type Draft =
 
 type Gesture =
   | { kind: "draw" }
-  | { kind: "move-region"; id: string; start: Point; origin: Point[]; moved: boolean }
+  | { kind: "move-region"; id: string; start: Point; origin: Point[]; originRings?: Point[][]; moved: boolean }
   | { kind: "handle"; id: string; index: number; anchor: Point | null; origin: Point[] }
   | { kind: "line-end"; end: 0 | 1 }
   | { kind: "move-note"; id: string; start: Point; origin: Point; moved: boolean };
@@ -203,8 +203,12 @@ export class ToolController {
       }
       case "region": {
         const r = this.region(hit.id)!;
+        if (p.shift) {
+          toggleRegion(r.id);
+          break;
+        }
         select({ kind: "region", id: r.id });
-        this.gesture = { kind: "move-region", id: r.id, start: pt, origin: r.points, moved: false };
+        this.gesture = { kind: "move-region", id: r.id, start: pt, origin: r.points, originRings: r.rings, moved: false };
         break;
       }
       default: {
@@ -247,7 +251,8 @@ export class ToolController {
         const r = this.region(g.id);
         if (!r) return;
         const whole = r.shape === "rectangle" || r.shape === "ellipse";
-        previewRegion(this.dsId, g.id, translate(g.origin, whole ? Math.round(dx) : dx, whole ? Math.round(dy) : dy));
+        const [mx, my] = whole ? [Math.round(dx), Math.round(dy)] : [dx, dy];
+        previewRegion(this.dsId, g.id, translate(g.origin, mx, my), g.originRings?.map((ring) => translate(ring, mx, my)));
         break;
       }
       case "handle": {
@@ -313,7 +318,7 @@ export class ToolController {
         return;
       case "move-region": {
         const r = this.region(g.id);
-        if (g.moved && r) void commitRegion(this.dsId, g.id, r.points);
+        if (g.moved && r) void commitRegion(this.dsId, g.id, r.points, r.rings);
         break;
       }
       case "handle": {
@@ -448,7 +453,7 @@ export class ToolController {
         const step = e.shiftKey ? 10 : 1;
         const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
         const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
-        void commitRegion(this.dsId, r.id, translate(r.points, dx, dy));
+        void commitRegion(this.dsId, r.id, translate(r.points, dx, dy), r.rings?.map((ring) => translate(ring, dx, dy)));
         return true;
       }
       default:

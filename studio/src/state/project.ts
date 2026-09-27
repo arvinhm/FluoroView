@@ -6,7 +6,7 @@
 import { create } from "zustand";
 import { ApiError, project as papi } from "../api/client";
 import type {
-  Annotation, Counter, CountPoint, Measurement, Point, Profile, Project, Region, RegionShape,
+  Annotation, Counter, CountPoint, Measurement, Point, Profile, Project, Region, RegionOpRequest, RegionShape,
 } from "../api/types";
 import { useStudio } from "./store";
 
@@ -17,7 +17,11 @@ export interface Line {
   y1: number;
 }
 
-export type Selection = { kind: "region" | "note"; id: string } | null;
+export type Selection =
+  /** `also`: further regions picked with ⇧, in the order picked; `id` is the first (the base for Subtract) */
+  | { kind: "region"; id: string; also?: string[] }
+  | { kind: "note"; id: string }
+  | null;
 
 export interface MeasureEntry {
   /** `modified` stamp of the region the numbers belong to */
@@ -113,6 +117,21 @@ export function select(selection: Selection): void {
   useProject.setState({ selection, noteDraft: null });
 }
 
+/** Every selected region, the first picked first. */
+export function selectedRegions(selection: Selection): string[] {
+  return selection?.kind === "region" ? [selection.id, ...(selection.also ?? [])] : [];
+}
+
+export function selectRegions(ids: readonly string[]): void {
+  select(ids.length ? { kind: "region", id: ids[0]!, also: ids.slice(1) } : null);
+}
+
+/** ⇧-click: add a region to the selection, or take it out again. */
+export function toggleRegion(id: string): void {
+  const picked = selectedRegions(useProject.getState().selection);
+  selectRegions(picked.includes(id) ? picked.filter((r) => r !== id) : [...picked, id]);
+}
+
 const requested = new Set<string>();
 
 /** Load a scan's project once per session; later changes are mirrored as they are made. */
@@ -164,19 +183,26 @@ export async function createRegion(dsId: string, shape: RegionShape, points: Poi
   }
 }
 
+/** New outline (and rings, when given) of one region; the other regions are kept as they are. */
+function reshape(dsId: string, rid: string, points: Point[], rings?: Point[][]): void {
+  patchScan(dsId, (s) => ({
+    regions: s.regions.map((r) => (r.id === rid ? { ...r, points, ...(rings ? { rings } : {}) } : r)),
+  }));
+}
+
 /** Local-only change while a region is dragged; `commitRegion` saves it. */
-export function previewRegion(dsId: string, rid: string, points: Point[]): void {
-  patchScan(dsId, (s) => ({ regions: s.regions.map((r) => (r.id === rid ? { ...r, points } : r)) }));
+export function previewRegion(dsId: string, rid: string, points: Point[], rings?: Point[][]): void {
+  reshape(dsId, rid, points, rings);
   setStale(dsId, rid, true);
 }
 
 /** Put a previewed region back to its saved shape without saving anything. */
-export function revertRegion(dsId: string, rid: string, points: Point[]): void {
-  patchScan(dsId, (s) => ({ regions: s.regions.map((r) => (r.id === rid ? { ...r, points } : r)) }));
+export function revertRegion(dsId: string, rid: string, points: Point[], rings?: Point[][]): void {
+  reshape(dsId, rid, points, rings);
   setStale(dsId, rid, false);
 }
 
-type RegionChange = { points?: Point[]; name?: string };
+type RegionChange = { points?: Point[]; rings?: Point[][]; name?: string };
 
 /** Saves per region: one request in flight; changes made meanwhile are merged and sent next, newest winning. */
 const saving = new Map<string, { next: RegionChange | null }>();
@@ -210,12 +236,28 @@ async function saveRegion(dsId: string, rid: string, change: RegionChange): Prom
   }
 }
 
-export function commitRegion(dsId: string, rid: string, points: Point[]): Promise<void> {
+export function commitRegion(dsId: string, rid: string, points: Point[], rings?: Point[][]): Promise<void> {
   const region = scanOf(dsId).regions.find((r) => r.id === rid);
   if (!region) return Promise.resolve();
   const tidied = tidy(region.shape, points);
-  previewRegion(dsId, rid, tidied);
-  return saveRegion(dsId, rid, { points: tidied });
+  const tidiedRings = rings?.map((ring) => tidy("polygon", ring));
+  previewRegion(dsId, rid, tidied, tidiedRings);
+  return saveRegion(dsId, rid, { points: tidied, ...(tidiedRings ? { rings: tidiedRings } : {}) });
+}
+
+/** Union, intersect, XOR, subtract, enlarge/shrink, convex hull or fit ellipse: the new regions are added
+ * and selected; the regions they came from are kept. */
+export async function regionOp(dsId: string, req: RegionOpRequest): Promise<boolean> {
+  try {
+    const { regions } = await papi.regionOp(dsId, req);
+    patchScan(dsId, (s) => ({ regions: [...s.regions, ...regions] }));
+    selectRegions(regions.map((r) => r.id));
+    for (const r of regions) measure(dsId, r.id);
+    return true;
+  } catch (e) {
+    report(e);
+    return false;
+  }
 }
 
 export function renameRegion(dsId: string, rid: string, name: string): Promise<void> {
@@ -232,7 +274,8 @@ export async function deleteRegion(dsId: string, rid: string): Promise<void> {
   try {
     const res = await papi.deleteRegion(dsId, rid);
     patchScan(dsId, (s) => ({ regions: s.regions.filter((r) => r.id !== rid), background: res.background_region }));
-    if (useProject.getState().selection?.id === rid) select(null);
+    const picked = selectedRegions(useProject.getState().selection);
+    if (picked.includes(rid)) selectRegions(picked.filter((r) => r !== rid));
     useStudio.getState().setNotice({
       text: `Deleted ${region.name}.`,
       action: { label: "Undo", run: () => void restoreRegion(dsId, region, wasBackground) },

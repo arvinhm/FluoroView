@@ -1,6 +1,7 @@
 /**
  * Region geometry in full-resolution image pixels. Containment matches the engine's rasterization
  * (rectangles half-open, ellipses analytic, polygons even-odd), so what is outlined is what is measured.
+ * A region's rings (holes and further parts) toggle inside and outside by the same even-odd rule.
  */
 
 import type { Point, Region, RegionShape } from "../api/types";
@@ -28,10 +29,17 @@ export function bbox(points: readonly Point[]): Box {
 
 const boxes = new WeakMap<Region, Box>();
 
-/** Bounding box of a region, cached per region object (regions are replaced, never mutated). */
+/** Bounding box of a region and its rings, cached per region object (regions are replaced, never mutated). */
 export function regionBox(region: Region): Box {
   let b = boxes.get(region);
-  if (!b) boxes.set(region, (b = bbox(region.points)));
+  if (!b) {
+    b = bbox(region.points);
+    for (const ring of region.rings ?? []) {
+      const [x0, y0, x1, y1] = bbox(ring);
+      b = [Math.min(b[0], x0), Math.min(b[1], y0), Math.max(b[2], x1), Math.max(b[3], y1)];
+    }
+    boxes.set(region, b);
+  }
   return b;
 }
 
@@ -103,13 +111,37 @@ export function segmentDistance(px: number, py: number, a: Point, b: Point): num
   return Math.hypot(px - (a[0] + t * dx), py - (a[1] + t * dy));
 }
 
-export function outlineDistance(shape: RegionShape, points: readonly Point[], x: number, y: number): number {
-  const ring = outline(shape, points);
+function ringDistance(ring: readonly Point[], x: number, y: number): number {
   let best = Infinity;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     best = Math.min(best, segmentDistance(x, y, ring[j]!, ring[i]!));
   }
   return best;
+}
+
+export function outlineDistance(shape: RegionShape, points: readonly Point[], x: number, y: number): number {
+  return ringDistance(outline(shape, points), x, y);
+}
+
+/** Whether (x, y) is inside the region, holes excluded and extra parts included. */
+export function regionContains(region: Region, x: number, y: number): boolean {
+  let inside = contains(region.shape, region.points, x, y);
+  for (const ring of region.rings ?? []) if (evenOdd(ring, x, y)) inside = !inside;
+  return inside;
+}
+
+/** Distance to the nearest of the region's outlines, rings included. */
+export function regionEdgeDistance(region: Region, x: number, y: number): number {
+  let best = outlineDistance(region.shape, region.points, x, y);
+  for (const ring of region.rings ?? []) best = Math.min(best, ringDistance(ring, x, y));
+  return best;
+}
+
+/** Rings that start inside the region's own outline are holes; the others are further parts. */
+export function ringKinds(region: Region): { holes: number; parts: number } {
+  let holes = 0;
+  for (const ring of region.rings ?? []) if (contains(region.shape, region.points, ring[0]![0], ring[0]![1])) holes++;
+  return { holes, parts: 1 + (region.rings?.length ?? 0) - holes };
 }
 
 /** Enclosed area in square pixels (continuous geometry, used for ordering hits). */
@@ -138,6 +170,16 @@ export function area(shape: RegionShape, points: readonly Point[]): number {
   }
 }
 
+/** Enclosed area in square pixels with holes taken out (continuous geometry, used for ordering hits). */
+function regionArea(region: Region): number {
+  let a = area(region.shape, region.points);
+  for (const ring of region.rings ?? []) {
+    const hole = contains(region.shape, region.points, ring[0]![0], ring[0]![1]);
+    a += (hole ? -1 : 1) * area("polygon", ring);
+  }
+  return Math.max(0, a);
+}
+
 /**
  * Region under (x, y). An outline within `tol` wins (closest first), so a small region inside a
  * large one stays reachable; otherwise the smallest region containing the point.
@@ -148,18 +190,20 @@ export function hitRegion(regions: readonly Region[], x: number, y: number, tol:
   for (const r of regions) {
     const [x0, y0, x1, y1] = regionBox(r);
     if (x < x0 - tol || x > x1 + tol || y < y0 - tol || y > y1 + tol) continue;
-    const d = outlineDistance(r.shape, r.points, x, y);
+    const d = regionEdgeDistance(r, x, y);
     if (d <= tol && (!edge || d < edge.d)) edge = { id: r.id, d };
-    if (!edge && contains(r.shape, r.points, x, y)) {
-      const a = area(r.shape, r.points);
+    if (!edge && regionContains(r, x, y)) {
+      const a = regionArea(r);
       if (!inner || a < inner.a) inner = { id: r.id, a };
     }
   }
   return edge?.id ?? inner?.id ?? null;
 }
 
-/** Draggable points: the four box corners of rectangles and ellipses, the vertices of polygons. */
+/** Draggable points: the four box corners of rectangles and ellipses, the vertices of polygons. Regions
+ * with holes or several parts are moved as a whole. */
 export function handles(region: Region): Point[] {
+  if (region.rings?.length) return [];
   switch (region.shape) {
     case "rectangle":
     case "ellipse": {

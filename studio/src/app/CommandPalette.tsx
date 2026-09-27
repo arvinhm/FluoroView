@@ -68,6 +68,7 @@ export function ShortcutsDialog() {
     ["Zoom in 2× (⌥ out)", "Double-click"],
     ["Zoom to a region", "Double-click the region"],
     ["Nudge the selected region (⇧ 10 px)", "← ↑ → ↓"],
+    ["Add a region to the selection", "⇧-click"],
     ["Cancel drawing · deselect", "Esc"],
   ];
   return (

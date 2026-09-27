@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Point, Region } from "../api/types";
 import {
-  area, constrainAngle, contains, dragBox, handles, hasArea, hitRegion, moveHandle, outlineDistance, simplify,
+  area, constrainAngle, contains, dragBox, handles, hasArea, hitRegion, moveHandle, outlineDistance, regionBox,
+  regionContains, ringKinds, simplify,
 } from "./geometry";
 
 function region(id: string, shape: Region["shape"], points: Point[]): Region {
@@ -53,6 +54,29 @@ describe("hit testing", () => {
     expect(hitRegion([big, small], 50, 39.5, 1)).toBe("small");
     expect(hitRegion([big, small], 100.5, 50, 1)).toBe("big");
     expect(outlineDistance("rectangle", big.points, 50, 50)).toBe(50);
+  });
+});
+
+describe("regions with rings", () => {
+  const donut: Region = {
+    ...region("donut", "polygon", [[0, 0], [100, 0], [100, 100], [0, 100]]),
+    rings: [[[30, 30], [70, 30], [70, 70], [30, 70]], [[150, 0], [170, 0], [170, 20], [150, 20]]],
+  };
+
+  it("holes are outside and extra parts inside, as the engine rasterizes them", () => {
+    expect(regionContains(donut, 10, 10)).toBe(true);
+    expect(regionContains(donut, 50, 50)).toBe(false);
+    expect(regionContains(donut, 160, 10)).toBe(true);
+    expect(regionContains(donut, 120, 10)).toBe(false);
+    expect(ringKinds(donut)).toEqual({ holes: 1, parts: 2 });
+  });
+
+  it("boxes, hits and handles account for the rings", () => {
+    expect(regionBox(donut)).toEqual([0, 0, 170, 100]);
+    expect(hitRegion([donut], 50, 50, 1)).toBeNull();
+    expect(hitRegion([donut], 30.5, 50, 1)).toBe("donut");
+    expect(hitRegion([donut], 160, 10, 1)).toBe("donut");
+    expect(handles(donut)).toEqual([]);
   });
 });
 

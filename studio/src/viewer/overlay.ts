@@ -76,6 +76,8 @@ export interface OverlayScene {
   counterColors: ReadonlyMap<string, string>;
   background: string | null;
   selected: string | null;
+  /** further selected regions (⇧-click); highlighted, without handles */
+  also: readonly string[];
   hover: string | null;
   notes: readonly Annotation[];
   selectedNote: string | null;
@@ -214,10 +216,10 @@ function drawRegions(ctx: CanvasRenderingContext2D, v: PanelView, s: OverlayScen
     const box = regionBox(r);
     const [x0, y0, x1, y1] = box;
     if (x1 < vx0 || x0 > vx1 || y1 < vy0 || y0 > vy1) continue;
-    const isSel = r.id === s.selected;
+    const isSel = r.id === s.selected || s.also.includes(r.id);
     const isHover = r.id === s.hover;
     const isBg = r.id === s.background;
-    if (isSel) selected = r;
+    if (r.id === s.selected) selected = r;
     const color = isSel ? s.accent : r.color;
     const w = (x1 - x0) * v.cam.scale;
     const h = (y1 - y0) * v.cam.scale;
@@ -229,6 +231,10 @@ function drawRegions(ctx: CanvasRenderingContext2D, v: PanelView, s: OverlayScen
       continue;
     }
     trace(ctx, v, r.shape, r.points, box);
+    for (const ring of r.rings ?? []) {
+      polyline(ctx, v, ring);
+      ctx.closePath();
+    }
     if (isSel || isHover) {
       ctx.fillStyle = isSel ? withAlpha(s.accent, 0.1) : "rgba(255, 255, 255, 0.05)";
       ctx.fill("evenodd");

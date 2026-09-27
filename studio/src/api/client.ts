@@ -1,7 +1,8 @@
 import type {
   Annotation, Counter, CountPoint, DatasetInfo, EngineEvent, ExportPlan, FigureRequest, FsListing, Histogram,
   Measurement, Patch, Point,
-  Profile, Project, RawRequest, Region, RegionShape, SavedDisplay, SessionApplied, SessionInfo, SessionSaveRequest,
+  Profile, Project, RawRequest, Region, RegionOpRequest, RegionShape, SavedDisplay, SessionApplied, SessionInfo,
+  SessionSaveRequest,
 } from "./types";
 
 const TOKEN_KEY = "fluoroview.token";
@@ -56,8 +57,11 @@ export const project = {
   get: (id: string) => request<Project>(`/datasets/${id}/project`),
   createRegion: (id: string, body: { shape: RegionShape; points: Point[]; name?: string; color?: string }) =>
     request<Region>(`/datasets/${id}/regions`, send("POST", body)),
-  patchRegion: (id: string, rid: string, body: { name?: string; points?: Point[]; color?: string }) =>
+  patchRegion: (id: string, rid: string, body: { name?: string; points?: Point[]; rings?: Point[][]; color?: string }) =>
     request<Region>(`/datasets/${id}/regions/${rid}`, send("PATCH", body)),
+  /** Union, intersect, XOR, subtract, enlarge/shrink, convex hull or fit ellipse; the results are new regions. */
+  regionOp: (id: string, body: RegionOpRequest) =>
+    request<{ regions: Region[] }>(`/datasets/${id}/regions/op`, send("POST", body)),
   deleteRegion: (id: string, rid: string) =>
     request<{ deleted: string; background_region: string | null }>(`/datasets/${id}/regions/${rid}`, send("DELETE")),
   /** Put back a deleted region with its original id. */

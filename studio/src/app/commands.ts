@@ -1,12 +1,13 @@
+import type { RegionCombine, RegionOpRequest } from "../api/types";
 import { isTyping } from "../lib/dom";
-import { deleteNote, deleteRegion, useProject } from "../state/project";
+import { deleteNote, deleteRegion, regionOp, selectedRegions, selectRegions, useProject } from "../state/project";
 import { type Accent, useStudio } from "../state/store";
 import { runViewerCommand } from "../viewer/commands";
 import { TOOLS } from "../viewer/ToolPalette";
 import { activeTools } from "../viewer/tools";
 import { exportRegionsCsv } from "./actions";
 
-export type CommandGroup = "File" | "View" | "Image" | "Tools" | "Help";
+export type CommandGroup = "File" | "View" | "Image" | "Region" | "Tools" | "Help";
 
 export interface Command {
   id: string;
@@ -18,7 +19,14 @@ export interface Command {
   run: () => void;
 }
 
-export const MENU_GROUPS: CommandGroup[] = ["File", "View", "Image", "Tools", "Help"];
+export const MENU_GROUPS: CommandGroup[] = ["File", "View", "Image", "Region", "Tools", "Help"];
+
+export const COMBINE: [RegionCombine, string, string][] = [
+  ["union", "Union", "Pixels in any of the selected regions"],
+  ["intersect", "Intersect", "Pixels in all of the selected regions"],
+  ["xor", "Exclusive or (XOR)", "Pixels in an odd number of the selected regions"],
+  ["subtract", "Subtract", "The first selected region minus the others"],
+];
 
 /** Every action in the studio; menus, the palette and shortcuts all read this list. */
 export function buildCommands(): Command[] {
@@ -32,6 +40,8 @@ export function buildCommands(): Command[] {
   const accents: [Accent, string][] = [["champagne", "Champagne"], ["ice", "Ice"], ["white", "White"]];
   const regions = id ? useProject.getState().scans[id]?.regions.length ?? 0 : 0;
   const selection = useProject.getState().selection;
+  const picked = selectedRegions(selection);
+  const op = (req: RegionOpRequest) => () => id && void regionOp(id, req);
 
   const commands: Command[] = [
     { id: "open", group: "File", title: "Open image or session…", keys: "⌘O", run: () => s.setDialog("open") },
@@ -62,6 +72,21 @@ export function buildCommands(): Command[] {
       run: () => id && s.autoContrast(id) },
     { id: "set-scale", group: "Image", title: "Set scale…", disabled: none, run: () => s.setDialog("set-scale") },
   ];
+  commands.push(
+    { id: "select-all-regions", group: "Region", title: "Select all regions", keys: "⌘A", disabled: !regions,
+      run: () => id && selectRegions(useProject.getState().scans[id]?.regions.map((r) => r.id) ?? []) },
+    ...COMBINE.map(([combine, title]): Command => ({
+      id: `region-${combine}`, group: "Region", title, disabled: none || picked.length < 2,
+      run: op({ op: combine, ids: picked }),
+    })),
+    { id: "region-enlarge", group: "Region", title: "Enlarge or shrink…", disabled: none || !picked.length,
+      run: () => s.setDialog("enlarge") },
+    { id: "region-hull", group: "Region", title: "Convex hull", disabled: none || !picked.length,
+      run: op({ op: "hull", ids: picked }) },
+    { id: "region-ellipse", group: "Region", title: "Fit ellipse", disabled: none || !picked.length,
+      run: op({ op: "ellipse", ids: picked }) },
+    { id: "region-specify", group: "Region", title: "Specify…", disabled: none, run: () => s.setDialog("specify") },
+  );
   ds?.channels.slice(0, 9).forEach((ch, i) => {
     commands.push({
       id: `channel-${i}`, group: "Image", title: `Show ${ch.name}`, keys: `${i + 1}`, checked: display[i]?.visible,
@@ -124,6 +149,9 @@ export function handleShortcut(e: KeyboardEvent): void {
     } else if (key === "s") {
       e.preventDefault();
       if (id) s.setDialog("save-session");
+    } else if (key === "a" && id && s.page === "viewer") {
+      e.preventDefault();
+      selectRegions(useProject.getState().scans[id]?.regions.map((r) => r.id) ?? []);
     }
     return;
   }

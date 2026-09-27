@@ -87,10 +87,24 @@ export interface Region {
   shape: RegionShape;
   /** full-resolution pixel coordinates; two opposite corners for rectangles and ellipses */
   points: Point[];
+  /** extra closed outlines of a polygon, combined even-odd with `points`: holes and further parts */
+  rings?: Point[][];
   color: string;
   created: string;
   modified: string;
   author: string | null;
+}
+
+export type RegionCombine = "union" | "intersect" | "xor" | "subtract";
+export type RegionOp = RegionCombine | "enlarge" | "hull" | "ellipse";
+
+export interface RegionOpRequest {
+  op: RegionOp;
+  /** for subtract, the first region is the one the others are cut out of */
+  ids: string[];
+  /** enlarge by this much; negative shrinks */
+  distance?: number;
+  unit?: "px" | "um";
 }
 
 export interface Reply {

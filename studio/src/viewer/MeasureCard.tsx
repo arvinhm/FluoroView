@@ -5,6 +5,7 @@ import { fmt1, fmtArea, fmtInt, fmtPercent, fmtSigned } from "../lib/format";
 import { deleteRegion, measure, measureKey, renameRegion, setBackground, useProject } from "../state/project";
 import { useStudio } from "../state/store";
 import { formatLength } from "./camera";
+import { ringKinds } from "./geometry";
 import { type Anchor, type Bounds, placeBeside } from "./overlay";
 
 const CARD_W = 272;
@@ -70,6 +71,7 @@ export function MeasureCard({ ds, anchor, bounds, avoid }: {
   const Icon = SHAPE_ICON[region.shape];
   const m = entry?.data ?? null;
   const isBg = background === region.id;
+  const kinds = region.rings?.length ? ringKinds(region) : null;
   const bg = !isBg && bgEntry?.data ? bgEntry.data.channels.map((c) => c.mean) : null;
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 
@@ -112,6 +114,12 @@ export function MeasureCard({ ds, anchor, bounds, avoid }: {
           <span className={entry?.error ? "err" : "muted"}>{entry?.error ?? "Measuring full-resolution pixels…"}</span>
         )}
         {isBg && <span className="badge">Background</span>}
+        {kinds && (
+          <span className="muted">
+            {[kinds.parts > 1 && `${kinds.parts} parts`, kinds.holes > 0 && `${kinds.holes} ${kinds.holes === 1 ? "hole" : "holes"}`]
+              .filter(Boolean).join(" · ")}
+          </span>
+        )}
         {m && (entry?.loading || entry?.stale) && (
           <span className="muted mcard-busy">{entry.loading ? "measuring" : "release to measure"}</span>
         )}

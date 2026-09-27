@@ -315,6 +315,7 @@ export function Viewer({ dataset }: { dataset: DatasetInfo }) {
         counterColors: new Map(scan.counters.map((c) => [c.id, c.color])),
         background: scan.background,
         selected: pj.selection?.kind === "region" ? pj.selection.id : null,
+        also: pj.selection?.kind === "region" ? pj.selection.also ?? [] : [],
         hover: tc?.hover?.kind === "region" ? tc.hover.id : null,
         notes: scan.notes,
         selectedNote: pj.selection?.kind === "note" ? pj.selection.id : null,

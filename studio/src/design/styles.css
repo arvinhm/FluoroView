@@ -575,6 +575,12 @@ button.res:hover { color: var(--fv-text-1); background: var(--fv-surface-3); }
 .dialog.export { width: 580px; }
 .dialog.prompt { width: 460px; }
 .scale-row { display: flex; align-items: center; gap: 10px; }
+.spec-grid { display: grid; grid-template-columns: repeat(2, 132px); gap: 8px 10px; }
+.ops-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 9px 10px 9px 14px;
+  font-size: var(--fv-fs-sm); border-bottom: var(--fv-hair) solid var(--fv-line); background: var(--fv-accent-weak);
+}
+.ops-bar .muted { margin-right: auto; }
 .prompt-body { margin: 14px 16px 0; font-size: var(--fv-fs-md); line-height: 19px; color: var(--fv-text-1); }
 .prompt-body.muted { margin-bottom: 16px; color: var(--fv-text-3); font-size: var(--fv-fs-sm); line-height: 17px; }
 .banner {
