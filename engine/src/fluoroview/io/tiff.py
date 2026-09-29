@@ -171,9 +171,12 @@ class TiffSource:
         )
 
     def _channel_pages(self, series, n_channels: int):
-        """One page per channel when every plane is its own page (YX last); otherwise None."""
+        """One page per channel when every plane is its own page (YX last); otherwise None.
+
+        Samples stored as separate planes (planar configuration 2) share one page, so they have no page each.
+        """
         axes, shape = self._axes, self._shape
-        if axes[-2:] != "YX":
+        if axes[-2:] != "YX" or "S" in axes:
             return None
         lead_axes, lead_shape = axes[:-2], shape[:-2]
         pages = series.pages

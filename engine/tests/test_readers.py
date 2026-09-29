@@ -69,6 +69,23 @@ def test_biotek_bright_field_is_transmitted(tmp_path):
     src.close()
 
 
+def test_samples_stored_as_planes_in_one_page(tmp_path):
+    data = make_planes(3, 45, 70)
+    path = tmp_path / "planar.tif"
+    tifffile.imwrite(path, data, photometric="rgb", planarconfig="separate", compression="zlib", predictor=True,
+                     rowsperstrip=7, metadata=None)
+    with tifffile.TiffFile(path) as tf:
+        assert tf.pages[0].planarconfig == 2
+    src = TiffSource(path)
+    assert [c.name for c in src.info.channels] == ["Red", "Green", "Blue"]
+    assert src.info.layout is Layout.CHUNKED
+    for c in range(3):
+        np.testing.assert_array_equal(src.read_rows(c, 0, 45), data[c])
+        np.testing.assert_array_equal(src.read_rows(c, 13, 31), data[c, 13:31])
+        np.testing.assert_array_equal(src.read_segment(c, 20, 5, 60), data[c, 20, 5:60])
+    src.close()
+
+
 def test_ome_tiled_metadata(ome_tiled_image):
     path, _ = ome_tiled_image
     src = TiffSource(path)
