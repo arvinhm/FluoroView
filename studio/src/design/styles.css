@@ -634,6 +634,8 @@ button.res:hover { color: var(--fv-text-1); background: var(--fv-surface-3); }
 .shortcuts { display: grid; grid-template-columns: 1fr auto; row-gap: 7px; padding: 14px; font-size: var(--fv-fs-md); }
 .dialog.export { width: 580px; }
 .dialog.prompt { width: 460px; }
+.open-local { display: grid; gap: 8px; padding: 16px 16px 18px; font-size: var(--fv-fs-md); line-height: 19px; color: var(--fv-text-2); }
+.open-local p { margin: 0; }
 .scale-row { display: flex; align-items: center; gap: 10px; }
 .spec-grid { display: grid; grid-template-columns: repeat(2, 132px); gap: 8px 10px; }
 .ops-bar {

@@ -1,3 +1,4 @@
+import { api } from "../api/client";
 import { fmt1, fmtInt, fmtZoom } from "../lib/format";
 import { type Tool, useActive, useStudio } from "../state/store";
 
@@ -89,10 +90,17 @@ export function StatusBar() {
         {ds && <span className="d" />}
         <BuildStatus />
         <span className="d" />
-        <span title={connected ? "Connected to the local engine" : "Engine connection lost; retrying"}>
-          <span className={`led ${connected ? "ok" : "bad"}`} />
-          {connected ? "Engine" : "Reconnecting"}
-        </span>
+        {api.inBrowser ? (
+          <span title="FluoroView is running in this browser, on this computer; files are not uploaded">
+            <span className="led ok" />
+            In this browser
+          </span>
+        ) : (
+          <span title={connected ? "Connected to the local engine" : "Engine connection lost; retrying"}>
+            <span className={`led ${connected ? "ok" : "bad"}`} />
+            {connected ? "Engine" : "Reconnecting"}
+          </span>
+        )}
       </span>
     </footer>
   );

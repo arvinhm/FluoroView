@@ -80,7 +80,7 @@ async function openWith(request: () => Promise<DatasetInfo>): Promise<boolean> {
     const ds = await request();
     s.upsertDataset(ds);
     s.setActive(ds.id);
-    remember(ds);
+    if (!api.inBrowser) remember(ds);
     void loadHistograms(ds.id);
     return true;
   } catch (e) {
@@ -110,6 +110,11 @@ export async function openChannels(paths: string[]): Promise<boolean> {
     return true;
   }
   return openWith(() => api.openChannels(paths));
+}
+
+/** The browser version: files the user picked, read in this browser (several files are combined as channels). */
+export function openFiles(files: File[]): Promise<boolean> {
+  return openWith(() => api.openFiles(files));
 }
 
 /** Suggested session file name: the scan's name without extension, or <folder>_<n>ch for combined files. */

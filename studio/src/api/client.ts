@@ -1,9 +1,14 @@
+import { NOT_IN_BROWSER, local } from "../local/engine";
+import { ApiError } from "./errors";
 import type {
   Annotation, Counter, CountPoint, DatasetInfo, EngineEvent, ExportPlan, FigureRequest, FsListing, Histogram,
   ImportedRegions, Measurement, Patch, Point,
   Profile, Project, RawRequest, Region, RegionOpRequest, RegionShape, SavedDisplay, SessionApplied, SessionInfo,
-  SessionSaveRequest,
+  SessionSaveRequest, TileResult,
 } from "./types";
+
+export { ApiError };
+export type { TileResult };
 
 const TOKEN_KEY = "fluoroview.token";
 
@@ -20,16 +25,11 @@ function readToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? "";
 }
 
-const token = readToken();
+const token = __LOCAL__ ? "" : readToken();
 const auth = { Authorization: `Bearer ${token}` };
 
-export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-  }
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (__LOCAL__) return (await local.request(path, init)) as T;
   const res = await fetch(`/api/v1${path}`, { ...init, headers: { ...auth, ...init.headers } });
   if (!res.ok) {
     let detail = res.statusText;
@@ -137,6 +137,7 @@ function lineQuery(l: LineQuery): string {
 }
 
 async function download(path: string, fallback: string, init: RequestInit = {}): Promise<{ blob: Blob; name: string }> {
+  if (__LOCAL__) throw new ApiError(501, NOT_IN_BROWSER);
   const res = await fetch(`/api/v1${path}`, { ...init, headers: { ...auth, ...init.headers } });
   if (!res.ok) {
     let detail = res.status === 409 ? "The image is still loading; try again in a moment." : res.statusText;
@@ -152,8 +153,12 @@ async function download(path: string, fallback: string, init: RequestInit = {}):
 }
 
 export const api = {
-  hasToken: () => token.length > 0,
+  /** Scans run in this browser (the web build) rather than in a FluoroView engine on this computer. */
+  inBrowser: __LOCAL__,
+  hasToken: () => __LOCAL__ || token.length > 0,
   datasets: () => request<DatasetInfo[]>("/datasets"),
+  /** The web build: open files the user picked, read in this browser. */
+  openFiles: (files: File[]) => local.open(files),
   dataset: (id: string) => request<DatasetInfo>(`/datasets/${id}`),
   open: (path: string) =>
     request<DatasetInfo>("/datasets", {
@@ -173,12 +178,14 @@ export const api = {
   list: (path?: string) => request<FsListing>(`/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   /** The preview saved inside a .fv session. */
   sessionThumbnail: async (path: string, signal?: AbortSignal): Promise<Blob> => {
+    if (__LOCAL__) throw new ApiError(404, NOT_IN_BROWSER);
     const res = await fetch(`/api/v1/sessions/thumbnail?path=${encodeURIComponent(path)}`, { headers: auth, signal });
     if (!res.ok) throw new ApiError(res.status, res.statusText);
     return res.blob();
   },
   /** PNG preview of a cached scan, or of files combined as channels (in order); 404 for scans not read yet. */
   thumbnail: async (path: string | string[], size = 480, signal?: AbortSignal): Promise<Blob> => {
+    if (__LOCAL__) throw new ApiError(404, NOT_IN_BROWSER);
     const query = (Array.isArray(path) ? path : [path]).map((p) => `path=${encodeURIComponent(p)}`).join("&");
     const res = await fetch(`/api/v1/thumbnail?${query}&size=${size}`, { headers: auth, signal });
     if (!res.ok) throw new ApiError(res.status, res.statusText);
@@ -186,12 +193,9 @@ export const api = {
   },
 };
 
-export type TileResult =
-  | { kind: "data"; data: Uint16Array | Uint8Array; width: number; height: number; final: boolean }
-  | { kind: "pending" };
-
 export async function fetchTile(id: string, level: number, c: number, ty: number, tx: number,
   signal: AbortSignal): Promise<TileResult> {
+  if (__LOCAL__) return local.tile(id, level, c, ty, tx, signal);
   const res = await fetch(`/api/v1/datasets/${id}/tiles/${level}/${c}/${ty}/${tx}`, { headers: auth, signal });
   if (res.status === 202) return { kind: "pending" };
   if (!res.ok) throw new ApiError(res.status, `tile ${level}/${c}/${ty}/${tx}: ${res.status}`);
@@ -204,6 +208,10 @@ export async function fetchTile(id: string, level: number, c: number, ty: number
 
 /** Engine event stream with automatic reconnect. Returns a function that closes it. */
 export function openEvents(onEvent: (e: EngineEvent) => void, onStatus: (connected: boolean) => void): () => void {
+  if (__LOCAL__) {
+    onStatus(true);
+    return local.subscribe(onEvent);
+  }
   let socket: WebSocket | null = null;
   let closed = false;
   let delay = 250;

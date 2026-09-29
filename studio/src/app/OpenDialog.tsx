@@ -1,12 +1,59 @@
-import { ArrowUp, Bookmark, Folder, HardDrive, House, Image, X } from "lucide-react";
+import { ArrowUp, Bookmark, Folder, HardDrive, House, Image, Lock, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import type { FsListing } from "../api/types";
+import { pickFiles } from "../lib/dom";
 import { fmtBytes } from "../lib/format";
 import { useActive, useStudio } from "../state/store";
-import { openChannels, openImage, openSession, restoreInto } from "./actions";
+import { openChannels, openFiles, openImage, openSession, restoreInto } from "./actions";
 
-export function OpenDialog() {
+const TIFF_TYPES = ".tif,.tiff,.btf,.tf8,.qptiff";
+
+/** The browser version: the user picks files, which are read here and never uploaded. */
+function BrowserOpenDialog() {
+  const setDialog = useStudio((s) => s.setDialog);
+  const [busy, setBusy] = useState(false);
+  const close = () => setDialog(null);
+
+  const choose = async () => {
+    const files = await pickFiles(TIFF_TYPES);
+    if (!files.length) return;
+    setBusy(true);
+    const ok = await openFiles(files);
+    setBusy(false);
+    if (ok) close();
+  };
+
+  return (
+    <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && close()}>
+      <div className="dialog prompt" role="dialog" aria-label="Open image">
+        <div className="dialog-h">
+          Open image
+          <button className="ib" onClick={close} title="Close (Esc)"><X /></button>
+        </div>
+        <div className="banner">
+          <Lock />
+          <span>
+            FluoroView reads your files <b>here, in this browser, on this computer</b>. Nothing is uploaded. The zoom
+            levels are kept in this browser&rsquo;s storage, so a scan opens at once the next time.
+          </span>
+        </div>
+        <div className="open-local">
+          <p>Choose a TIFF, OME-TIFF or BioTek scan.</p>
+          <p>Choose several single-channel files of the same size to combine them as the channels of one image.</p>
+        </div>
+        <div className="dialog-f">
+          <span>Regions, measurements, exports and sessions are not in the browser version yet.</span>
+          <button className="btn primary" disabled={busy} onClick={() => void choose()}>
+            {busy ? "Opening…" : "Choose files…"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EngineOpenDialog() {
   const active = useActive();
   const setDialog = useStudio((s) => s.setDialog);
   const pending = useStudio((s) => s.pendingSession);
@@ -116,3 +163,5 @@ export function OpenDialog() {
     </div>
   );
 }
+
+export const OpenDialog = api.inBrowser ? BrowserOpenDialog : EngineOpenDialog;

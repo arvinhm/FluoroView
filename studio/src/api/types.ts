@@ -325,3 +325,7 @@ export interface SessionApplied {
 export type EngineEvent =
   | { type: "hello"; version: string }
   | { type: "build"; id: string; build: BuildInfo };
+
+export type TileResult =
+  | { kind: "data"; data: Uint16Array | Uint8Array; width: number; height: number; final: boolean }
+  | { kind: "pending" };

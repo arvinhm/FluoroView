@@ -14,6 +14,19 @@ export function pickFile(accept: string): Promise<File | null> {
   });
 }
 
+/** Files from the browser's file picker (several may be chosen); empty when the picker is dismissed. */
+export function pickFiles(accept: string): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.multiple = true;
+    input.addEventListener("change", () => resolve([...(input.files ?? [])]), { once: true });
+    input.addEventListener("cancel", () => resolve([]), { once: true });
+    input.click();
+  });
+}
+
 /** Save a blob through the browser's download flow. */
 export function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);

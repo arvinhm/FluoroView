@@ -53,9 +53,39 @@ function RecentCard({ item, index }: { item: RecentItem; index: number }) {
   );
 }
 
+function Recent() {
+  const recent = useStudio((s) => s.recent);
+  return (
+    <section>
+      <div className="home-sec">
+        <span className="caps">Recent</span>
+        {recent.length > 0 && <span className="muted num">{recent.length}</span>}
+      </div>
+      {recent.length === 0 ? (
+        <p className="home-empty">Scans and sessions you open appear here, with a preview once their pyramid is cached.</p>
+      ) : (
+        <div className="home-grid">
+          {recent.map((item, i) => <RecentCard key={`${item.kind}:${item.paths.join("|")}`} item={item} index={i} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function InThisBrowser() {
+  return (
+    <section>
+      <div className="home-sec"><span className="caps">In this browser</span></div>
+      <p className="home-empty">
+        Scans are read from this computer and never uploaded. Their zoom levels are kept in this browser, so a scan you
+        have opened before opens at once.
+      </p>
+    </section>
+  );
+}
+
 export function Home() {
   const ds = useActive();
-  const recent = useStudio((s) => s.recent);
   const setDialog = useStudio((s) => s.setDialog);
   const setPage = useStudio((s) => s.setPage);
   return (
@@ -68,7 +98,7 @@ export function Home() {
         </header>
         <div className="home-actions">
           <button className="btn primary lg" onClick={() => setDialog("open")}>
-            Open image or session <span className="kbd">⌘O</span>
+            {api.inBrowser ? "Open image" : "Open image or session"} <span className="kbd">⌘O</span>
           </button>
           {ds && (
             <button className="btn lg" onClick={() => setPage("viewer")}>
@@ -76,22 +106,10 @@ export function Home() {
             </button>
           )}
         </div>
-        <section>
-          <div className="home-sec">
-            <span className="caps">Recent</span>
-            {recent.length > 0 && <span className="muted num">{recent.length}</span>}
-          </div>
-          {recent.length === 0 ? (
-            <p className="home-empty">Scans and sessions you open appear here, with a preview once their pyramid is cached.</p>
-          ) : (
-            <div className="home-grid">
-              {recent.map((item, i) => <RecentCard key={`${item.kind}:${item.paths.join("|")}`} item={item} index={i} />)}
-            </div>
-          )}
-        </section>
+        {api.inBrowser ? <InThisBrowser /> : <Recent />}
         <footer className="home-f">
           <span><span className="kbd">⌘O</span> Open</span>
-          <span><span className="kbd">⌘S</span> Save session</span>
+          {!api.inBrowser && <span><span className="kbd">⌘S</span> Save session</span>}
           <span><span className="kbd">⌘K</span> Commands</span>
           <span><span className="kbd">?</span> Shortcuts</span>
         </footer>
